@@ -19,7 +19,7 @@ impl<const N: usize> Assets<N> {
 #[macro_export]
 macro_rules! assets {
     ( $( $item:expr ),* $(,)? ) => {
-        Assets::new([
+        $crate::Assets::new([
             $( Box::new($item) ),*
         ])
     };
