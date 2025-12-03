@@ -2264,9 +2264,9 @@ dependencies = [
  "enum-assoc",
  "gpui",
  "gpui_squircle",
- "gpui_tesserae_macros",
- "gpui_tesserae_theme",
- "gpui_transitions",
+ "gpui_tesserae_macros 0.1.0 (git+https://github.com/astrum-chat/gpui_tesserae)",
+ "gpui_tesserae_theme 0.1.0 (git+https://github.com/astrum-chat/gpui_tesserae)",
+ "gpui_transitions 0.1.0 (git+https://github.com/astrum-chat/gpui_tesserae)",
  "rust-embed",
  "serde",
  "serde_json",
@@ -2278,7 +2278,18 @@ dependencies = [
 name = "gpui_tesserae_macros"
 version = "0.1.0"
 dependencies = [
- "gpui_tesserae_theme",
+ "gpui_tesserae_theme 0.1.0 (git+https://github.com/astrum-chat/gpui_tesserae)",
+ "quote",
+ "serde",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "gpui_tesserae_macros"
+version = "0.1.0"
+source = "git+https://github.com/astrum-chat/gpui_tesserae#162c0ce74728a337f0d91fe47758becf106eda04"
+dependencies = [
+ "gpui_tesserae_theme 0.1.0 (git+https://github.com/astrum-chat/gpui_tesserae)",
  "quote",
  "serde",
  "syn 2.0.111",
@@ -2295,8 +2306,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui_tesserae_theme"
+version = "0.1.0"
+source = "git+https://github.com/astrum-chat/gpui_tesserae#162c0ce74728a337f0d91fe47758becf106eda04"
+dependencies = [
+ "gpui",
+ "serde",
+ "serde_json",
+ "smallvec",
+]
+
+[[package]]
 name = "gpui_transitions"
 version = "0.1.0"
+dependencies = [
+ "gpui",
+]
+
+[[package]]
+name = "gpui_transitions"
+version = "0.1.0"
+source = "git+https://github.com/astrum-chat/gpui_tesserae#162c0ce74728a337f0d91fe47758becf106eda04"
 dependencies = [
  "gpui",
 ]

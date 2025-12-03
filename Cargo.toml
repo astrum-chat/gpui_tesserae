@@ -5,13 +5,13 @@ edition = "2024"
 
 [dependencies]
 # Local development.
-gpui_tesserae_theme = { path = "./crates/gpui_tesserae_theme" }
-gpui_tesserae_macros = { path = "./crates/gpui_tesserae_macros" }
-gpui_transitions = { path = "./crates/gpui_transitions" }
+# gpui_tesserae_theme = { path = "./crates/gpui_tesserae_theme" }
+# gpui_tesserae_macros = { path = "./crates/gpui_tesserae_macros" }
+# gpui_transitions = { path = "./crates/gpui_transitions" }
 
-# gpui_tesserae_theme = { git = "https://github.com/astrum-chat/gpui_tesserae" }
-# gpui_tesserae_macros = { git = "https://github.com/astrum-chat/gpui_tesserae" }
-# gpui_transitions = { git = ".https://github.com/astrum-chat/gpui_tesserae" }
+gpui_tesserae_theme = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+gpui_tesserae_macros = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+gpui_transitions = { git = "https://github.com/astrum-chat/gpui_tesserae" }
 
 gpui = "0.2.2"
 gpui_squircle = "1.0.0"

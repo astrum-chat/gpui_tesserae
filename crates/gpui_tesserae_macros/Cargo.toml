@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 # Local development.
-gpui_tesserae_theme = { path = "../gpui_tesserae_theme" }
+# gpui_tesserae_theme = { path = "../gpui_tesserae_theme" }
 
-# gpui_tesserae_theme = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+gpui_tesserae_theme = { git = "https://github.com/astrum-chat/gpui_tesserae" }
 
 serde = "1.0.228"
 syn = { version = "2.0.111", features = ["full"] }
