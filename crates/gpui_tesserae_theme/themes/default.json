@@ -1,0 +1,87 @@
+{
+    "name": "Default",
+    "layout": {
+        "text": {
+            "base_size": "16px",
+            "default_font": {
+                "family": "Geist",
+                "line_height": "161.8034%",
+                "sizes": {
+                    "heading_xl": "1.438rem",
+                    "heading_lg": "1.313rem",
+                    "heading_md": "1.188rem",
+                    "heading_sm": "1.063rem",
+                    "body": "0.938rem",
+                    "caption": "0.813rem"
+                },
+                "weights": {
+                    "heading_xl": 600,
+                    "heading_lg": 600,
+                    "heading_md": 500,
+                    "heading_sm": 500,
+                    "body": 400,
+                    "caption": 400
+                }
+            },
+            "mono_font": {
+                "family": "Geist Mono",
+                "line_height": "161.8034%",
+                "sizes": {
+                    "heading_xl": "1.438rem",
+                    "heading_lg": "1.313rem",
+                    "heading_md": "1.188rem",
+                    "heading_sm": "1.063rem",
+                    "body": "0.938rem",
+                    "caption": "0.813rem"
+                },
+                "weights": {
+                    "heading_xl": 600,
+                    "heading_lg": 600,
+                    "heading_md": 500,
+                    "heading_sm": 500,
+                    "body": 400,
+                    "caption": 400
+                }
+            }
+        },
+        "corner_radii": {
+            "lg": "12px",
+            "md": "8px",
+            "sm": "4px"
+        },
+        "size": {
+            "lg": "36px",
+            "md": "16px",
+            "sm": "6px"
+        },
+        "padding": {
+            "lg": "11px",
+            "md": "4px",
+            "sm": "2px"
+        }
+    },
+    "variants": [
+        {
+            "name": "Dark",
+            "kind": "Dark",
+            "colors": {
+                "background": {
+                    "primary": "#110F15",
+                    "secondary": "#17151C",
+                    "tertiary": "#23202A",
+                    "quaternary": "#2C2A35",
+                    "quinary": "#383543"
+                },
+                "accent": {
+                    "primary": "#6A41FF",
+                    "constructive": "#27D280",
+                    "destructive": "#BE123C"
+                },
+                "text": {
+                    "primary": "#E8E4FF",
+                    "secondary": "#C1BCDE"
+                }
+            }
+        }
+    ]
+}

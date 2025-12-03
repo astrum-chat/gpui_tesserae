@@ -1,0 +1,40 @@
+[package]
+name = "gpui_tesserae"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Local development.
+gpui_tesserae_theme = { path = "./crates/gpui_tesserae_theme" }
+gpui_tesserae_macros = { path = "./crates/gpui_tesserae_macros" }
+gpui_transitions = { path = "./crates/gpui_transitions" }
+
+# gpui_tesserae_theme = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+# gpui_tesserae_macros = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+# gpui_transitions = { git = ".https://github.com/astrum-chat/gpui_tesserae" }
+
+gpui = "0.2.2"
+gpui_squircle = "1.0.0"
+smallvec = { version = "1.15.1", features = ["serde"] }
+serde_json = "1.0.145"
+serde = { version = "1.0.228", features = ["derive"] }
+anyhow = "1.0.100"
+cfg-if = "1.0.4"
+
+# Input component.
+unicode-segmentation = "1.12.0"
+
+# Assets feature.
+rust-embed = { version = "8.9.0", optional = true }
+enum-assoc = { version = "1.2.4", optional = true }
+
+[features]
+default = ["assets"]
+assets = ["dep:rust-embed", "dep:enum-assoc"]
+
+[workspace]
+members = [
+    "crates/gpui_tesserae_macros",
+    "crates/gpui_tesserae_theme",
+    "crates/gpui_transitions"
+]
