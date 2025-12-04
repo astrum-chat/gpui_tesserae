@@ -19,6 +19,8 @@ It currently offers the following components:
 
     ![button](/readme/assets/button.png)
 
+Examples can be found [here](https://github.com/astrum-chat/gpui_tesserae/tree/main/examples).
+
 # Setup
 ```rs
 use gpui::{App, Application, prelude::*};
