@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use gpui::{
     App, ElementId, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    ShapedGlyph, SharedString, StatefulInteractiveElement, Styled, div, ease_out_quint,
-    prelude::FluentBuilder, px,
+    SharedString, StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder,
+    px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
