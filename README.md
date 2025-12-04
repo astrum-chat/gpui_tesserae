@@ -7,6 +7,10 @@ It currently offers the following components:
 
     ![checkbox](/readme/assets/checkbox.png)
 
+- Switch
+
+    ![switch](/readme/assets/switch.png)
+
 - Single-line Input
 
     ![input](/readme/assets/input.png)

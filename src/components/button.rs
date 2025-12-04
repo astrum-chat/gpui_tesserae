@@ -217,30 +217,39 @@ impl RenderOnce for Button {
             )
             .children(self.children.bottom)
             .when(!self.disabled, |this| {
+                let is_hover_state_on_hover = is_hover_state.clone();
+                let is_click_down_state_on_mouse_down = is_click_down_state.clone();
+                let is_click_down_state_on_click = is_click_down_state.clone();
+
                 this.on_hover(move |hover, _window, cx| {
-                    is_hover_state.update(cx, |this, _cx| *this = *hover);
-                    cx.notify(is_hover_state.entity_id());
+                    is_hover_state_on_hover.update(cx, |this, _cx| *this = *hover);
+                    cx.notify(is_hover_state_on_hover.entity_id());
                 })
-                .map(|this| {
-                    let is_click_down_state = is_click_down_state.clone();
+                .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                    // Prevents focus ring from appearing when clicked.
+                    window.prevent_default();
 
-                    this.on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
-                        // Prevents focus ring from appearing when clicked.
-                        window.prevent_default();
-
-                        is_click_down_state.update(cx, |this, _cx| *this = true);
-                        cx.notify(is_click_down_state.entity_id());
-                    })
+                    is_click_down_state_on_mouse_down.update(cx, |this, _cx| *this = true);
+                    cx.notify(is_click_down_state_on_mouse_down.entity_id());
                 })
                 .on_click({
                     move |event, window, cx| {
                         window.prevent_default();
 
-                        is_click_down_state.update(cx, |this, _cx| *this = false);
-                        cx.notify(is_click_down_state.entity_id());
+                        is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
+                        cx.notify(is_click_down_state_on_click.entity_id());
 
                         Self::handle_on_click(window, cx, event, self.on_click.as_ref());
                     }
+                })
+                .on_mouse_up_out(gpui::MouseButton::Left, move |_event, _window, cx| {
+                    // We need to clean up states when the mouse clicks down on the component, leaves its bounds, then unclicks.
+
+                    is_hover_state.update(cx, |this, _cx| *this = false);
+                    cx.notify(is_hover_state.entity_id());
+
+                    is_click_down_state.update(cx, |this, _cx| *this = false);
+                    cx.notify(is_click_down_state.entity_id());
                 })
                 .track_focus(&focus_handle)
             })

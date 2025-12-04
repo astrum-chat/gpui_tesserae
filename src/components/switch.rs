@@ -2,44 +2,37 @@ use std::time::Duration;
 
 use gpui::{
     App, CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
-    prelude::FluentBuilder, px, relative, svg,
+    StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
+use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
-    TesseraeIconKind, conitional_transition,
+    ElementIdExt, conitional_transition,
     primitives::FocusRing,
-    theme::{ThemeExt, ThemeLayerKind},
-    utils::{ElementIdExt, RgbaExt, SquircleExt, checked_transition, disabled_transition},
+    theme::ThemeLayerKind,
+    utils::{RgbaExt, SquircleExt, checked_transition, disabled_transition},
 };
 
 #[derive(IntoElement)]
-pub struct Checkbox {
+pub struct Switch {
     id: ElementId,
-    icon: SharedString,
     layer: ThemeLayerKind,
     checked: bool,
     disabled: bool,
     on_click: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
 }
 
-impl Checkbox {
+impl Switch {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
-            icon: TesseraeIconKind::Checkmark.into(),
             layer: ThemeLayerKind::Tertiary,
             checked: false,
             disabled: false,
             on_click: None,
         }
-    }
-
-    pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
-        self.icon = icon.into();
-        self
     }
 
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
@@ -74,10 +67,18 @@ impl Checkbox {
     }
 }
 
-impl RenderOnce for Checkbox {
-    fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
-        let size = cx.get_theme().layout.size.md;
-        let corner_radii = cx.get_theme().layout.corner_radii.sm;
+impl RenderOnce for Switch {
+    fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
+        const INNER_SIZE_FOCUS_MULT: f32 = 1.25;
+
+        let inner_size = cx.get_theme().layout.size.md;
+        let padding = px(4.);
+        let width = (inner_size * 2) + (padding * 2);
+        let height = inner_size + (padding * 2);
+        let (start_offset, end_offset) = (
+            padding.to_f64() as f32,
+            (width - inner_size - padding).to_f64() as f32,
+        );
         let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
         let primary_text_color = cx.get_theme().variants.active().colors.text.primary;
         let background_color = *self.layer.resolve(cx.get_theme());
@@ -89,7 +90,7 @@ impl RenderOnce for Checkbox {
             self.id.clone(),
             window,
             cx,
-            Duration::from_millis(285),
+            Duration::from_millis(200),
             self.checked,
         );
 
@@ -137,6 +138,19 @@ impl RenderOnce for Checkbox {
         )
         .with_easing(ease_out_quint());
 
+        // We want the width of the inner circle to expand slightly when focused.
+        let inner_width_state = conitional_transition!(
+            self.id.with_suffix("state:transition:inner_width"),
+            window,
+            cx,
+            Duration::from_millis(185),
+            {
+                is_focus | is_click_down => px((inner_size.to_f64() as f32 * INNER_SIZE_FOCUS_MULT).floor()),
+                _ => inner_size
+            }
+        )
+        .with_easing(ease_out_quint());
+
         div()
             .id(self.id.clone())
             .cursor(if is_disabled {
@@ -144,23 +158,21 @@ impl RenderOnce for Checkbox {
             } else {
                 CursorStyle::PointingHand
             })
-            .size(size)
-            .min_w(size)
-            .min_h(size)
-            .flex()
-            .items_center()
-            .justify_center()
+            .w(width)
+            .min_w(width)
+            .h(height)
+            .min_h(height)
             .with_transitions(disabled_transition_state, move |_cx, this, opacity| {
                 this.opacity(opacity)
             })
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
-                    .rounded(corner_radii),
+                    .rounded(px(100.)),
             )
             .child(
                 squircle()
                     .absolute_expand()
-                    .rounded(corner_radii)
+                    .rounded(px(100.))
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
@@ -168,27 +180,33 @@ impl RenderOnce for Checkbox {
                         this.border_color(color)
                     }),
             )
-            .with_transitions(checked_state, move |_cx, this, delta| {
-                this.child(
-                    squircle()
-                        .absolute_expand()
-                        .rounded(corner_radii)
-                        .border(px(1.))
-                        .border_inside()
-                        .bg(primary_accent_color.alpha(delta))
-                        .border_highlight_color(delta * 0.15),
-                )
-                .child(
-                    svg()
-                        .map(|mut this| {
-                            this.style().aspect_ratio = Some(1.);
-                            this
-                        })
-                        .size(relative(0.48))
-                        .text_color(primary_text_color.alpha(delta))
-                        .path(self.icon.clone()),
-                )
-            })
+            .with_transitions(
+                (checked_state, inner_width_state),
+                move |_cx, this, (delta, inner_width)| {
+                    let offset = remap(delta, 0., 1., start_offset, end_offset);
+
+                    let width_diff = (inner_width - inner_size) * delta;
+
+                    this.child(
+                        squircle()
+                            .absolute_expand()
+                            .bg(primary_accent_color.alpha(delta))
+                            .rounded(px(100.))
+                            .border_inside()
+                            .border(px(1.))
+                            .border_highlight_color(0.15 * delta),
+                    )
+                    .child(
+                        div()
+                            .w(inner_width)
+                            .h(inner_size)
+                            .top(padding)
+                            .bg(primary_text_color)
+                            .rounded(px(100.))
+                            .left(px(offset) - width_diff),
+                    )
+                },
+            )
             .when(!is_disabled, |this| {
                 let is_hover_state_on_hover = is_hover_state.clone();
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();
@@ -227,4 +245,8 @@ impl RenderOnce for Checkbox {
                 .track_focus(&focus_handle)
             })
     }
+}
+
+pub fn remap(value: f32, from_min: f32, from_max: f32, to_min: f32, to_max: f32) -> f32 {
+    (value - from_min) / (from_max - from_min) * (to_max - to_min) + to_min
 }

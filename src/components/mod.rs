@@ -9,3 +9,6 @@ pub use icon::*;
 
 mod input;
 pub use input::*;
+
+mod switch;
+pub use switch::*;

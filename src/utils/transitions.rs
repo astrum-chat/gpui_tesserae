@@ -80,3 +80,29 @@ pub fn disabled_transition(
     )
     .with_easing(ease_out_quint())
 }
+
+pub fn checked_transition(
+    base_id: impl Into<ElementId>,
+    window: &mut Window,
+    cx: &mut App,
+    duration: Duration,
+    is_checked: bool,
+) -> Transition<f32> {
+    let is_checked_float = is_checked as u8 as f32;
+
+    let checked_state = Transition::new(
+        base_id.into().with_suffix("state:checked"),
+        window,
+        cx,
+        duration,
+        |_cx, _window| is_checked_float,
+    )
+    .with_easing(ease_out_quint());
+
+    let checked_changed = checked_state.set(cx, is_checked_float);
+    if checked_changed {
+        cx.notify(checked_state.entity_id());
+    }
+
+    checked_state
+}

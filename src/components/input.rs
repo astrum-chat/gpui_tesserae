@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    CursorStyle, ElementId, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder,
-    px,
+    App, ElementId, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    ShapedGlyph, SharedString, StatefulInteractiveElement, Styled, div, ease_out_quint,
+    prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
@@ -52,6 +52,10 @@ impl Input {
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
+    }
+
+    pub fn text(&self, cx: &mut App) -> SharedString {
+        self.state.read(cx).value()
     }
 }
 
@@ -121,11 +125,6 @@ impl RenderOnce for Input {
 
         div()
             .id(self.id.clone())
-            .cursor(if is_disabled {
-                CursorStyle::OperationNotAllowed
-            } else {
-                CursorStyle::PointingHand
-            })
             .w_full()
             .h_auto()
             .pl(horizontal_padding)
