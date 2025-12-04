@@ -7,9 +7,13 @@ It currently offers the following components:
 
     ![checkbox](/readme/assets/checkbox.png)
 
-- Input (single-line only)
+- Single-line Input
 
     ![input](/readme/assets/input.png)
+
+- Button
+
+    ![button](/readme/assets/button.png)
 
 # Setup
 ```rs
