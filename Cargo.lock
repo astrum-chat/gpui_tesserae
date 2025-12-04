@@ -2261,6 +2261,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cfg-if",
+ "either",
  "enum-assoc",
  "gpui",
  "gpui_squircle",
@@ -2287,7 +2288,7 @@ dependencies = [
 [[package]]
 name = "gpui_tesserae_macros"
 version = "0.1.0"
-source = "git+https://github.com/astrum-chat/gpui_tesserae#162c0ce74728a337f0d91fe47758becf106eda04"
+source = "git+https://github.com/astrum-chat/gpui_tesserae#19d3ab4d1fc1db3482d86e699edd9fd8f28cafb7"
 dependencies = [
  "gpui_tesserae_theme 0.1.0 (git+https://github.com/astrum-chat/gpui_tesserae)",
  "quote",
@@ -2326,7 +2327,7 @@ dependencies = [
 [[package]]
 name = "gpui_transitions"
 version = "0.1.0"
-source = "git+https://github.com/astrum-chat/gpui_tesserae#162c0ce74728a337f0d91fe47758becf106eda04"
+source = "git+https://github.com/astrum-chat/gpui_tesserae#19d3ab4d1fc1db3482d86e699edd9fd8f28cafb7"
 dependencies = [
  "gpui",
 ]

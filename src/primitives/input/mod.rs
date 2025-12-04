@@ -14,6 +14,7 @@ use crate::utils::rgb_a;
 #[derive(IntoElement)]
 pub struct Input {
     state: Entity<InputState>,
+    disabled: bool,
     placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
@@ -30,11 +31,17 @@ impl Input {
     pub fn new(state: Entity<InputState>) -> Self {
         Self {
             state,
+            disabled: false,
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
             selection_color: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
     }
 
     pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
@@ -284,8 +291,12 @@ impl RenderOnce for Input {
             })
             .tab_index(0)
             .key_context("TextInput")
-            .track_focus(&state.focus_handle)
-            .cursor(CursorStyle::IBeam)
+            .when(!self.disabled, |this| this.track_focus(&state.focus_handle))
+            .cursor(if self.disabled {
+                CursorStyle::OperationNotAllowed
+            } else {
+                CursorStyle::IBeam
+            })
             .on_action(window.listener_for(&self.state, InputState::backspace))
             .on_action(window.listener_for(&self.state, InputState::delete))
             .on_action(window.listener_for(&self.state, InputState::left))

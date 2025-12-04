@@ -20,6 +20,7 @@ serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
 anyhow = "1.0.100"
 cfg-if = "1.0.4"
+either = "1.15.0"
 
 # Input component.
 unicode-segmentation = "1.12.0"

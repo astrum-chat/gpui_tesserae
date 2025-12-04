@@ -1,23 +1,24 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, px,
-    relative, svg,
+    App, CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    prelude::FluentBuilder, px, relative, svg,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::{Transition, TransitionExt, TransitionGoal};
 
 use crate::{
-    TesseraeIconKind,
+    TesseraeIconKind, conitional_transition,
     primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
-    utils::{ElementIdExt, RgbaExt, SquircleExt, hover_border_color_transition},
+    utils::{ElementIdExt, RgbaExt, SquircleExt, disabled_transition},
 };
 
 #[derive(IntoElement)]
 pub struct Checkbox {
     id: ElementId,
+    icon: SharedString,
     layer: ThemeLayerKind,
     checked: bool,
     disabled: bool,
@@ -28,11 +29,17 @@ impl Checkbox {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
+            icon: TesseraeIconKind::Checkmark.into(),
             layer: ThemeLayerKind::Tertiary,
             checked: false,
             disabled: false,
             on_click: None,
         }
+    }
+
+    pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
+        self.icon = icon.into();
+        self
     }
 
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
@@ -58,7 +65,7 @@ impl Checkbox {
     fn checked_transition(&self, window: &mut Window, cx: &mut App) -> Transition<f32> {
         let checked_float = self.checked as u8 as f32;
 
-        let checked = Transition::new(
+        let checked_state = Transition::new(
             self.id.with_suffix("state:checked"),
             window,
             cx,
@@ -67,17 +74,22 @@ impl Checkbox {
         )
         .with_easing(ease_out_quint());
 
-        let changed = checked.set(cx, checked_float);
-        if changed {
-            cx.notify(checked.entity_id());
+        let checked_changed = checked_state.set(cx, checked_float);
+        if checked_changed {
+            cx.notify(checked_state.entity_id());
         }
 
-        checked
+        checked_state
     }
 
-    fn handle_on_click(&self, window: &mut Window, cx: &mut App) {
-        if let Some(on_click) = self.on_click.as_ref() {
-            (on_click)(&!self.checked, window, cx)
+    fn handle_on_click(
+        window: &mut Window,
+        cx: &mut App,
+        checked: bool,
+        on_click: Option<&Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
+    ) {
+        if let Some(on_click) = on_click {
+            (on_click)(&checked, window, cx)
         }
     }
 }
@@ -91,48 +103,73 @@ impl RenderOnce for Checkbox {
         let background_color = *self.layer.resolve(cx.get_theme());
         let border_color = *self.layer.next().resolve(cx.get_theme());
         let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
+        let border_click_down_color = border_color.apply_delta(&primary_text_color, 0.16);
 
         let checked_state = self.checked_transition(window, cx);
 
-        let is_hover_state = window.use_state(cx, |_cx, _window| false);
+        let is_disabled = self.disabled;
+
+        let is_hover_state =
+            window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
         let is_hover = *is_hover_state.read(cx);
 
-        let border_color_transition_state = hover_border_color_transition(
-            self.id.with_suffix("state:border_color"),
-            window,
+        let is_click_down_state = window.use_keyed_state(
+            self.id.with_suffix("state:click_down"),
             cx,
-            is_hover,
-            border_color,
-            border_hover_color,
+            |_cx, _window| false,
         );
+        let is_click_down = *is_click_down_state.read(cx);
 
-        let focus_handle_state = window
+        let focus_handle = window
             .use_keyed_state(
                 self.id.with_suffix("state:focus_handle"),
                 cx,
                 |_window, cx| cx.focus_handle().tab_stop(true),
             )
-            .read(cx);
+            .read(cx)
+            .clone();
+        let is_focus = focus_handle.is_focused(window);
+
+        let disabled_transition_state =
+            disabled_transition(self.id.clone(), window, cx, is_disabled);
+
+        if is_focus && is_disabled {
+            window.blur();
+        }
+
+        let border_color_transition_state = conitional_transition!(
+            self.id.with_suffix("state:transition:border_color"),
+            window,
+            cx,
+            Duration::from_millis(365),
+            {
+                is_focus => primary_accent_color,
+                is_click_down => border_click_down_color,
+                is_hover => border_hover_color,
+                _ => border_color
+            }
+        )
+        .with_easing(ease_out_quint());
 
         div()
             .id(self.id.clone())
-            .cursor_pointer()
+            .cursor(if is_disabled {
+                CursorStyle::OperationNotAllowed
+            } else {
+                CursorStyle::PointingHand
+            })
             .size(size)
             .min_w(size)
             .min_h(size)
             .flex()
             .items_center()
             .justify_center()
-            .on_hover(move |hover, _window, cx| {
-                is_hover_state.update(cx, |this, _cx| *this = *hover);
-                cx.notify(is_hover_state.entity_id());
+            .with_transitions(disabled_transition_state, move |_cx, this, opacity| {
+                this.opacity(opacity)
             })
             .child(
-                FocusRing::new(
-                    self.id.with_suffix("focus_ring"),
-                    focus_handle_state.clone(),
-                )
-                .rounded(corner_radii),
+                FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
+                    .rounded(corner_radii),
             )
             .child(
                 squircle()
@@ -141,11 +178,12 @@ impl RenderOnce for Checkbox {
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
-                    .with_transitions(border_color_transition_state, move |_cx, this, color| {
-                        this.border_color(color)
-                    }),
+                    .with_transitions(
+                        border_color_transition_state.clone(),
+                        move |_cx, this, color| this.border_color(color),
+                    ),
             )
-            .with_transitions(checked_state, move |_cx, this, delta| {
+            .with_transitions(checked_state.clone(), move |_cx, this, delta| {
                 this.child(
                     squircle()
                         .absolute_expand()
@@ -163,22 +201,36 @@ impl RenderOnce for Checkbox {
                         })
                         .size(relative(0.48))
                         .text_color(primary_text_color.alpha(delta))
-                        .path(TesseraeIconKind::Checkmark),
+                        .path(self.icon.clone()),
                 )
             })
-            .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
-                // Prevents focusing.
-                window.prevent_default();
-            })
-            .when(!self.disabled, |this| {
-                this.on_click({
+            .when(!is_disabled, |this| {
+                this.on_hover(move |hover, _window, cx| {
+                    is_hover_state.update(cx, |this, _cx| *this = *hover);
+                    cx.notify(is_hover_state.entity_id());
+                })
+                .map(|this| {
+                    let is_click_down_state = is_click_down_state.clone();
+
+                    this.on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                        // Prevents focus ring from appearing when clicked.
+                        window.prevent_default();
+
+                        is_click_down_state.update(cx, |this, _cx| *this = true);
+                        cx.notify(is_click_down_state.entity_id());
+                    })
+                })
+                .on_click({
                     move |_, window, cx| {
                         window.prevent_default();
-                        window.blur();
-                        self.handle_on_click(window, cx);
+
+                        is_click_down_state.update(cx, |this, _cx| *this = false);
+                        cx.notify(is_click_down_state.entity_id());
+
+                        Self::handle_on_click(window, cx, !self.checked, self.on_click.as_ref());
                     }
                 })
-                .track_focus(focus_handle_state)
+                .track_focus(&focus_handle)
             })
     }
 }

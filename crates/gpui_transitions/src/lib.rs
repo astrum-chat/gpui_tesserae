@@ -166,11 +166,11 @@ impl<T: TransitionGoal + Clone + PartialEq + 'static> TransitionState<T> {
 /// An extension trait for adding the transition wrapper to both Elements and Components
 pub trait TransitionExt {
     /// Render this component or element with transitions
-    fn with_transitions<'a, T>(
+    fn with_transitions<'a, R, T>(
         self,
         transitions: T,
-        animator: impl Fn(&mut App, Self, T::Values) -> Self + 'static,
-    ) -> TransitionElement<'a, Self, T>
+        animator: impl Fn(&mut App, Self, T::Values) -> R + 'static,
+    ) -> TransitionElement<'a, Self, R, T>
     where
         T: TransitionValues<'a>,
         Self: Sized,
@@ -186,14 +186,14 @@ pub trait TransitionExt {
 impl<E: IntoElement + 'static> TransitionExt for E {}
 
 /// A GPUI element that applies a transition to another element
-pub struct TransitionElement<'a, E, T: TransitionValues<'a>> {
+pub struct TransitionElement<'a, E, R, T: TransitionValues<'a>> {
     element: Option<E>,
     transitions: T,
-    animator: Box<dyn Fn(&mut App, E, T::Values) -> E + 'a>,
+    animator: Box<dyn Fn(&mut App, E, T::Values) -> R + 'a>,
 }
 
-impl<E: Element + 'static, T: TransitionValues<'static> + 'static> Element
-    for TransitionElement<'static, E, T>
+impl<E: Element + 'static, R: Element + 'static, T: TransitionValues<'static> + 'static> Element
+    for TransitionElement<'static, E, R, T>
 {
     type RequestLayoutState = AnyElement;
     type PrepaintState = ();
@@ -251,42 +251,54 @@ impl<E: Element + 'static, T: TransitionValues<'static> + 'static> Element
     }
 }
 
-impl<E: Element + 'static, T: TransitionValues<'static> + 'static> IntoElement
-    for TransitionElement<'static, E, T>
+impl<E: Element + 'static, R: Element + 'static, T: TransitionValues<'static> + 'static> IntoElement
+    for TransitionElement<'static, E, R, T>
 {
-    type Element = TransitionElement<'static, E, T>;
+    type Element = TransitionElement<'static, E, R, T>;
 
     fn into_element(self) -> Self::Element {
         self
     }
 }
 
-impl<E: Element + Styled + 'static, T: TransitionValues<'static> + 'static> Styled
-    for TransitionElement<'static, E, T>
+impl<
+    E: Element + Styled + 'static,
+    R: Element + Styled + 'static,
+    T: TransitionValues<'static> + 'static,
+> Styled for TransitionElement<'static, E, R, T>
 {
     fn style(&mut self) -> &mut StyleRefinement {
         self.element.as_mut().unwrap().style()
     }
 }
 
-impl<E: Element + InteractiveElement + 'static, T: TransitionValues<'static> + 'static>
-    InteractiveElement for TransitionElement<'static, E, T>
+impl<
+    E: Element + InteractiveElement + 'static,
+    R: Element + InteractiveElement + 'static,
+    T: TransitionValues<'static> + 'static,
+> InteractiveElement for TransitionElement<'static, E, R, T>
 {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.element.as_mut().unwrap().interactivity()
     }
 }
 
-impl<E: Element + ParentElement + 'static, T: TransitionValues<'static> + 'static> ParentElement
-    for TransitionElement<'static, E, T>
+impl<
+    E: Element + ParentElement + 'static,
+    R: Element + ParentElement + 'static,
+    T: TransitionValues<'static> + 'static,
+> ParentElement for TransitionElement<'static, E, R, T>
 {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.element.as_mut().unwrap().extend(elements);
     }
 }
 
-impl<E: Element + StatefulInteractiveElement + 'static, T: TransitionValues<'static> + 'static>
-    StatefulInteractiveElement for TransitionElement<'static, E, T>
+impl<
+    E: Element + StatefulInteractiveElement + 'static,
+    R: Element + StatefulInteractiveElement + 'static,
+    T: TransitionValues<'static> + 'static,
+> StatefulInteractiveElement for TransitionElement<'static, E, R, T>
 {
 }
 

@@ -1,12 +1,16 @@
+use std::time::Duration;
+
 use gpui::{
-    ElementId, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, div, px,
+    CursorStyle, ElementId, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder,
+    px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
+    conitional_transition,
     primitives::{
         FocusRing,
         input::{Input as PrimitiveInput, InputState},
@@ -14,7 +18,7 @@ use crate::{
     theme::ThemeLayerKind,
     utils::{
         ElementIdExt, PixelsExt, PositionalChildren, PositionalParentElement, RgbaExt,
-        hover_and_focus_border_color_transition,
+        disabled_transition,
     },
 };
 
@@ -22,6 +26,8 @@ use crate::{
 pub struct Input {
     id: ElementId,
     state: Entity<InputState>,
+    invalid: bool,
+    disabled: bool,
     layer: ThemeLayerKind,
     children: PositionalChildren,
 }
@@ -31,9 +37,21 @@ impl Input {
         Self {
             id: id.into(),
             state,
+            invalid: false,
+            disabled: false,
             layer: ThemeLayerKind::Tertiary,
             children: PositionalChildren::default(),
         }
+    }
+
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.invalid = invalid;
+        self
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
     }
 }
 
@@ -42,6 +60,7 @@ impl RenderOnce for Input {
         let (primary_text_color, secondary_text_color) =
             cx.get_theme().variants.active().colors.text.all();
         let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
+        let destructive_accent_color = cx.get_theme().variants.active().colors.accent.destructive;
         let background_color = *self.layer.resolve(cx.get_theme());
         let border_color = *self.layer.next().resolve(cx.get_theme());
         let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
@@ -57,23 +76,56 @@ impl RenderOnce for Input {
                 .lg
                 .padding_needed_for_height(window, text_size, line_height);
 
-        let is_focus = self.state.focus_handle(cx).is_focused(window);
-        let is_hover_state = window.use_state(cx, |_cx, _window| false);
+        let is_invalid = self.invalid;
+
+        let is_hover_state =
+            window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
         let is_hover = *is_hover_state.read(cx);
 
-        let border_color_transition_state = hover_and_focus_border_color_transition(
-            self.id.with_suffix("state:border_color"),
+        let focus_handle = self.state.focus_handle(cx).clone();
+        let is_focus = focus_handle.is_focused(window);
+
+        let is_disabled = self.disabled;
+        let disabled_transition_state =
+            disabled_transition(self.id.clone(), window, cx, is_disabled);
+
+        if is_focus && is_disabled {
+            window.blur();
+        }
+
+        let border_color_transition_state = conitional_transition!(
+            self.id.with_suffix("state:transition:border_color"),
             window,
             cx,
-            is_hover,
-            is_focus,
-            border_color,
-            border_hover_color,
-            primary_accent_color,
-        );
+            Duration::from_millis(400),
+            {
+                is_invalid => destructive_accent_color,
+                is_focus => primary_accent_color,
+                is_hover => border_hover_color,
+                _ => border_color
+            }
+        )
+        .with_easing(ease_out_quint());
+
+        let focus_ring_color_transition_state = conitional_transition!(
+            self.id.with_suffix("state:transition:focus_ring_color"),
+            window,
+            cx,
+            Duration::from_millis(400),
+            {
+                is_invalid => destructive_accent_color,
+                _ => primary_accent_color
+            }
+        )
+        .with_easing(ease_out_quint());
 
         div()
             .id(self.id.clone())
+            .cursor(if is_disabled {
+                CursorStyle::OperationNotAllowed
+            } else {
+                CursorStyle::PointingHand
+            })
             .w_full()
             .h_auto()
             .pl(horizontal_padding)
@@ -83,16 +135,15 @@ impl RenderOnce for Input {
             .gap(horizontal_padding)
             .flex()
             .flex_col()
-            .on_hover(move |hover, _window, cx| {
-                is_hover_state.update(cx, |this, _cx| *this = *hover);
-                cx.notify(is_hover_state.entity_id());
-            })
-            .child(
-                FocusRing::new(
-                    self.id.with_suffix("focus_ring"),
-                    self.state.focus_handle(cx).clone(),
-                )
-                .rounded(corner_radii),
+            .with_transitions(
+                (disabled_transition_state, focus_ring_color_transition_state),
+                move |_cx, this, (opacity, color)| {
+                    this.opacity(opacity).child(
+                        FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
+                            .border_color(color)
+                            .rounded(corner_radii),
+                    )
+                },
             )
             .child(
                 squircle()
@@ -121,11 +172,18 @@ impl RenderOnce for Input {
                             .text_color(primary_text_color)
                             .placeholder_text_color(secondary_text_color)
                             .selection_color(primary_accent_color.alpha(0.3))
-                            .line_height(line_height),
+                            .line_height(line_height)
+                            .disabled(is_disabled),
                     )
                     .children(self.children.right),
             )
             .children(self.children.bottom)
+            .when(!is_disabled, |this| {
+                this.on_hover(move |hover, _window, cx| {
+                    is_hover_state.update(cx, |this, _cx| *this = *hover);
+                    cx.notify(is_hover_state.entity_id());
+                })
+            })
     }
 }
 

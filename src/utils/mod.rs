@@ -1,5 +1,5 @@
-mod border_color;
-pub use border_color::*;
+mod transitions;
+pub use transitions::*;
 
 mod colors;
 pub use colors::*;

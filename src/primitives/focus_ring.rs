@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use gpui::{
-    CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, ease_out_quint,
-    prelude::*, px,
+    Corners, CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba,
+    ease_out_quint, prelude::*, px,
 };
-use gpui_squircle::{SquircleStyleRefinement, SquircleStyled, squircle};
+use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{Transition, TransitionExt};
 
@@ -16,7 +16,8 @@ const SIZE_SCALE_FACTOR: f32 = 8.;
 pub struct FocusRing {
     id: ElementId,
     focus_handle: FocusHandle,
-    style: SquircleStyleRefinement,
+    corner_radii: Corners<Pixels>,
+    border_color: Option<Rgba>,
 }
 
 impl FocusRing {
@@ -24,7 +25,8 @@ impl FocusRing {
         Self {
             id: id.into(),
             focus_handle: focus_handle,
-            style: SquircleStyleRefinement::default(),
+            corner_radii: Corners::all(px(8.)),
+            border_color: None,
         }
     }
 
@@ -32,21 +34,23 @@ impl FocusRing {
         self.focus_handle = focus_handle;
         self
     }
-}
 
-impl SquircleStyled for FocusRing {
-    fn style(&mut self) -> &mut gpui::StyleRefinement {
-        &mut self.style.inner
+    pub fn border_color(mut self, border_color: impl Into<Rgba>) -> Self {
+        self.border_color = Some(border_color.into());
+        self
     }
 
-    fn outer_style(&mut self) -> &mut SquircleStyleRefinement {
-        &mut self.style
+    pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.corner_radii = Corners::all(rounded.into());
+        self
     }
 }
 
 impl RenderOnce for FocusRing {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
-        let border_focus_color = cx.get_theme().variants.active().colors.accent.primary;
+        let border_color = self
+            .border_color
+            .unwrap_or_else(|| cx.get_theme().variants.active().colors.accent.primary);
 
         let is_focused = self.focus_handle.is_focused(window) as u8 as f32;
 
@@ -76,28 +80,21 @@ impl RenderOnce for FocusRing {
                 let size_factor = (1. - delta) * SIZE_SCALE_FACTOR;
 
                 this.inset(px(-size_factor))
-                    .border_color(border_focus_color.alpha(delta * 0.3))
+                    .border_color(border_color.alpha(border_color.a * delta * 0.3))
                     .map(|mut this| {
-                        this.outer_style().corner_radii = add_to_corner_radii(
-                            &self.style.corner_radii,
-                            px(8.),
-                            px(size_factor + 1.),
-                        );
+                        this.outer_style().corner_radii =
+                            add_to_corner_radii(&self.corner_radii, px(size_factor + 1.));
                         this
                     })
             })
     }
 }
 
-fn add_to_corner_radii(
-    corner_radii: &CornersRefinement<Pixels>,
-    default: Pixels,
-    num: Pixels,
-) -> CornersRefinement<Pixels> {
+fn add_to_corner_radii(corner_radii: &Corners<Pixels>, num: Pixels) -> CornersRefinement<Pixels> {
     CornersRefinement {
-        top_left: Some(corner_radii.top_left.unwrap_or(default) + num),
-        top_right: Some(corner_radii.top_right.unwrap_or(default) + num),
-        bottom_right: Some(corner_radii.bottom_right.unwrap_or(default) + num),
-        bottom_left: Some(corner_radii.bottom_left.unwrap_or(default) + num),
+        top_left: Some(corner_radii.top_left + num),
+        top_right: Some(corner_radii.top_right + num),
+        bottom_right: Some(corner_radii.bottom_right + num),
+        bottom_left: Some(corner_radii.bottom_left + num),
     }
 }
