@@ -1,7 +1,7 @@
 use gpui::{
     App, Bounds, ClipboardItem, Context, EntityInputHandler, FocusHandle, Focusable, IntoElement,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ShapedLine, SharedString,
-    Styled, UTF16Selection, Window, actions, div, point, px, white,
+    UTF16Selection, Window, actions, div, point,
 };
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
@@ -428,7 +428,7 @@ impl EntityInputHandler for InputState {
 
 impl Render for InputState {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().h(px(30. + 4. * 2.)).w_full().p(px(4.)).bg(white())
+        div()
     }
 }
 

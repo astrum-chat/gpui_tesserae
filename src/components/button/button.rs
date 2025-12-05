@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ClickEvent, CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, Rgba, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    App, ClickEvent, CursorStyle, ElementId, InteractiveElement, IntoElement, JustifyContent,
+    ParentElement, RenderOnce, Rgba, SharedString, StatefulInteractiveElement, Styled, Window, div,
     ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
@@ -11,7 +11,7 @@ use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
     conitional_transition,
-    primitives::FocusRing,
+    primitives::{FocusRing, min_w0_wrapper},
     utils::{
         ElementIdExt, PixelsExt, PositionalChildren, PositionalParentElement, RgbaExt, SquircleExt,
         disabled_transition,
@@ -23,6 +23,7 @@ pub struct Button {
     id: ElementId,
     text: SharedString,
     variant: ButtonVariantEither,
+    justify_content: JustifyContent,
     disabled: bool,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
@@ -35,6 +36,7 @@ impl Button {
             id: id.into(),
             text: SharedString::from("Button"),
             variant: ButtonVariantEither::Left(ButtonVariant::Primary),
+            justify_content: JustifyContent::Center,
             disabled: false,
             on_hover: None,
             on_click: None,
@@ -74,6 +76,43 @@ impl Button {
         self
     }
 
+    /// Sets the element to justify flex items against the start of the container's main axis.
+    /// [Docs](https://tailwindcss.com/docs/justify-content#start)
+    pub fn justify_start(mut self) -> Self {
+        self.justify_content = JustifyContent::Start;
+        self
+    }
+
+    /// Sets the element to justify flex items against the end of the container's main axis.
+    /// [Docs](https://tailwindcss.com/docs/justify-content#end)
+    pub fn justify_end(mut self) -> Self {
+        self.justify_content = JustifyContent::End;
+        self
+    }
+
+    /// Sets the element to justify flex items along the center of the container's main axis.
+    /// [Docs](https://tailwindcss.com/docs/justify-content#center)
+    pub fn justify_center(mut self) -> Self {
+        self.justify_content = JustifyContent::Center;
+        self
+    }
+
+    /// Sets the element to justify flex items along the container's main axis
+    /// such that there is an equal amount of space between each item.
+    /// [Docs](https://tailwindcss.com/docs/justify-content#space-between)
+    pub fn justify_between(mut self) -> Self {
+        self.justify_content = JustifyContent::SpaceBetween;
+        self
+    }
+
+    /// Sets the element to justify items along the container's main axis such
+    /// that there is an equal amount of space on each side of each item.
+    /// [Docs](https://tailwindcss.com/docs/justify-content#space-around)
+    pub fn justify_around(mut self) -> Self {
+        self.justify_content = JustifyContent::SpaceAround;
+        self
+    }
+
     fn handle_on_click(
         window: &mut Window,
         cx: &mut App,
@@ -93,7 +132,7 @@ impl RenderOnce for Button {
         let font_family = cx.get_theme().layout.text.default_font.family[0].clone();
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = cx.get_theme().layout.text.default_font.sizes.body.clone();
-        let corner_radii = cx.get_theme().layout.corner_radii.md;
+        let corner_radius = cx.get_theme().layout.corner_radii.md;
         let horizontal_padding = cx.get_theme().layout.padding.lg;
         let vertical_padding =
             cx.get_theme()
@@ -135,7 +174,7 @@ impl RenderOnce for Button {
             self.id.with_suffix("state:transition:bg_color"),
             window,
             cx,
-            Duration::from_millis(365),
+            Duration::from_millis(250),
             {
                 is_focus || is_click_down => variant.bg_focus_color,
                 is_hover => variant.bg_hover_color,
@@ -148,7 +187,7 @@ impl RenderOnce for Button {
             self.id.with_suffix("state:transition:text_color"),
             window,
             cx,
-            Duration::from_millis(365),
+            Duration::from_millis(250),
             variant.text_color
         )
         .with_easing(ease_out_quint());
@@ -157,8 +196,11 @@ impl RenderOnce for Button {
             self.id.with_suffix("state:transition:highlight_alpha"),
             window,
             cx,
-            Duration::from_millis(365),
-            variant.highlight_alpha
+            Duration::from_millis(250),
+            {
+                is_focus || is_click_down || is_hover => variant.highlight_active_alpha,
+                _ => variant.highlight_alpha
+            }
         )
         .with_easing(ease_out_quint());
 
@@ -183,12 +225,12 @@ impl RenderOnce for Button {
             })
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
-                    .rounded(corner_radii.clone()),
+                    .rounded(corner_radius.clone()),
             )
             .child(
                 squircle()
                     .absolute_expand()
-                    .rounded(corner_radii)
+                    .rounded(corner_radius)
                     .border(px(1.))
                     .border_inside()
                     .with_transitions(
@@ -203,13 +245,20 @@ impl RenderOnce for Button {
                 div()
                     .w_full()
                     .flex()
-                    .justify_center()
                     .gap(horizontal_padding)
+                    .map(|mut this| {
+                        this.style().justify_content = Some(self.justify_content);
+                        this
+                    })
                     .items_center()
-                    .font_family(font_family.clone())
-                    .text_size(text_size)
                     .children(self.children.left)
-                    .child(self.text)
+                    .child(
+                        min_w0_wrapper()
+                            .font_family(font_family.clone())
+                            .text_size(text_size)
+                            .text_ellipsis()
+                            .child(self.text),
+                    )
                     .children(self.children.right)
                     .with_transitions(text_color_state, |_cx, this, text_color| {
                         this.text_color(text_color)
@@ -262,23 +311,28 @@ impl PositionalParentElement for Button {
     }
 }
 
+#[derive(Clone)]
 pub struct GranularButtonVariant {
     pub bg_color: Rgba,
     pub bg_hover_color: Rgba,
     pub bg_focus_color: Rgba,
     pub text_color: Rgba,
     pub highlight_alpha: f32,
+    pub highlight_active_alpha: f32,
 }
 
 pub enum ButtonVariant {
     Primary,
     Secondary,
+    SecondaryGhost,
     Constructive,
+    ConstructiveGhost,
     Destructive,
+    DestructiveGhost,
 }
 
 impl ButtonVariant {
-    fn as_granular(&self, cx: &mut App) -> GranularButtonVariant {
+    pub fn as_granular(&self, cx: &mut App) -> GranularButtonVariant {
         const HOVER_STRENGTH: f32 = 0.25;
         const FOCUS_STRENGTH: f32 = 0.35;
 
@@ -301,6 +355,20 @@ impl ButtonVariant {
                     .alpha(SECONDARY_ALPHA),
                 text_color: *main_color,
                 highlight_alpha: 0.05,
+                highlight_active_alpha: 0.05,
+            }
+        }
+
+        fn ghost_variant(primary_background: &Rgba, main_color: &Rgba) -> GranularButtonVariant {
+            GranularButtonVariant {
+                bg_color: main_color.alpha(0.),
+                bg_hover_color: main_color.alpha(SECONDARY_ALPHA),
+                bg_focus_color: main_color
+                    .apply_delta(&primary_background, HOVER_STRENGTH)
+                    .alpha(SECONDARY_ALPHA),
+                text_color: *main_color,
+                highlight_alpha: 0.,
+                highlight_active_alpha: 0.05,
             }
         }
 
@@ -317,18 +385,31 @@ impl ButtonVariant {
                     .apply_delta(&primary_background, FOCUS_STRENGTH),
                 text_color: colors.text.primary,
                 highlight_alpha: 0.15,
+                highlight_active_alpha: 0.15,
             },
 
             ButtonVariant::Secondary => {
                 secondary_variant(&primary_background, &colors.text.secondary)
             }
 
+            ButtonVariant::SecondaryGhost => {
+                ghost_variant(&primary_background, &colors.text.secondary)
+            }
+
             ButtonVariant::Constructive => {
                 secondary_variant(&primary_background, &colors.accent.constructive)
             }
 
+            ButtonVariant::ConstructiveGhost => {
+                ghost_variant(&primary_background, &colors.accent.constructive)
+            }
+
             ButtonVariant::Destructive => {
                 secondary_variant(&primary_background, &colors.accent.destructive)
+            }
+
+            ButtonVariant::DestructiveGhost => {
+                ghost_variant(&primary_background, &colors.accent.destructive)
             }
         }
     }

@@ -119,6 +119,8 @@ pub struct ThemeTextWeights {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemeCornerRadii {
     #[serde(deserialize_with = "de_pixels")]
+    pub xl: Pixels,
+    #[serde(deserialize_with = "de_pixels")]
     pub lg: Pixels,
     #[serde(deserialize_with = "de_pixels")]
     pub md: Pixels,
@@ -129,6 +131,8 @@ pub struct ThemeCornerRadii {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemeSize {
     #[serde(deserialize_with = "de_pixels")]
+    pub xl: Pixels,
+    #[serde(deserialize_with = "de_pixels")]
     pub lg: Pixels,
     #[serde(deserialize_with = "de_pixels")]
     pub md: Pixels,
@@ -138,6 +142,8 @@ pub struct ThemeSize {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemePadding {
+    #[serde(deserialize_with = "de_pixels")]
+    pub xl: Pixels,
     #[serde(deserialize_with = "de_pixels")]
     pub lg: Pixels,
     #[serde(deserialize_with = "de_pixels")]

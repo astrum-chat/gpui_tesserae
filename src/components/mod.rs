@@ -1,6 +1,9 @@
 mod button;
 pub use button::*;
 
+mod chat_bubble;
+pub use chat_bubble::*;
+
 mod checkbox;
 pub use checkbox::*;
 

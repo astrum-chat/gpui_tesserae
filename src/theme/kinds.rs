@@ -1,9 +1,29 @@
 use gpui_tesserae_macros::IntoThemeField;
 
+/// An enum containing all of the available text size options.
+#[derive(IntoThemeField)]
+#[field(gpui::AbsoluteLength)]
+pub enum ThemeTextSizeKind {
+    #[theme(layout.text.default_font.sizes.heading_xl)]
+    Xl,
+    #[theme(layout.text.default_font.sizes.heading_lg)]
+    Lg,
+    #[theme(layout.text.default_font.sizes.heading_md)]
+    Md,
+    #[theme(layout.text.default_font.sizes.heading_sm)]
+    Sm,
+    #[theme(layout.text.default_font.sizes.body)]
+    Body,
+    #[theme(layout.text.default_font.sizes.caption)]
+    Caption,
+}
+
 /// An enum containing all of the available size options.
 #[derive(IntoThemeField)]
 #[field(gpui::Pixels)]
 pub enum ThemeLayoutSizeKind {
+    #[theme(layout.size.xl)]
+    Xl,
     #[theme(layout.size.lg)]
     Lg,
     #[theme(layout.size.md)]
@@ -15,6 +35,7 @@ pub enum ThemeLayoutSizeKind {
 impl ThemeLayoutSizeKind {
     pub fn corner_radii(&self) -> ThemeLayoutCornerRadiiKind {
         match self {
+            Self::Xl => ThemeLayoutCornerRadiiKind::Xl,
             Self::Lg => ThemeLayoutCornerRadiiKind::Lg,
             Self::Md => ThemeLayoutCornerRadiiKind::Md,
             Self::Sm => ThemeLayoutCornerRadiiKind::Sm,
@@ -26,6 +47,8 @@ impl ThemeLayoutSizeKind {
 #[derive(IntoThemeField)]
 #[field(gpui::Pixels)]
 pub enum ThemeLayoutPaddingKind {
+    #[theme(layout.padding.xl)]
+    Xl,
     #[theme(layout.padding.lg)]
     Lg,
     #[theme(layout.padding.md)]
@@ -38,6 +61,8 @@ pub enum ThemeLayoutPaddingKind {
 #[derive(IntoThemeField)]
 #[field(gpui::Pixels)]
 pub enum ThemeLayoutCornerRadiiKind {
+    #[theme(layout.corner_radii.xl)]
+    Xl,
     #[theme(layout.corner_radii.lg)]
     Lg,
     #[theme(layout.corner_radii.md)]

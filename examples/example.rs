@@ -64,7 +64,7 @@ impl Render for Root {
                 )
                 .disabled(self.checkbox_checked || self.switch_checked)
                 .map(|this| {
-                    let invalid = this.text(cx).to_lowercase() == "invalid";
+                    let invalid = this.read_text(cx).to_lowercase() == "invalid";
 
                     this.invalid(invalid)
                 }),

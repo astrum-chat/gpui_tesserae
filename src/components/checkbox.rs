@@ -77,7 +77,7 @@ impl Checkbox {
 impl RenderOnce for Checkbox {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
         let size = cx.get_theme().layout.size.md;
-        let corner_radii = cx.get_theme().layout.corner_radii.sm;
+        let corner_radius = cx.get_theme().layout.corner_radii.sm;
         let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
         let primary_text_color = cx.get_theme().variants.active().colors.text.primary;
         let background_color = *self.layer.resolve(cx.get_theme());
@@ -155,12 +155,12 @@ impl RenderOnce for Checkbox {
             })
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
-                    .rounded(corner_radii),
+                    .rounded(corner_radius),
             )
             .child(
                 squircle()
                     .absolute_expand()
-                    .rounded(corner_radii)
+                    .rounded(corner_radius)
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
@@ -172,7 +172,7 @@ impl RenderOnce for Checkbox {
                 this.child(
                     squircle()
                         .absolute_expand()
-                        .rounded(corner_radii)
+                        .rounded(corner_radius)
                         .border(px(1.))
                         .border_inside()
                         .bg(primary_accent_color.alpha(delta))

@@ -1,9 +1,9 @@
 use gpui::{
-    App, Bounds, CursorStyle, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
-    Hsla, InspectorElementId, InteractiveElement, IntoElement, KeyBinding, LayoutId, MouseButton,
-    PaintQuad, ParentElement, Pixels, Refineable, RenderOnce, ShapedLine, SharedString, Style,
-    StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div, fill, hsla, point,
-    prelude::FluentBuilder, px, relative, rgb, size,
+    App, Bounds, CursorStyle, Element, ElementId, ElementInputHandler, Entity, FocusHandle,
+    Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement, IntoElement,
+    KeyBinding, LayoutId, MouseButton, PaintQuad, ParentElement, Pixels, Refineable, RenderOnce,
+    ShapedLine, SharedString, Style, StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div,
+    fill, hsla, point, prelude::FluentBuilder, px, relative, rgb, size,
 };
 
 mod state;
@@ -67,6 +67,10 @@ impl Input {
             this.value = Some(text.into());
         });
         self
+    }
+
+    pub fn read_text(&self, cx: &mut App) -> SharedString {
+        self.state.read(cx).value()
     }
 }
 
@@ -363,4 +367,10 @@ pub fn init(cx: &mut App) {
         }
     })
     .detach();
+}
+
+impl Focusable for Input {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.state.read(cx).focus_handle.clone()
+    }
 }

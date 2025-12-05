@@ -45,16 +45,19 @@
             }
         },
         "corner_radii": {
+            "xl": "22px",
             "lg": "12px",
             "md": "8px",
             "sm": "4px"
         },
         "size": {
+            "xl": "44px",
             "lg": "36px",
             "md": "16px",
             "sm": "6px"
         },
         "padding": {
+            "xl": "15px",
             "lg": "11px",
             "md": "4px",
             "sm": "2px"

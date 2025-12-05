@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gpui::{
-    Corners, CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba,
+    CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba,
     ease_out_quint, prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
@@ -16,7 +16,7 @@ const SIZE_SCALE_FACTOR: f32 = 8.;
 pub struct FocusRing {
     id: ElementId,
     focus_handle: FocusHandle,
-    corner_radii: Corners<Pixels>,
+    pub corner_radii: CornersRefinement<Pixels>,
     border_color: Option<Rgba>,
 }
 
@@ -25,7 +25,12 @@ impl FocusRing {
         Self {
             id: id.into(),
             focus_handle: focus_handle,
-            corner_radii: Corners::all(px(8.)),
+            corner_radii: CornersRefinement {
+                top_left: None,
+                top_right: None,
+                bottom_left: None,
+                bottom_right: None,
+            },
             border_color: None,
         }
     }
@@ -41,7 +46,34 @@ impl FocusRing {
     }
 
     pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
-        self.corner_radii = Corners::all(rounded.into());
+        let rounded = rounded.into();
+
+        self.corner_radii = CornersRefinement {
+            top_left: Some(rounded),
+            top_right: Some(rounded),
+            bottom_left: Some(rounded),
+            bottom_right: Some(rounded),
+        };
+        self
+    }
+
+    pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.corner_radii.top_left = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.corner_radii.top_right = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.corner_radii.bottom_left = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.corner_radii.bottom_right = Some(rounded.into());
         self
     }
 }
@@ -90,11 +122,14 @@ impl RenderOnce for FocusRing {
     }
 }
 
-fn add_to_corner_radii(corner_radii: &Corners<Pixels>, num: Pixels) -> CornersRefinement<Pixels> {
+fn add_to_corner_radii(
+    corner_radii: &CornersRefinement<Pixels>,
+    num: Pixels,
+) -> CornersRefinement<Pixels> {
     CornersRefinement {
-        top_left: Some(corner_radii.top_left + num),
-        top_right: Some(corner_radii.top_right + num),
-        bottom_right: Some(corner_radii.bottom_right + num),
-        bottom_left: Some(corner_radii.bottom_left + num),
+        top_left: Some(corner_radii.top_left.unwrap_or_default() + num),
+        top_right: Some(corner_radii.top_right.unwrap_or_default() + num),
+        bottom_right: Some(corner_radii.bottom_right.unwrap_or_default() + num),
+        bottom_left: Some(corner_radii.bottom_left.unwrap_or_default() + num),
     }
 }

@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ElementId, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    SharedString, StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder,
-    px,
+    App, ElementId, Entity, FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement,
+    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, div,
+    ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
@@ -25,22 +25,22 @@ use crate::{
 #[derive(IntoElement)]
 pub struct Input {
     id: ElementId,
-    state: Entity<InputState>,
     invalid: bool,
     disabled: bool,
     layer: ThemeLayerKind,
     children: PositionalChildren,
+    base: PrimitiveInput,
 }
 
 impl Input {
     pub fn new(id: impl Into<ElementId>, state: Entity<InputState>) -> Self {
         Self {
             id: id.into(),
-            state,
             invalid: false,
             disabled: false,
             layer: ThemeLayerKind::Tertiary,
             children: PositionalChildren::default(),
+            base: PrimitiveInput::new(state),
         }
     }
 
@@ -54,8 +54,28 @@ impl Input {
         self
     }
 
-    pub fn text(&self, cx: &mut App) -> SharedString {
-        self.state.read(cx).value()
+    pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.base = self.base.placeholder_text_color(color);
+        self
+    }
+
+    pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.base = self.base.selection_color(color);
+        self
+    }
+
+    pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
+        self.base = self.base.placeholder(text);
+        self
+    }
+
+    pub fn initial_value(mut self, text: impl Into<SharedString>, cx: &mut App) -> Self {
+        self.base = self.base.initial_value(text, cx);
+        self
+    }
+
+    pub fn read_text(&self, cx: &mut App) -> SharedString {
+        self.base.read_text(cx)
     }
 }
 
@@ -71,7 +91,7 @@ impl RenderOnce for Input {
         let font_family = cx.get_theme().layout.text.default_font.family[0].clone();
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = cx.get_theme().layout.text.default_font.sizes.body.clone();
-        let corner_radii = cx.get_theme().layout.corner_radii.md;
+        let corner_radius = cx.get_theme().layout.corner_radii.md;
         let horizontal_padding = cx.get_theme().layout.padding.lg;
         let vertical_padding =
             cx.get_theme()
@@ -86,7 +106,7 @@ impl RenderOnce for Input {
             window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
         let is_hover = *is_hover_state.read(cx);
 
-        let focus_handle = self.state.focus_handle(cx).clone();
+        let focus_handle = self.focus_handle(cx).clone();
         let is_focus = focus_handle.is_focused(window);
 
         let is_disabled = self.disabled;
@@ -140,14 +160,14 @@ impl RenderOnce for Input {
                     this.opacity(opacity).child(
                         FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
                             .border_color(color)
-                            .rounded(corner_radii),
+                            .rounded(corner_radius),
                     )
                 },
             )
             .child(
                 squircle()
                     .absolute_expand()
-                    .rounded(corner_radii)
+                    .rounded(corner_radius)
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
@@ -164,7 +184,7 @@ impl RenderOnce for Input {
                     .items_center()
                     .children(self.children.left)
                     .child(
-                        PrimitiveInput::new(self.state)
+                        self.base
                             .w_full()
                             .text_size(text_size)
                             .font_family(font_family)
@@ -189,5 +209,11 @@ impl RenderOnce for Input {
 impl PositionalParentElement for Input {
     fn children_mut(&mut self) -> &mut crate::utils::PositionalChildren {
         &mut self.children
+    }
+}
+
+impl Focusable for Input {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.base.focus_handle(cx)
     }
 }
