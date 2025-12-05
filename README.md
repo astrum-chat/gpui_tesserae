@@ -19,6 +19,10 @@ It currently offers the following components:
 
     ![button](/readme/assets/button.png)
 
+- Chat bubble
+
+    ![chat bubble](/readme/assets/chat_bubble.png)
+
 Examples can be found [here](https://github.com/astrum-chat/gpui_tesserae/tree/main/examples).
 
 # Setup
