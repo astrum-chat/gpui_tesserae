@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ElementId, Entity, FocusHandle, Focusable, Hsla, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, div,
-    ease_out_quint, prelude::FluentBuilder, px,
+    App, Corners, DefiniteLength, Edges, ElementId, Entity, FocusHandle, Focusable, Hsla,
+    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
+    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
@@ -22,6 +22,14 @@ use crate::{
     },
 };
 
+#[derive(Default)]
+struct InputStyles {
+    gap: Option<DefiniteLength>,
+    padding: Edges<Option<DefiniteLength>>,
+    inner_padding: Edges<Option<DefiniteLength>>,
+    corner_radii: Corners<Option<Pixels>>,
+}
+
 #[derive(IntoElement)]
 pub struct Input {
     id: ElementId,
@@ -29,6 +37,7 @@ pub struct Input {
     disabled: bool,
     layer: ThemeLayerKind,
     children: PositionalChildren,
+    style: InputStyles,
     base: PrimitiveInput,
 }
 
@@ -40,6 +49,7 @@ impl Input {
             disabled: false,
             layer: ThemeLayerKind::Tertiary,
             children: PositionalChildren::default(),
+            style: InputStyles::default(),
             base: PrimitiveInput::new(state),
         }
     }
@@ -77,6 +87,132 @@ impl Input {
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.base.read_text(cx)
     }
+
+    pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
+        let rounded = rounded.into();
+        self.style.corner_radii = Corners::all(Some(rounded));
+        self
+    }
+
+    pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.top_left = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.top_right = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.bottom_left = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.bottom_right = Some(rounded.into());
+        self
+    }
+
+    pub fn gap(mut self, gap: impl Into<DefiniteLength>) -> Self {
+        self.style.gap = Some(gap.into());
+        self
+    }
+
+    pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        let padding = padding.into();
+        self.style.padding = Edges::all(Some(padding));
+        self
+    }
+
+    pub fn pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.top = Some(padding.into());
+        self
+    }
+
+    pub fn pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.bottom = Some(padding.into());
+        self
+    }
+
+    pub fn pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.left = Some(padding.into());
+        self
+    }
+
+    pub fn pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.right = Some(padding.into());
+        self
+    }
+
+    pub fn inner_p(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        let padding = padding.into();
+        self.style.inner_padding = Edges::all(Some(padding));
+        self
+    }
+
+    pub fn inner_pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.inner_padding.top = Some(padding.into());
+        self
+    }
+
+    pub fn inner_pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.inner_padding.bottom = Some(padding.into());
+        self
+    }
+
+    pub fn inner_pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.inner_padding.left = Some(padding.into());
+        self
+    }
+
+    pub fn inner_pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.inner_padding.right = Some(padding.into());
+        self
+    }
+}
+
+macro_rules! apply_corner_radii {
+    ($this:expr, $corner_radii_override:expr, $corner_radius:expr) => {
+        $this
+            .rounded_tl(
+                $corner_radii_override
+                    .top_left
+                    .unwrap_or($corner_radius.into()),
+            )
+            .rounded_tr(
+                $corner_radii_override
+                    .top_right
+                    .unwrap_or($corner_radius.into()),
+            )
+            .rounded_bl(
+                $corner_radii_override
+                    .bottom_left
+                    .unwrap_or($corner_radius.into()),
+            )
+            .rounded_br(
+                $corner_radii_override
+                    .bottom_right
+                    .unwrap_or($corner_radius.into()),
+            )
+    };
+}
+
+macro_rules! apply_padding {
+    (
+        $this:expr,
+        $padding_override:expr,
+        $vertical_padding:expr,
+        $horizontal_padding:expr
+    ) => {
+        $this
+            .pt($padding_override.top.unwrap_or($vertical_padding.into()))
+            .pb($padding_override.bottom.unwrap_or($vertical_padding.into()))
+            .pl($padding_override.left.unwrap_or($horizontal_padding.into()))
+            .pr($padding_override
+                .right
+                .unwrap_or($horizontal_padding.into()))
+    };
 }
 
 impl RenderOnce for Input {
@@ -92,6 +228,9 @@ impl RenderOnce for Input {
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = cx.get_theme().layout.text.default_font.sizes.body.clone();
         let corner_radius = cx.get_theme().layout.corner_radii.md;
+        let corner_radii_override = self.style.corner_radii;
+        let padding_override = self.style.padding;
+        let inner_padding_override = self.style.inner_padding;
         let horizontal_padding = cx.get_theme().layout.padding.lg;
         let vertical_padding =
             cx.get_theme()
@@ -147,11 +286,10 @@ impl RenderOnce for Input {
             .id(self.id.clone())
             .w_full()
             .h_auto()
-            .pl(horizontal_padding)
-            .pr(horizontal_padding)
-            .pt(vertical_padding)
-            .pb(vertical_padding)
-            .gap(horizontal_padding)
+            .map(|this| {
+                apply_padding!(this, padding_override, vertical_padding, horizontal_padding)
+            })
+            .gap(self.style.gap.unwrap_or(horizontal_padding.into()))
             .flex()
             .flex_col()
             .with_transitions(
@@ -160,14 +298,16 @@ impl RenderOnce for Input {
                     this.opacity(opacity).child(
                         FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
                             .border_color(color)
-                            .rounded(corner_radius),
+                            .map(|this| {
+                                apply_corner_radii!(this, corner_radii_override, corner_radius)
+                            }),
                     )
                 },
             )
             .child(
                 squircle()
                     .absolute_expand()
-                    .rounded(corner_radius)
+                    .map(|this| apply_corner_radii!(this, corner_radii_override, corner_radius))
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
@@ -182,6 +322,7 @@ impl RenderOnce for Input {
                     .flex()
                     .gap(horizontal_padding)
                     .items_center()
+                    .map(|this| apply_padding!(this, inner_padding_override, px(0.), px(0.)))
                     .children(self.children.left)
                     .child(
                         self.base

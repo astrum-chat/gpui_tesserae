@@ -47,7 +47,6 @@ impl FocusRing {
 
     pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
         let rounded = rounded.into();
-
         self.corner_radii = CornersRefinement {
             top_left: Some(rounded),
             top_right: Some(rounded),

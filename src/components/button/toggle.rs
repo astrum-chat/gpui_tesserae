@@ -1,4 +1,7 @@
-use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window, prelude::FluentBuilder};
+use gpui::{
+    App, DefiniteLength, ElementId, IntoElement, Length, RenderOnce, SharedString, Window,
+    prelude::FluentBuilder,
+};
 
 use crate::{
     PositionalParentElement,
@@ -26,6 +29,21 @@ impl Toggle {
 
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {
         self.base = self.base.text(text);
+        self
+    }
+
+    pub fn no_text(mut self) -> Self {
+        self.base = self.base.no_text();
+        self
+    }
+
+    pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
+        self.base = self.base.icon(icon);
+        self
+    }
+
+    pub fn icon_size(mut self, icon_size: impl Into<Length>) -> Self {
+        self.base = self.base.icon_size(icon_size);
         self
     }
 
@@ -94,6 +112,46 @@ impl Toggle {
         self.base = self.base.justify_around();
         self
     }
+
+    pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.base = self.base.p(padding);
+        self
+    }
+
+    pub fn pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.base = self.base.pt(padding);
+        self
+    }
+
+    pub fn pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.base = self.base.pb(padding);
+        self
+    }
+
+    pub fn pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.base = self.base.pl(padding);
+        self
+    }
+
+    pub fn pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.base = self.base.pr(padding);
+        self
+    }
+
+    pub fn w(mut self, width: impl Into<Length>) -> Self {
+        self.base = self.base.w(width);
+        self
+    }
+
+    pub fn w_auto(mut self) -> Self {
+        self.base = self.base.w_auto();
+        self
+    }
+
+    pub fn w_full(mut self) -> Self {
+        self.base = self.base.w_full();
+        self
+    }
 }
 
 impl RenderOnce for Toggle {
@@ -120,6 +178,7 @@ impl PositionalParentElement for Toggle {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum ToggleVariant {
     Primary,
     Secondary,
@@ -138,7 +197,7 @@ impl GranularToggleVariant {
 
         Self {
             truthy: variant.clone(),
-            falsey: granular_variant_transparent_bg(variant),
+            falsey: falsey_granular_variant(variant),
         }
     }
 }
@@ -188,8 +247,17 @@ impl ToggleVariant {
     }
 }
 
-fn granular_variant_transparent_bg(mut variant: GranularButtonVariant) -> GranularButtonVariant {
+fn falsey_granular_variant(mut variant: GranularButtonVariant) -> GranularButtonVariant {
+    const ALPHA_MULT: f32 = 0.65;
+
     variant.bg_color = variant.bg_color.alpha(0.);
     variant.highlight_alpha = 0.;
+    variant.bg_hover_color = variant
+        .bg_hover_color
+        .alpha(variant.bg_hover_color.a * ALPHA_MULT);
+    variant.bg_focus_color = variant
+        .bg_focus_color
+        .alpha(variant.bg_focus_color.a * ALPHA_MULT);
+    variant.highlight_active_alpha = variant.highlight_active_alpha * ALPHA_MULT;
     variant
 }

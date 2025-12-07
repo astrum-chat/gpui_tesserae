@@ -209,6 +209,11 @@ impl RenderOnce for Checkbox {
                     move |_, window, cx| {
                         window.prevent_default();
 
+                        if !is_focus {
+                            // We only want to blur if something else may be focused.
+                            window.blur();
+                        }
+
                         is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
                         cx.notify(is_click_down_state_on_click.entity_id());
 

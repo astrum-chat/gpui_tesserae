@@ -1,15 +1,17 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ClickEvent, CursorStyle, ElementId, InteractiveElement, IntoElement, JustifyContent,
-    ParentElement, RenderOnce, Rgba, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    ease_out_quint, prelude::FluentBuilder, px,
+    App, ClickEvent, CursorStyle, DefiniteLength, Edges, ElementId, InteractiveElement,
+    IntoElement, JustifyContent, Length, ParentElement, RenderOnce, Rgba, SharedString,
+    SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
+    components::Icon,
     conitional_transition,
     primitives::{FocusRing, min_w0_wrapper},
     utils::{
@@ -18,34 +20,76 @@ use crate::{
     },
 };
 
+struct ButtonStyles {
+    justify_content: JustifyContent,
+    padding: Edges<Option<DefiniteLength>>,
+    width: Length,
+}
+
+impl Default for ButtonStyles {
+    fn default() -> Self {
+        Self {
+            justify_content: JustifyContent::Center,
+            padding: Edges::default(),
+            width: Length::Auto,
+        }
+    }
+}
+
 #[derive(IntoElement)]
 pub struct Button {
     id: ElementId,
-    text: SharedString,
+    text: Option<SharedString>,
+    icon: Option<SharedString>,
+    icon_size: SizeRefinement<Length>,
     variant: ButtonVariantEither,
-    justify_content: JustifyContent,
     disabled: bool,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
     children: PositionalChildren,
+    style: ButtonStyles,
 }
 
 impl Button {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
-            text: SharedString::from("Button"),
+            text: None,
+            icon: None,
+            icon_size: SizeRefinement {
+                width: Some(px(0.).into()),
+                height: Some(px(0.).into()),
+            },
             variant: ButtonVariantEither::Left(ButtonVariant::Primary),
-            justify_content: JustifyContent::Center,
             disabled: false,
             on_hover: None,
             on_click: None,
             children: PositionalChildren::default(),
+            style: ButtonStyles::default(),
         }
     }
 
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {
-        self.text = text.into();
+        self.text = Some(text.into());
+        self
+    }
+
+    pub fn no_text(mut self) -> Self {
+        self.text = None;
+        self
+    }
+
+    pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
+    pub fn icon_size(mut self, icon_size: impl Into<Length>) -> Self {
+        let icon_size = icon_size.into();
+        self.icon_size = SizeRefinement {
+            width: Some(icon_size),
+            height: Some(icon_size),
+        };
         self
     }
 
@@ -79,21 +123,21 @@ impl Button {
     /// Sets the element to justify flex items against the start of the container's main axis.
     /// [Docs](https://tailwindcss.com/docs/justify-content#start)
     pub fn justify_start(mut self) -> Self {
-        self.justify_content = JustifyContent::Start;
+        self.style.justify_content = JustifyContent::Start;
         self
     }
 
     /// Sets the element to justify flex items against the end of the container's main axis.
     /// [Docs](https://tailwindcss.com/docs/justify-content#end)
     pub fn justify_end(mut self) -> Self {
-        self.justify_content = JustifyContent::End;
+        self.style.justify_content = JustifyContent::End;
         self
     }
 
     /// Sets the element to justify flex items along the center of the container's main axis.
     /// [Docs](https://tailwindcss.com/docs/justify-content#center)
     pub fn justify_center(mut self) -> Self {
-        self.justify_content = JustifyContent::Center;
+        self.style.justify_content = JustifyContent::Center;
         self
     }
 
@@ -101,7 +145,7 @@ impl Button {
     /// such that there is an equal amount of space between each item.
     /// [Docs](https://tailwindcss.com/docs/justify-content#space-between)
     pub fn justify_between(mut self) -> Self {
-        self.justify_content = JustifyContent::SpaceBetween;
+        self.style.justify_content = JustifyContent::SpaceBetween;
         self
     }
 
@@ -109,7 +153,48 @@ impl Button {
     /// that there is an equal amount of space on each side of each item.
     /// [Docs](https://tailwindcss.com/docs/justify-content#space-around)
     pub fn justify_around(mut self) -> Self {
-        self.justify_content = JustifyContent::SpaceAround;
+        self.style.justify_content = JustifyContent::SpaceAround;
+        self
+    }
+
+    pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        let padding = padding.into();
+        self.style.padding = Edges::all(Some(padding));
+        self
+    }
+
+    pub fn pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.top = Some(padding.into());
+        self
+    }
+
+    pub fn pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.bottom = Some(padding.into());
+        self
+    }
+
+    pub fn pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.left = Some(padding.into());
+        self
+    }
+
+    pub fn pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
+        self.style.padding.right = Some(padding.into());
+        self
+    }
+
+    pub fn w(mut self, width: impl Into<Length>) -> Self {
+        self.style.width = width.into();
+        self
+    }
+
+    pub fn w_auto(mut self) -> Self {
+        self.style.width = Length::Auto;
+        self
+    }
+
+    pub fn w_full(mut self) -> Self {
+        self.style.width = relative(100.).into();
         self
     }
 
@@ -125,13 +210,30 @@ impl Button {
     }
 }
 
+macro_rules! apply_padding {
+    (
+        $this:expr,
+        $padding_override:expr,
+        $vertical_padding:expr,
+        $horizontal_padding:expr
+    ) => {
+        $this
+            .pt($padding_override.top.unwrap_or($vertical_padding.into()))
+            .pb($padding_override.bottom.unwrap_or($vertical_padding.into()))
+            .pl($padding_override.left.unwrap_or($horizontal_padding.into()))
+            .pr($padding_override
+                .right
+                .unwrap_or($horizontal_padding.into()))
+    };
+}
+
 impl RenderOnce for Button {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let variant = self.variant.into_granular(cx);
-
         let font_family = cx.get_theme().layout.text.default_font.family[0].clone();
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = cx.get_theme().layout.text.default_font.sizes.body.clone();
+        let padding_override = self.style.padding;
         let corner_radius = cx.get_theme().layout.corner_radii.md;
         let horizontal_padding = cx.get_theme().layout.padding.lg;
         let vertical_padding =
@@ -211,12 +313,11 @@ impl RenderOnce for Button {
             } else {
                 CursorStyle::PointingHand
             })
-            .w_full()
+            .w(self.style.width)
             .h_auto()
-            .pl(horizontal_padding)
-            .pr(horizontal_padding)
-            .pt(vertical_padding)
-            .pb(vertical_padding)
+            .map(|this| {
+                apply_padding!(this, padding_override, vertical_padding, horizontal_padding)
+            })
             .gap(horizontal_padding)
             .flex()
             .flex_col()
@@ -247,22 +348,30 @@ impl RenderOnce for Button {
                     .flex()
                     .gap(horizontal_padding)
                     .map(|mut this| {
-                        this.style().justify_content = Some(self.justify_content);
+                        this.style().justify_content = Some(self.style.justify_content);
                         this
                     })
                     .items_center()
                     .children(self.children.left)
-                    .child(
-                        min_w0_wrapper()
-                            .font_family(font_family.clone())
-                            .text_size(text_size)
-                            .text_ellipsis()
-                            .child(self.text),
-                    )
-                    .children(self.children.right)
-                    .with_transitions(text_color_state, |_cx, this, text_color| {
+                    .with_transitions(text_color_state, move |_cx, this, text_color| {
                         this.text_color(text_color)
-                    }),
+                            .when_some(self.icon.as_ref(), |this, icon| {
+                                this.child(Icon::new(icon).color(text_color).map(|mut this| {
+                                    this.size = self.icon_size.clone();
+                                    this
+                                }))
+                            })
+                    })
+                    .when_some(self.text, |this, text| {
+                        this.child(
+                            min_w0_wrapper()
+                                .font_family(font_family.clone())
+                                .text_size(text_size)
+                                .text_ellipsis()
+                                .child(text),
+                        )
+                    })
+                    .children(self.children.right),
             )
             .children(self.children.bottom)
             .when(!self.disabled, |this| {
@@ -284,6 +393,11 @@ impl RenderOnce for Button {
                 .on_click({
                     move |event, window, cx| {
                         window.prevent_default();
+
+                        if !is_focus {
+                            // We only want to blur if something else may be focused.
+                            window.blur();
+                        }
 
                         is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
                         cx.notify(is_click_down_state_on_click.entity_id());
@@ -333,7 +447,7 @@ pub enum ButtonVariant {
 
 impl ButtonVariant {
     pub fn as_granular(&self, cx: &mut App) -> GranularButtonVariant {
-        const HOVER_STRENGTH: f32 = 0.25;
+        const HOVER_STRENGTH: f32 = 0.15;
         const FOCUS_STRENGTH: f32 = 0.35;
 
         const SECONDARY_ALPHA: f32 = 0.1;
