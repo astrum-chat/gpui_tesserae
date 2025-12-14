@@ -182,6 +182,7 @@ impl PositionalParentElement for Toggle {
 pub enum ToggleVariant {
     Primary,
     Secondary,
+    Tertiary,
     Constructive,
     Destructive,
 }
@@ -236,6 +237,9 @@ impl ToggleVariant {
             }
             ToggleVariant::Secondary => {
                 GranularToggleVariant::from_button_variant(ButtonVariant::Secondary, cx)
+            }
+            ToggleVariant::Tertiary => {
+                GranularToggleVariant::from_button_variant(ButtonVariant::Tertiary, cx)
             }
             ToggleVariant::Constructive => {
                 GranularToggleVariant::from_button_variant(ButtonVariant::Constructive, cx)

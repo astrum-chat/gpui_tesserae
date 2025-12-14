@@ -1,115 +1,106 @@
-use gpui_tesserae_macros::IntoThemeField;
+use enum_assoc::Assoc;
+use gpui::App;
+
+use crate::theme::ThemeExt;
 
 /// An enum containing all of the available text size options.
-#[derive(IntoThemeField)]
-#[field(gpui::AbsoluteLength)]
+#[derive(Assoc)]
+#[func(pub fn resolve(&self, cx: &App) -> gpui::AbsoluteLength)]
 pub enum ThemeTextSizeKind {
-    #[theme(layout.text.default_font.sizes.heading_xl)]
+    #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_xl)]
     Xl,
-    #[theme(layout.text.default_font.sizes.heading_lg)]
+    #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_lg)]
     Lg,
-    #[theme(layout.text.default_font.sizes.heading_md)]
+    #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_md)]
     Md,
-    #[theme(layout.text.default_font.sizes.heading_sm)]
+    #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_sm)]
     Sm,
-    #[theme(layout.text.default_font.sizes.body)]
+    #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.body)]
     Body,
-    #[theme(layout.text.default_font.sizes.caption)]
+    #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.caption)]
     Caption,
 }
 
 /// An enum containing all of the available size options.
-#[derive(IntoThemeField)]
-#[field(gpui::Pixels)]
+#[derive(Assoc)]
+#[func(pub fn resolve(&self, cx: &App) -> gpui::Pixels)]
+#[func(pub fn corner_radii(&self) -> ThemeLayoutCornerRadiiKind)]
 pub enum ThemeLayoutSizeKind {
-    #[theme(layout.size.xl)]
+    #[assoc(resolve = cx.get_theme().layout.size.xl)]
+    #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Xl)]
     Xl,
-    #[theme(layout.size.lg)]
+    #[assoc(resolve = cx.get_theme().layout.size.lg)]
+    #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Lg)]
     Lg,
-    #[theme(layout.size.md)]
+    #[assoc(resolve = cx.get_theme().layout.size.md)]
+    #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Md)]
     Md,
-    #[theme(layout.size.sm)]
+    #[assoc(resolve = cx.get_theme().layout.size.sm)]
+    #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Sm)]
     Sm,
 }
 
-impl ThemeLayoutSizeKind {
-    pub fn corner_radii(&self) -> ThemeLayoutCornerRadiiKind {
-        match self {
-            Self::Xl => ThemeLayoutCornerRadiiKind::Xl,
-            Self::Lg => ThemeLayoutCornerRadiiKind::Lg,
-            Self::Md => ThemeLayoutCornerRadiiKind::Md,
-            Self::Sm => ThemeLayoutCornerRadiiKind::Sm,
-        }
-    }
-}
-
 /// An enum containing all of the available padding options.
-#[derive(IntoThemeField)]
-#[field(gpui::Pixels)]
+#[derive(Assoc)]
+#[func(pub fn resolve(&self, cx: &App) -> gpui::Pixels)]
 pub enum ThemeLayoutPaddingKind {
-    #[theme(layout.padding.xl)]
+    #[assoc(resolve = cx.get_theme().layout.padding.xl)]
     Xl,
-    #[theme(layout.padding.lg)]
+    #[assoc(resolve = cx.get_theme().layout.padding.lg)]
     Lg,
-    #[theme(layout.padding.md)]
+    #[assoc(resolve = cx.get_theme().layout.padding.md)]
     Md,
-    #[theme(layout.padding.sm)]
+    #[assoc(resolve = cx.get_theme().layout.padding.sm)]
     Sm,
 }
 
 /// An enum containing all of the available corner radius options.
-#[derive(IntoThemeField)]
-#[field(gpui::Pixels)]
+#[derive(Assoc)]
+#[func(pub fn resolve(&self, cx: &App) -> gpui::Pixels)]
 pub enum ThemeLayoutCornerRadiiKind {
-    #[theme(layout.corner_radii.xl)]
+    #[assoc(resolve = cx.get_theme().layout.corner_radii.xl)]
     Xl,
-    #[theme(layout.corner_radii.lg)]
+    #[assoc(resolve = cx.get_theme().layout.corner_radii.lg)]
     Lg,
-    #[theme(layout.corner_radii.md)]
+    #[assoc(resolve = cx.get_theme().layout.corner_radii.md)]
     Md,
-    #[theme(layout.corner_radii.sm)]
+    #[assoc(resolve = cx.get_theme().layout.corner_radii.sm)]
     Sm,
 }
 
 /// An enum containing all of the available background color options.
-#[derive(IntoThemeField)]
-#[field(gpui::Rgba)]
+#[derive(Assoc)]
+#[func(pub fn resolve(&self, cx: &App) -> gpui::Rgba)]
 pub enum ThemeBackgroundKind {
-    #[theme(variants.active().colors.background.primary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.primary)]
     Primary,
-    #[theme(variants.active().colors.background.secondary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.secondary)]
     Secondary,
-    #[theme(variants.active().colors.background.tertiary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.tertiary)]
     Tertiary,
-    #[theme(variants.active().colors.background.quaternary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.quaternary)]
     Quaternary,
-    #[theme(variants.active().colors.background.quinary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.quinary)]
     Quinary,
 }
 
 /// An enum containing all of the available background layers.
-#[derive(IntoThemeField)]
-#[field(gpui::Rgba)]
+#[derive(Assoc)]
+#[func(pub fn resolve(&self, cx: &App) -> gpui::Rgba)]
+#[func(pub fn next(&self) -> ThemeBackgroundKind)]
 pub enum ThemeLayerKind {
-    #[theme(variants.active().colors.background.primary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.primary)]
+    #[assoc(next = ThemeBackgroundKind::Secondary)]
     Primary,
-    #[theme(variants.active().colors.background.secondary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.secondary)]
+    #[assoc(next = ThemeBackgroundKind::Tertiary)]
     Secondary,
-    #[theme(variants.active().colors.background.tertiary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.tertiary)]
+    #[assoc(next = ThemeBackgroundKind::Quaternary)]
     Tertiary,
-    #[theme(variants.active().colors.background.quaternary)]
+    #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.quaternary)]
+    #[assoc(next = ThemeBackgroundKind::Quinary)]
     Quaternary,
-}
-
-impl ThemeLayerKind {
-    pub fn next(&self) -> ThemeBackgroundKind {
-        match self {
-            Self::Primary => ThemeBackgroundKind::Secondary,
-            Self::Secondary => ThemeBackgroundKind::Tertiary,
-            Self::Tertiary => ThemeBackgroundKind::Quaternary,
-            Self::Quaternary => ThemeBackgroundKind::Quinary,
-        }
-    }
 }
 
 impl Into<ThemeBackgroundKind> for ThemeLayerKind {

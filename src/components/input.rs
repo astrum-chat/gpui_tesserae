@@ -1,12 +1,11 @@
 use std::time::Duration;
 
 use gpui::{
-    App, Corners, DefiniteLength, Edges, ElementId, Entity, FocusHandle, Focusable, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
+    AbsoluteLength, App, Corners, DefiniteLength, Edges, ElementId, Entity, FocusHandle, Focusable,
+    Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
     StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
@@ -15,7 +14,7 @@ use crate::{
         FocusRing,
         input::{Input as PrimitiveInput, InputState},
     },
-    theme::ThemeLayerKind,
+    theme::{ThemeExt, ThemeLayerKind},
     utils::{
         ElementIdExt, PixelsExt, PositionalChildren, PositionalParentElement, RgbaExt,
         disabled_transition,
@@ -28,6 +27,7 @@ struct InputStyles {
     padding: Edges<Option<DefiniteLength>>,
     inner_padding: Edges<Option<DefiniteLength>>,
     corner_radii: Corners<Option<Pixels>>,
+    text_size: Option<AbsoluteLength>,
 }
 
 #[derive(IntoElement)]
@@ -170,6 +170,11 @@ impl Input {
         self.style.inner_padding.right = Some(padding.into());
         self
     }
+
+    pub fn text_size(mut self, padding: impl Into<AbsoluteLength>) -> Self {
+        self.style.text_size = Some(padding.into());
+        self
+    }
 }
 
 macro_rules! apply_corner_radii {
@@ -218,15 +223,18 @@ macro_rules! apply_padding {
 impl RenderOnce for Input {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let (primary_text_color, secondary_text_color) =
-            cx.get_theme().variants.active().colors.text.all();
-        let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
-        let destructive_accent_color = cx.get_theme().variants.active().colors.accent.destructive;
-        let background_color = *self.layer.resolve(cx.get_theme());
-        let border_color = *self.layer.next().resolve(cx.get_theme());
+            cx.get_theme().variants.active(cx).colors.text.all();
+        let primary_accent_color = cx.get_theme().variants.active(cx).colors.accent.primary;
+        let destructive_accent_color = cx.get_theme().variants.active(cx).colors.accent.destructive;
+        let background_color = self.layer.resolve(cx);
+        let border_color = self.layer.next().resolve(cx);
         let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
         let font_family = cx.get_theme().layout.text.default_font.family[0].clone();
         let line_height = cx.get_theme().layout.text.default_font.line_height;
-        let text_size = cx.get_theme().layout.text.default_font.sizes.body.clone();
+        let text_size = self
+            .style
+            .text_size
+            .unwrap_or_else(|| cx.get_theme().layout.text.default_font.sizes.body.clone());
         let corner_radius = cx.get_theme().layout.corner_radii.md;
         let corner_radii_override = self.style.corner_radii;
         let padding_override = self.style.padding;

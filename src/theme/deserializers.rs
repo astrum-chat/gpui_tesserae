@@ -2,7 +2,7 @@ use gpui::{AbsoluteLength, DefiniteLength, Pixels, SharedString, px, rems};
 use serde::{Deserialize, Deserializer, de::Error};
 use smallvec::SmallVec;
 
-use crate::ThemeVariant;
+use crate::theme::ThemeVariant;
 
 pub fn de_string_or_non_empty_list<'de, D>(
     deserializer: D,

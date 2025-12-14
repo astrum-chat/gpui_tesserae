@@ -5,13 +5,12 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
     ElementIdExt, conitional_transition,
     primitives::FocusRing,
-    theme::ThemeLayerKind,
+    theme::{ThemeExt, ThemeLayerKind},
     utils::{RgbaExt, SquircleExt, checked_transition, disabled_transition},
 };
 
@@ -79,10 +78,10 @@ impl RenderOnce for Switch {
             padding.to_f64() as f32,
             (width - inner_size - padding).to_f64() as f32,
         );
-        let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
-        let primary_text_color = cx.get_theme().variants.active().colors.text.primary;
-        let background_color = *self.layer.resolve(cx.get_theme());
-        let border_color = *self.layer.next().resolve(cx.get_theme());
+        let primary_accent_color = cx.get_theme().variants.active(cx).colors.accent.primary;
+        let primary_text_color = cx.get_theme().variants.active(cx).colors.text.primary;
+        let background_color = self.layer.resolve(cx);
+        let border_color = self.layer.next().resolve(cx);
         let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
         let border_click_down_color = border_color.apply_delta(&primary_text_color, 0.16);
 

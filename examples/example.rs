@@ -20,6 +20,8 @@ struct Root {
 
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        gpui_tesserae::init_for_window(window, cx);
+
         let theme = cx.get_theme();
 
         div()
@@ -27,7 +29,7 @@ impl Render for Root {
             .track_focus(&self.focus_handle)
             .size_full()
             .text_size(theme.layout.text.default_font.sizes.body)
-            .bg(theme.variants.active().colors.background.primary)
+            .bg(theme.variants.active(cx).colors.background.primary)
             .flex()
             .flex_col()
             .justify_center()

@@ -1,19 +1,18 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, CornersRefinement, ElementId, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Pixels, RenderOnce, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
-    relative,
+    AnyElement, CornersRefinement, ElementId, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, ParentElement, Pixels, RenderOnce, Styled, div, ease_out_quint,
+    prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::TransitionExt;
 use smallvec::SmallVec;
 
 use crate::{
     ElementIdExt, conitional_transition,
     primitives::{FocusRing, min_w0_wrapper},
-    theme::ThemeLayerKind,
+    theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,
 };
 
@@ -61,15 +60,15 @@ impl ChatBubble {
 
 impl RenderOnce for ChatBubble {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
-        let background_color = *self.layer.resolve(cx.get_theme());
-        let border_color = *self.layer.next().resolve(cx.get_theme());
-        let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
-        let secondary_text_color = cx.get_theme().variants.active().colors.text.secondary;
+        let background_color = self.layer.resolve(cx);
+        let border_color = self.layer.next().resolve(cx);
+        let primary_accent_color = cx.get_theme().variants.active(cx).colors.accent.primary;
+        let secondary_text_color = cx.get_theme().variants.active(cx).colors.text.secondary;
         let corner_radius = cx.get_theme().layout.corner_radii.xl;
         let anchor_corner_radius = cx.get_theme().layout.corner_radii.md;
         let corner_radii = calc_corner_radii(&self.anchor, corner_radius, anchor_corner_radius);
         let line_height = cx.get_theme().layout.text.default_font.line_height;
-        let text_size = cx.get_theme().layout.text.default_font.sizes.body;
+        let text_size = cx.get_theme().layout.text.default_font.sizes.heading_sm;
         let horizontal_padding = cx.get_theme().layout.padding.xl;
         let vertical_padding =
             cx.get_theme()
@@ -136,6 +135,7 @@ impl RenderOnce for ChatBubble {
                     .font_family("Geist")
                     .text_color(secondary_text_color)
                     .text_size(text_size)
+                    .font_weight(FontWeight::NORMAL)
                     .children(self.children),
             )
     }

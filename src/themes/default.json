@@ -5,14 +5,14 @@
             "base_size": "16px",
             "default_font": {
                 "family": "Geist",
-                "line_height": "161.8034%",
+                "line_height": "160.8034%",
                 "sizes": {
-                    "heading_xl": "1.438rem",
-                    "heading_lg": "1.313rem",
-                    "heading_md": "1.188rem",
-                    "heading_sm": "1.063rem",
-                    "body": "0.938rem",
-                    "caption": "0.813rem"
+                    "heading_xl": "1.375rem",
+                    "heading_lg": "1.25rem",
+                    "heading_md": "1.125rem",
+                    "heading_sm": "1rem",
+                    "body": "0.875rem",
+                    "caption": "0.75rem"
                 },
                 "weights": {
                     "heading_xl": 600,
@@ -46,18 +46,18 @@
         },
         "corner_radii": {
             "xl": "22px",
-            "lg": "12px",
+            "lg": "13px",
             "md": "8px",
             "sm": "4px"
         },
         "size": {
-            "xl": "44px",
+            "xl": "42px",
             "lg": "36px",
             "md": "16px",
             "sm": "6px"
         },
         "padding": {
-            "xl": "15px",
+            "xl": "14px",
             "lg": "11px",
             "md": "4px",
             "sm": "2px"
@@ -82,7 +82,7 @@
                 },
                 "text": {
                     "primary": "#E8E4FF",
-                    "secondary": "#C1BCDE"
+                    "secondary": "#C7C2E3"
                 }
             }
         }

@@ -7,13 +7,13 @@ use gpui::{
     prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{TransitionExt, TransitionGoal};
 
 use crate::{
     components::Icon,
     conitional_transition,
     primitives::{FocusRing, min_w0_wrapper},
+    theme::ThemeExt,
     utils::{
         ElementIdExt, PixelsExt, PositionalChildren, PositionalParentElement, RgbaExt, SquircleExt,
         disabled_transition,
@@ -439,6 +439,8 @@ pub enum ButtonVariant {
     Primary,
     Secondary,
     SecondaryGhost,
+    Tertiary,
+    TertiaryGhost,
     Constructive,
     ConstructiveGhost,
     Destructive,
@@ -452,7 +454,7 @@ impl ButtonVariant {
 
         const SECONDARY_ALPHA: f32 = 0.1;
 
-        let colors = &cx.get_theme().variants.active().colors;
+        let colors = &cx.get_theme().variants.active(cx).colors;
         let primary_background = colors.background.primary;
 
         fn secondary_variant(
@@ -503,10 +505,18 @@ impl ButtonVariant {
             },
 
             ButtonVariant::Secondary => {
-                secondary_variant(&primary_background, &colors.text.secondary)
+                secondary_variant(&primary_background, &colors.text.primary)
             }
 
             ButtonVariant::SecondaryGhost => {
+                ghost_variant(&primary_background, &colors.text.primary)
+            }
+
+            ButtonVariant::Tertiary => {
+                secondary_variant(&primary_background, &colors.text.secondary)
+            }
+
+            ButtonVariant::TertiaryGhost => {
                 ghost_variant(&primary_background, &colors.text.secondary)
             }
 

@@ -5,10 +5,9 @@ use gpui::{
     ease_out_quint, prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_tesserae_theme::ThemeExt;
 use gpui_transitions::{Transition, TransitionExt};
 
-use crate::utils::RgbaExt;
+use crate::{theme::ThemeExt, utils::RgbaExt};
 
 const SIZE_SCALE_FACTOR: f32 = 8.;
 
@@ -81,7 +80,7 @@ impl RenderOnce for FocusRing {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let border_color = self
             .border_color
-            .unwrap_or_else(|| cx.get_theme().variants.active().colors.accent.primary);
+            .unwrap_or_else(|| cx.get_theme().variants.active(cx).colors.accent.primary);
 
         let is_focused = self.focus_handle.is_focused(window) as u8 as f32;
 

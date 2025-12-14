@@ -3,7 +3,7 @@ use std::{
     sync::LazyLock,
 };
 
-use gpui::{AbsoluteLength, DefiniteLength, Global, Pixels, Rgba, SharedString};
+use gpui::{AbsoluteLength, App, DefiniteLength, Global, Pixels, Rgba, SharedString};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
@@ -75,7 +75,8 @@ pub struct ThemeLayout {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemeText {
-    pub base_size: Option<SharedString>,
+    #[serde(deserialize_with = "de_pixels")]
+    pub base_size: Pixels,
     pub default_font: ThemeFont,
     pub mono_font: ThemeFont,
 }
@@ -157,16 +158,17 @@ pub struct ThemePadding {
 pub struct ThemeVariants {
     #[serde(deserialize_with = "de_variants")]
     pub variants: SmallVec<[ThemeVariant; 2]>,
-
-    #[serde(skip)]
-    active: usize,
 }
 
 impl ThemeVariants {
-    pub fn active(&self) -> &ThemeVariant {
-        &self.variants[self.active]
+    pub fn active(&self, cx: &App) -> &ThemeVariant {
+        &self.variants[cx.global::<ActiveVariantId>().0]
     }
 }
+
+pub struct ActiveVariantId(pub usize);
+
+impl gpui::Global for ActiveVariantId {}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemeVariant {

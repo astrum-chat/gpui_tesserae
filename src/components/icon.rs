@@ -2,7 +2,8 @@ use gpui::{
     Hsla, IntoElement, Length, RenderOnce, SharedString, SizeRefinement, Styled,
     prelude::FluentBuilder, px, svg,
 };
-use gpui_tesserae_theme::ThemeExt;
+
+use crate::theme::ThemeExt;
 
 #[derive(IntoElement)]
 pub struct Icon {
@@ -37,7 +38,7 @@ impl Icon {
 
 impl RenderOnce for Icon {
     fn render(self, _window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
-        let primary_text_color = cx.get_theme().variants.active().colors.text.primary;
+        let primary_text_color = cx.get_theme().variants.active(cx).colors.text.primary;
         let size = self.size;
         let width = size.width.unwrap_or(px(14.).into());
         let height = size.height.unwrap_or(px(14.).into());

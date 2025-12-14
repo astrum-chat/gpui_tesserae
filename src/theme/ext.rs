@@ -1,6 +1,6 @@
 use gpui::App;
 
-use crate::Theme;
+use crate::theme::Theme;
 
 pub trait ThemeExt {
     /// Changes the theme.

@@ -57,6 +57,10 @@ impl InputState {
             .unwrap_or_else(|| SharedString::new_static(""))
     }
 
+    pub fn clear(&mut self) -> Option<SharedString> {
+        self.value.take()
+    }
+
     pub fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);

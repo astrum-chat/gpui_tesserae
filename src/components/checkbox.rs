@@ -78,10 +78,10 @@ impl RenderOnce for Checkbox {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
         let size = cx.get_theme().layout.size.md;
         let corner_radius = cx.get_theme().layout.corner_radii.sm;
-        let primary_accent_color = cx.get_theme().variants.active().colors.accent.primary;
-        let primary_text_color = cx.get_theme().variants.active().colors.text.primary;
-        let background_color = *self.layer.resolve(cx.get_theme());
-        let border_color = *self.layer.next().resolve(cx.get_theme());
+        let primary_accent_color = cx.get_theme().variants.active(cx).colors.accent.primary;
+        let primary_text_color = cx.get_theme().variants.active(cx).colors.text.primary;
+        let background_color = self.layer.resolve(cx);
+        let border_color = self.layer.next().resolve(cx);
         let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
         let border_click_down_color = border_color.apply_delta(&primary_text_color, 0.16);
 
