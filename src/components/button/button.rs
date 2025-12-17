@@ -353,15 +353,6 @@ impl RenderOnce for Button {
                     })
                     .items_center()
                     .children(self.children.left)
-                    .with_transitions(text_color_state, move |_cx, this, text_color| {
-                        this.text_color(text_color)
-                            .when_some(self.icon.as_ref(), |this, icon| {
-                                this.child(Icon::new(icon).color(text_color).map(|mut this| {
-                                    this.size = self.icon_size.clone();
-                                    this
-                                }))
-                            })
-                    })
                     .when_some(self.text, |this, text| {
                         this.child(
                             min_w0_wrapper()
@@ -370,6 +361,15 @@ impl RenderOnce for Button {
                                 .text_ellipsis()
                                 .child(text),
                         )
+                    })
+                    .with_transitions(text_color_state, move |_cx, this, text_color| {
+                        this.text_color(text_color)
+                            .when_some(self.icon.as_ref(), |this, icon| {
+                                this.child(Icon::new(icon).color(text_color).map(|mut this| {
+                                    this.size = self.icon_size.clone();
+                                    this
+                                }))
+                            })
                     })
                     .children(self.children.right),
             )

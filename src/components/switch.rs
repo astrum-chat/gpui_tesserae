@@ -71,7 +71,7 @@ impl RenderOnce for Switch {
         const INNER_SIZE_FOCUS_MULT: f32 = 1.25;
 
         let inner_size = cx.get_theme().layout.size.md;
-        let padding = px(4.);
+        let padding = cx.get_theme().layout.padding.md;
         let width = (inner_size * 2) + (padding * 2);
         let height = inner_size + (padding * 2);
         let (start_offset, end_offset) = (

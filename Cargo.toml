@@ -1,6 +1,6 @@
 [package]
 name = "gpui_tesserae"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
@@ -9,7 +9,7 @@ edition = "2024"
 gpui_transitions = { path = "./crates/gpui_transitions" }
 
 gpui = "0.2.2"
-gpui_squircle = "1.0.0"
+gpui_squircle = "1.0.1"
 smallvec = { version = "1.15.1", features = ["serde"] }
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }

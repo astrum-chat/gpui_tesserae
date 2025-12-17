@@ -45,8 +45,8 @@
             }
         },
         "corner_radii": {
-            "xl": "22px",
-            "lg": "13px",
+            "xl": "21px",
+            "lg": "12px",
             "md": "8px",
             "sm": "4px"
         },

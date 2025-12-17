@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba,
-    ease_out_quint, prelude::*, px,
+    CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba, div,
+    ease_out_quint, prelude::*, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::{Transition, TransitionExt};
@@ -100,14 +100,10 @@ impl RenderOnce for FocusRing {
 
         squircle()
             .absolute()
-            .top_0()
-            .bottom_0()
-            .left_0()
-            .right_0()
             .border(px(3.))
             .border_outside()
             .with_transitions(ring_progress_state, move |_cx, this, delta| {
-                let size_factor = (1. - delta) * SIZE_SCALE_FACTOR;
+                let size_factor = ((1. - delta) * SIZE_SCALE_FACTOR).floor();
 
                 this.inset(px(-size_factor))
                     .border_color(border_color.alpha(border_color.a * delta * 0.3))

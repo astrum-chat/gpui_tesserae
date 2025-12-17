@@ -69,7 +69,7 @@ impl RenderOnce for ChatBubble {
         let corner_radii = calc_corner_radii(&self.anchor, corner_radius, anchor_corner_radius);
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = cx.get_theme().layout.text.default_font.sizes.heading_sm;
-        let horizontal_padding = cx.get_theme().layout.padding.xl;
+        let horizontal_padding = cx.get_theme().layout.padding.xl + px(2.); // Adding 2px here makes it look less cramped.
         let vertical_padding =
             cx.get_theme()
                 .layout
