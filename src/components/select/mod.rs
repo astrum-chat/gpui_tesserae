@@ -120,6 +120,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
 
         div()
             .id(self.id.clone())
+            .track_focus(&focus_handle)
             .cursor_pointer()
             .w_full()
             .h_auto()

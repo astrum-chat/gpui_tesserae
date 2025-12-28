@@ -1,4 +1,4 @@
-use gpui::{AnyElement, App, IntoElement, SharedString, Window};
+use gpui::{App, IntoElement, SharedString, Window};
 
 pub trait SelectItem {
     type Value;
@@ -8,7 +8,7 @@ pub trait SelectItem {
     fn value(&self) -> &Self::Value;
 
     #[allow(unused)]
-    fn display(&self, window: &mut Window, cx: &App) -> AnyElement {
+    fn display(&self, window: &mut Window, cx: &App) -> impl IntoElement {
         self.name().into_any_element()
     }
 }
