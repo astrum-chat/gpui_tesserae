@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use gpui::{
     ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
+    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px, radians,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -104,17 +104,19 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
         )
         .with_easing(ease_out_quint());
 
-        let menu_opacity_transition = conitional_transition!(
-            self.id.with_suffix("state:transition:menu_opacity"),
+        let menu_visible_transition = conitional_transition!(
+            self.id.with_suffix("state:transition:menu_visible"),
             window,
             cx,
-            Duration::from_millis(250),
+            Duration::from_millis(350),
             {
                 is_focus => 1.,
                 _ => 0.
             }
         )
         .with_easing(ease_out_quint());
+
+        let menu_visible_delta = *menu_visible_transition.evaluate(window, cx);
 
         div()
             .id(self.id.clone())
@@ -178,26 +180,30 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                     .child(
                         Icon::new(TesseraeIconKind::ArrowDown)
                             .size(px(11.))
-                            .color(secondary_text_color),
+                            .color(secondary_text_color)
+                            .map(|this| {
+                                let rotation = radians(
+                                    ((1. - menu_visible_delta) * 180.) * std::f32::consts::PI
+                                        / 180.0,
+                                );
+
+                                this.rotate(rotation)
+                            }),
                     ),
             )
-            .map(|this| {
-                let menu_opacity = *menu_opacity_transition.evaluate(window, cx);
-
-                this.when(menu_opacity != 0., |this| {
-                    this.child(
-                        div()
-                            .w_full()
-                            .absolute()
-                            .top_full()
-                            .left_0()
-                            .pt(cx.get_theme().layout.padding.md)
-                            .child(
-                                SelectMenu::new(self.id.with_suffix("menu"), self.state.clone())
-                                    .opacity(menu_opacity),
-                            ),
-                    )
-                })
+            .when(menu_visible_delta != 0., |this| {
+                this.child(
+                    div()
+                        .w_full()
+                        .absolute()
+                        .top_full()
+                        .left_0()
+                        .pt(cx.get_theme().layout.padding.md)
+                        .child(
+                            SelectMenu::new(self.id.with_suffix("menu"), self.state.clone())
+                                .opacity(menu_visible_delta),
+                        ),
+                )
             })
             .when(!is_disabled, |this| {
                 this.on_hover(move |hover, _window, cx| {
