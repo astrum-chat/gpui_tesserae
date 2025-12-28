@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use gpui::{App, ElementId, Window, ease_out_quint};
-use gpui_transitions::Transition;
+use gpui_transitions::{Transition, WindowUseTransition};
 
 use crate::ElementIdExt;
 
@@ -10,18 +10,19 @@ macro_rules! conitional_transition {
     (
         $id:expr, $window:expr, $cx:expr, $duration:expr, $($rest:tt)+
     ) => {{
+        use gpui_transitions::{WindowUseTransition};
+
         let value = conitional_transition!(@condition [ $($rest)+ ]);
 
-        let transition = gpui_transitions::Transition::new(
+        let transition = $window.use_keyed_transition(
             $id,
-            $window,
             $cx,
             $duration,
             |_window, _cx| value,
         )
         .with_easing(gpui::ease_out_quint());
 
-        if transition.read($cx) != &value {
+        if transition.read_goal($cx) != &value {
             transition.update($cx, |this, _cx| *this = value);
             $cx.notify(transition.entity_id());
         }
@@ -90,19 +91,21 @@ pub fn checked_transition(
 ) -> Transition<f32> {
     let is_checked_float = is_checked as u8 as f32;
 
-    let checked_state = Transition::new(
-        base_id.into().with_suffix("state:checked"),
-        window,
-        cx,
-        duration,
-        |_cx, _window| is_checked_float,
-    )
-    .with_easing(ease_out_quint());
+    let checked_transition = window
+        .use_keyed_transition(
+            base_id.into().with_suffix("state:checked"),
+            cx,
+            duration,
+            |_cx, _window| is_checked_float,
+        )
+        .with_easing(ease_out_quint());
 
-    let checked_changed = checked_state.set(cx, is_checked_float);
-    if checked_changed {
-        cx.notify(checked_state.entity_id());
-    }
+    checked_transition.update(cx, |this, cx| {
+        if *this != is_checked_float {
+            *this = is_checked_float;
+            cx.notify();
+        }
+    });
 
-    checked_state
+    checked_transition
 }

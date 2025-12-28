@@ -18,6 +18,8 @@ struct Root {
     switch_checked: bool,
 }
 
+actions!(window, [TabNext, TabPrev]);
+
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         gpui_tesserae::init_for_window(window, cx);
@@ -75,10 +77,9 @@ impl Render for Root {
     }
 }
 
-actions!(window, [Quit, Blur, TabNext, TabPrev]);
-
 fn main() {
     Application::new()
+        .with_quit_mode(gpui::QuitMode::LastWindowClosed)
         .with_assets(assets![TesseraeAssets])
         .run(|cx: &mut App| {
             gpui_tesserae::init(cx);
@@ -92,63 +93,57 @@ fn main() {
 
             let bounds = Bounds::centered(None, size(px(620.), px(800.)), cx);
 
-            let window = cx
-                .open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(bounds)),
-                        titlebar: Some(TitlebarOptions {
-                            appears_transparent: true,
-                            traffic_light_position: Some(point(px(10.), px(10.))),
-                            ..Default::default()
-                        }),
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    titlebar: Some(TitlebarOptions {
+                        appears_transparent: true,
+                        traffic_light_position: Some(point(px(10.), px(10.))),
                         ..Default::default()
-                    },
-                    |_window, cx| {
-                        cx.new(|cx| Root {
-                            focus_handle: cx.focus_handle(),
-                            checkbox_checked: false,
-                            switch_checked: false,
-                        })
-                    },
-                )
-                .unwrap();
+                    }),
+                    ..Default::default()
+                },
+                |_window, cx| {
+                    cx.new(|cx| Root {
+                        focus_handle: cx.focus_handle(),
+                        checkbox_checked: false,
+                        switch_checked: false,
+                    })
+                },
+            )
+            .unwrap();
 
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-
-            cx.on_action(|_: &Quit, cx| quit(cx));
-
-            cx.on_window_closed(move |cx| {
-                if cx.windows().len() == 0 {
-                    quit(cx)
-                }
-            })
-            .detach();
-
-            cx.on_action(move |_: &TabNext, cx| {
-                cx.defer(move |cx| {
-                    let _ = window.update(cx, move |_, window, _cx| {
-                        window.focus_next();
-                    });
-                })
-            });
-
-            cx.on_action(move |_: &TabPrev, cx| {
-                cx.defer(move |cx| {
-                    let _ = window.update(cx, move |_, window, _cx| {
-                        window.focus_prev();
-                    });
-                })
-            });
-
-            cx.bind_keys([KeyBinding::new("tab", TabNext, None)]);
-            cx.bind_keys([KeyBinding::new("shift-tab", TabPrev, None)]);
+            init_tab_indexing_actions(cx);
 
             cx.activate(true);
         });
 }
 
-#[inline(always)]
-fn quit(cx: &mut App) {
-    cx.quit();
-    std::process::exit(0);
+fn init_tab_indexing_actions(cx: &mut App) {
+    cx.on_action(move |_: &TabNext, cx| {
+        cx.defer(move |cx| {
+            let Some(window) = cx.active_window() else {
+                return;
+            };
+
+            let _ = window.update(cx, move |_, window, cx| {
+                window.focus_next(cx);
+            });
+        })
+    });
+
+    cx.on_action(move |_: &TabPrev, cx| {
+        cx.defer(move |cx| {
+            let Some(window) = cx.active_window() else {
+                return;
+            };
+
+            let _ = window.update(cx, move |_, window, cx| {
+                window.focus_prev(cx);
+            });
+        })
+    });
+
+    cx.bind_keys([KeyBinding::new("tab", TabNext, None)]);
+    cx.bind_keys([KeyBinding::new("shift-tab", TabPrev, None)]);
 }

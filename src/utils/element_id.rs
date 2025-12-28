@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui::{ElementId, SharedString};
 
 pub trait ElementIdExt {
@@ -6,6 +8,6 @@ pub trait ElementIdExt {
 
 impl ElementIdExt for ElementId {
     fn with_suffix(&self, suffix: impl Into<SharedString>) -> ElementId {
-        ElementId::NamedChild(Box::new(self.clone()), suffix.into())
+        ElementId::NamedChild(Arc::new(self.clone()), suffix.into())
     }
 }

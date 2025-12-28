@@ -5,7 +5,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_transitions::{TransitionExt, TransitionGoal};
+use gpui_transitions::Lerp;
 
 use crate::{
     ElementIdExt, conitional_transition,
@@ -82,10 +82,10 @@ impl RenderOnce for Switch {
         let primary_text_color = cx.get_theme().variants.active(cx).colors.text.primary;
         let background_color = self.layer.resolve(cx);
         let border_color = self.layer.next().resolve(cx);
-        let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
-        let border_click_down_color = border_color.apply_delta(&primary_text_color, 0.16);
+        let border_hover_color = border_color.lerp(&primary_text_color, 0.07);
+        let border_click_down_color = border_color.lerp(&primary_text_color, 0.16);
 
-        let checked_state = checked_transition(
+        let checked_transition = checked_transition(
             self.id.clone(),
             window,
             cx,
@@ -116,14 +116,13 @@ impl RenderOnce for Switch {
             .clone();
         let is_focus = focus_handle.is_focused(window);
 
-        let disabled_transition_state =
-            disabled_transition(self.id.clone(), window, cx, is_disabled);
+        let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);
 
         if is_focus && is_disabled {
             window.blur();
         }
 
-        let border_color_transition_state = conitional_transition!(
+        let border_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:border_color"),
             window,
             cx,
@@ -138,7 +137,7 @@ impl RenderOnce for Switch {
         .with_easing(ease_out_quint());
 
         // We want the width of the inner circle to expand slightly when focused.
-        let inner_width_state = conitional_transition!(
+        let inner_width_transition = conitional_transition!(
             self.id.with_suffix("state:transition:inner_width"),
             window,
             cx,
@@ -161,9 +160,7 @@ impl RenderOnce for Switch {
             .min_w(width)
             .h(height)
             .min_h(height)
-            .with_transitions(disabled_transition_state, move |_cx, this, opacity| {
-                this.opacity(opacity)
-            })
+            .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
                     .rounded(px(100.)),
@@ -175,37 +172,35 @@ impl RenderOnce for Switch {
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
-                    .with_transitions(border_color_transition_state, move |_cx, this, color| {
-                        this.border_color(color)
-                    }),
+                    .border_color(*border_color_transition.evaluate(window, cx)),
             )
-            .with_transitions(
-                (checked_state, inner_width_state),
-                move |_cx, this, (delta, inner_width)| {
-                    let offset = remap(delta, 0., 1., start_offset, end_offset);
+            .map(|this| {
+                let checked_delta = *checked_transition.evaluate(window, cx);
+                let inner_width = *inner_width_transition.evaluate(window, cx);
 
-                    let width_diff = (inner_width - inner_size) * delta;
+                let offset = remap(checked_delta, 0., 1., start_offset, end_offset);
 
-                    this.child(
-                        squircle()
-                            .absolute_expand()
-                            .bg(primary_accent_color.alpha(delta))
-                            .rounded(px(100.))
-                            .border_inside()
-                            .border(px(1.))
-                            .border_highlight_color(0.15 * delta),
-                    )
-                    .child(
-                        div()
-                            .w(inner_width)
-                            .h(inner_size)
-                            .top(padding)
-                            .bg(primary_text_color)
-                            .rounded(px(100.))
-                            .left(px(offset) - width_diff),
-                    )
-                },
-            )
+                let width_diff = (inner_width - inner_size) * checked_delta;
+
+                this.child(
+                    squircle()
+                        .absolute_expand()
+                        .bg(primary_accent_color.alpha(checked_delta))
+                        .rounded(px(100.))
+                        .border_inside()
+                        .border(px(1.))
+                        .border_highlight(0.15 * checked_delta),
+                )
+                .child(
+                    div()
+                        .w(inner_width)
+                        .h(inner_size)
+                        .top(padding)
+                        .bg(primary_text_color)
+                        .rounded(px(100.))
+                        .left(px(offset) - width_diff),
+                )
+            })
             .when(!is_disabled, |this| {
                 let is_hover_state_on_hover = is_hover_state.clone();
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();

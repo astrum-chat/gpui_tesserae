@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use gpui::{
-    CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba, div,
-    ease_out_quint, prelude::*, px, relative,
+    CornersRefinement, ElementId, FocusHandle, IntoElement, Pixels, RenderOnce, Rgba,
+    ease_out_quint, prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_transitions::{Transition, TransitionExt};
+use gpui_transitions::WindowUseTransition;
 
 use crate::{theme::ThemeExt, utils::RgbaExt};
 
@@ -84,29 +84,32 @@ impl RenderOnce for FocusRing {
 
         let is_focused = self.focus_handle.is_focused(window) as u8 as f32;
 
-        let ring_progress_state = Transition::new(
-            self.id.clone(),
-            window,
-            cx,
-            Duration::from_millis(365),
-            |_window, _cx| is_focused,
-        )
-        .with_easing(ease_out_quint());
+        let ring_progress_state = window
+            .use_keyed_transition(
+                self.id.clone(),
+                cx,
+                Duration::from_millis(365),
+                |_window, _cx| is_focused,
+            )
+            .with_easing(ease_out_quint());
 
-        let changed = ring_progress_state.set(cx, is_focused);
-        if changed {
-            cx.notify(ring_progress_state.entity_id());
-        }
+        ring_progress_state.update(cx, |this, cx| {
+            if *this != is_focused {
+                *this = is_focused;
+                cx.notify();
+            }
+        });
 
         squircle()
             .absolute()
             .border(px(3.))
             .border_outside()
-            .with_transitions(ring_progress_state, move |_cx, this, delta| {
-                let size_factor = ((1. - delta) * SIZE_SCALE_FACTOR).floor();
+            .map(|this| {
+                let ring_progress_delta = *ring_progress_state.evaluate(window, cx);
+                let size_factor = ((1. - ring_progress_delta) * SIZE_SCALE_FACTOR).floor();
 
                 this.inset(px(-size_factor))
-                    .border_color(border_color.alpha(border_color.a * delta * 0.3))
+                    .border_color(border_color.alpha(border_color.a * ring_progress_delta * 0.3))
                     .map(|mut this| {
                         this.outer_style().corner_radii =
                             add_to_corner_radii(&self.corner_radii, px(size_factor + 1.));

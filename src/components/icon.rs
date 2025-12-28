@@ -1,6 +1,6 @@
 use gpui::{
-    Hsla, IntoElement, Length, RenderOnce, SharedString, SizeRefinement, Styled,
-    prelude::FluentBuilder, px, svg,
+    Hsla, IntoElement, Length, Radians, RenderOnce, SharedString, SizeRefinement, Styled,
+    Transformation, prelude::FluentBuilder, px, svg,
 };
 
 use crate::theme::ThemeExt;
@@ -9,6 +9,7 @@ use crate::theme::ThemeExt;
 pub struct Icon {
     path: SharedString,
     pub(crate) size: SizeRefinement<Length>,
+    rotate: Radians,
     color: Option<Hsla>,
 }
 
@@ -17,6 +18,7 @@ impl Icon {
         Self {
             path: path.into(),
             size: SizeRefinement::default(),
+            rotate: Radians(0.),
             color: None,
         }
     }
@@ -32,6 +34,11 @@ impl Icon {
 
     pub fn color(mut self, color: impl Into<Hsla>) -> Self {
         self.color = Some(color.into());
+        self
+    }
+
+    pub fn rotate(mut self, rotate: impl Into<Radians>) -> Self {
+        self.rotate = rotate.into();
         self
     }
 }
@@ -50,6 +57,7 @@ impl RenderOnce for Icon {
             .min_w(width)
             .h(height)
             .min_h(height)
+            .with_transformation(Transformation::rotate(self.rotate))
             .when_some(self.color, |this, color| this.text_color(color))
     }
 }

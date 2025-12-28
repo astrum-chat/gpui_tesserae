@@ -59,16 +59,6 @@ impl Input {
         self
     }
 
-    pub fn initial_value(self, text: impl Into<SharedString>, cx: &mut App) -> Self {
-        self.state.update(cx, |this, _| {
-            if this.value.is_some() {
-                return;
-            };
-            this.value = Some(text.into());
-        });
-        self
-    }
-
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.state.read(cx).value()
     }
@@ -250,8 +240,15 @@ impl Element for TextElement {
         }
 
         let line = prepaint.line.take().unwrap();
-        line.paint(bounds.origin, self.line_height, window, cx)
-            .unwrap();
+        line.paint(
+            bounds.origin,
+            self.line_height,
+            gpui::TextAlign::Left,
+            None,
+            window,
+            cx,
+        )
+        .unwrap();
 
         if focus_handle.is_focused(window)
             && let Some(cursor) = prepaint.cursor.take()
@@ -270,23 +267,23 @@ impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.read(cx);
 
-        let (text_color, line_height) = match &self.style.text {
-            Some(text_style) => (
-                text_style.color.unwrap_or_else(|| rgb(0xE8E4FF).into()),
-                text_style
-                    .line_height
-                    .map(|this| {
-                        this.to_pixels(
-                            text_style
-                                .font_size
-                                .unwrap_or_else(|| window.text_style().font_size),
-                            window.rem_size(),
-                        )
-                    })
-                    .unwrap_or_else(|| window.line_height()),
-            ),
-            None => (rgb(0xE8E4FF).into(), window.line_height()),
-        };
+        let text_style = &self.style.text;
+        let text_color = self
+            .style
+            .text
+            .color
+            .unwrap_or_else(|| rgb(0xE8E4FF).into());
+        let line_height = text_style
+            .line_height
+            .map(|this| {
+                this.to_pixels(
+                    text_style
+                        .font_size
+                        .unwrap_or_else(|| window.text_style().font_size),
+                    window.rem_size(),
+                )
+            })
+            .unwrap_or_else(|| window.line_height());
 
         div()
             .map(|mut this| {

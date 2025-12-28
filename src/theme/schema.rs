@@ -56,7 +56,7 @@ impl AsRef<Theme> for LazyLockTheme {
 }
 
 impl Theme {
-    generate_builtin_themes!(["../themes/default.json", DEFAULT]);
+    generate_builtin_themes!(["../../themes/default.json", DEFAULT]);
 
     fn from_string<S: AsRef<str>>(str: S) -> Result<Theme, serde_json::Error> {
         serde_json::from_str(str.as_ref())

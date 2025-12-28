@@ -1,6 +1,8 @@
 use gpui::{AnyElement, StyleRefinement, div, prelude::*};
 use smallvec::SmallVec;
 
+use crate::theme::ThemeExt;
+
 #[derive(IntoElement)]
 pub struct MinW0Wrapper {
     children: SmallVec<[AnyElement; 2]>,
@@ -17,10 +19,32 @@ impl MinW0Wrapper {
 }
 
 impl RenderOnce for MinW0Wrapper {
-    fn render(self, _window: &mut gpui::Window, _cx: &mut gpui::App) -> impl IntoElement {
+    fn render(self, _window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
+        let mut style = self.style;
+
+        style
+            .text
+            .font_family
+            .get_or_insert_with(|| cx.get_theme().layout.text.default_font.family[0].clone());
+
+        style
+            .text
+            .font_size
+            .get_or_insert_with(|| cx.get_theme().layout.text.default_font.sizes.body);
+
+        style.text.color.get_or_insert_with(|| {
+            cx.get_theme()
+                .variants
+                .active(cx)
+                .colors
+                .text
+                .secondary
+                .into()
+        });
+
         div()
             .map(|mut this| {
-                this.style().refine(&self.style);
+                this.style().refine(&style);
                 this
             })
             .children(self.children)

@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ClickEvent, CursorStyle, DefiniteLength, Edges, ElementId, InteractiveElement,
-    IntoElement, JustifyContent, Length, ParentElement, RenderOnce, Rgba, SharedString,
-    SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    App, ClickEvent, Corners, CursorStyle, DefiniteLength, Edges, ElementId, InteractiveElement,
+    IntoElement, JustifyContent, Length, ParentElement, Pixels, Radians, RenderOnce, Rgba,
+    SharedString, SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
     prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_transitions::{TransitionExt, TransitionGoal};
+use gpui_transitions::Lerp;
 
 use crate::{
     components::Icon,
@@ -23,6 +23,8 @@ use crate::{
 struct ButtonStyles {
     justify_content: JustifyContent,
     padding: Edges<Option<DefiniteLength>>,
+    corner_radii: Corners<Option<Pixels>>,
+    icon_rotate: Radians,
     width: Length,
 }
 
@@ -31,6 +33,8 @@ impl Default for ButtonStyles {
         Self {
             justify_content: JustifyContent::Center,
             padding: Edges::default(),
+            corner_radii: Corners::default(),
+            icon_rotate: Radians(0.),
             width: Length::Auto,
         }
     }
@@ -57,8 +61,8 @@ impl Button {
             text: None,
             icon: None,
             icon_size: SizeRefinement {
-                width: Some(px(0.).into()),
-                height: Some(px(0.).into()),
+                width: Some(px(14.).into()),
+                height: Some(px(14.).into()),
             },
             variant: ButtonVariantEither::Left(ButtonVariant::Primary),
             disabled: false,
@@ -90,6 +94,11 @@ impl Button {
             width: Some(icon_size),
             height: Some(icon_size),
         };
+        self
+    }
+
+    pub fn icon_rotate(mut self, rotate: impl Into<Radians>) -> Self {
+        self.style.icon_rotate = rotate.into();
         self
     }
 
@@ -154,6 +163,32 @@ impl Button {
     /// [Docs](https://tailwindcss.com/docs/justify-content#space-around)
     pub fn justify_around(mut self) -> Self {
         self.style.justify_content = JustifyContent::SpaceAround;
+        self
+    }
+
+    pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
+        let rounded = rounded.into();
+        self.style.corner_radii = Corners::all(Some(rounded));
+        self
+    }
+
+    pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.top_left = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.top_right = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.bottom_left = Some(rounded.into());
+        self
+    }
+
+    pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.style.corner_radii.bottom_right = Some(rounded.into());
         self
     }
 
@@ -227,10 +262,35 @@ macro_rules! apply_padding {
     };
 }
 
+macro_rules! apply_corner_radii {
+    ($this:expr, $corner_radii_override:expr, $corner_radius:expr) => {
+        $this
+            .rounded_tl(
+                $corner_radii_override
+                    .top_left
+                    .unwrap_or($corner_radius.into()),
+            )
+            .rounded_tr(
+                $corner_radii_override
+                    .top_right
+                    .unwrap_or($corner_radius.into()),
+            )
+            .rounded_bl(
+                $corner_radii_override
+                    .bottom_left
+                    .unwrap_or($corner_radius.into()),
+            )
+            .rounded_br(
+                $corner_radii_override
+                    .bottom_right
+                    .unwrap_or($corner_radius.into()),
+            )
+    };
+}
+
 impl RenderOnce for Button {
     fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         let variant = self.variant.into_granular(cx);
-        let font_family = cx.get_theme().layout.text.default_font.family[0].clone();
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = cx.get_theme().layout.text.default_font.sizes.body.clone();
         let padding_override = self.style.padding;
@@ -265,14 +325,13 @@ impl RenderOnce for Button {
         let is_focus = focus_handle.is_focused(window);
 
         let is_disabled = self.disabled;
-        let disabled_transition_state =
-            disabled_transition(self.id.clone(), window, cx, is_disabled);
+        let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);
 
         if is_focus && is_disabled {
             window.blur();
         }
 
-        let bg_color_state = conitional_transition!(
+        let bg_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:bg_color"),
             window,
             cx,
@@ -285,7 +344,7 @@ impl RenderOnce for Button {
         )
         .with_easing(ease_out_quint());
 
-        let text_color_state = conitional_transition!(
+        let text_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:text_color"),
             window,
             cx,
@@ -294,7 +353,7 @@ impl RenderOnce for Button {
         )
         .with_easing(ease_out_quint());
 
-        let highlight_alpha_state = conitional_transition!(
+        let highlight_alpha_transition = conitional_transition!(
             self.id.with_suffix("state:transition:highlight_alpha"),
             window,
             cx,
@@ -321,9 +380,7 @@ impl RenderOnce for Button {
             .gap(horizontal_padding)
             .flex()
             .flex_col()
-            .with_transitions(disabled_transition_state, |_cx, this, opacity| {
-                this.opacity(opacity)
-            })
+            .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
                     .rounded(corner_radius.clone()),
@@ -331,15 +388,11 @@ impl RenderOnce for Button {
             .child(
                 squircle()
                     .absolute_expand()
-                    .rounded(corner_radius)
+                    .map(|this| apply_corner_radii!(this, self.style.corner_radii, corner_radius))
                     .border(px(1.))
                     .border_inside()
-                    .with_transitions(
-                        (bg_color_state, highlight_alpha_state),
-                        move |_cx, this, (bg_color, highlight_alpha)| {
-                            this.bg(bg_color).border_highlight_color(highlight_alpha)
-                        },
-                    ),
+                    .bg(*bg_color_transition.evaluate(window, cx))
+                    .border_highlight(*highlight_alpha_transition.evaluate(window, cx)),
             )
             .children(self.children.top)
             .child(
@@ -352,25 +405,37 @@ impl RenderOnce for Button {
                         this
                     })
                     .items_center()
+                    .text_color(*text_color_transition.evaluate(window, cx))
                     .children(self.children.left)
-                    .when_some(self.text, |this, text| {
-                        this.child(
-                            min_w0_wrapper()
-                                .font_family(font_family.clone())
-                                .text_size(text_size)
-                                .text_ellipsis()
-                                .child(text),
-                        )
-                    })
-                    .with_transitions(text_color_state, move |_cx, this, text_color| {
-                        this.text_color(text_color)
-                            .when_some(self.icon.as_ref(), |this, icon| {
-                                this.child(Icon::new(icon).color(text_color).map(|mut this| {
-                                    this.size = self.icon_size.clone();
-                                    this
-                                }))
-                            })
-                    })
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(horizontal_padding)
+                            .map(|this| {
+                                let text_color = *text_color_transition.evaluate(window, cx);
+
+                                this.when_some(self.icon.as_ref(), |this, icon| {
+                                    this.child(
+                                        Icon::new(icon)
+                                            .color(text_color)
+                                            .rotate(self.style.icon_rotate)
+                                            .map(|mut this| {
+                                                this.size = self.icon_size.clone();
+                                                this
+                                            }),
+                                    )
+                                })
+                                .when_some(
+                                    self.text.clone(),
+                                    |this, text| {
+                                        this.child(
+                                            min_w0_wrapper().child(text).text_color(text_color),
+                                        )
+                                    },
+                                )
+                            }),
+                    )
                     .children(self.children.right),
             )
             .children(self.children.bottom)
@@ -464,10 +529,10 @@ impl ButtonVariant {
             GranularButtonVariant {
                 bg_color: main_color.alpha(SECONDARY_ALPHA),
                 bg_hover_color: main_color
-                    .apply_delta(&primary_background, HOVER_STRENGTH)
+                    .lerp(&primary_background, HOVER_STRENGTH)
                     .alpha(SECONDARY_ALPHA),
                 bg_focus_color: main_color
-                    .apply_delta(&primary_background, FOCUS_STRENGTH)
+                    .lerp(&primary_background, FOCUS_STRENGTH)
                     .alpha(SECONDARY_ALPHA),
                 text_color: *main_color,
                 highlight_alpha: 0.05,
@@ -480,7 +545,7 @@ impl ButtonVariant {
                 bg_color: main_color.alpha(0.),
                 bg_hover_color: main_color.alpha(SECONDARY_ALPHA),
                 bg_focus_color: main_color
-                    .apply_delta(&primary_background, HOVER_STRENGTH)
+                    .lerp(&primary_background, HOVER_STRENGTH)
                     .alpha(SECONDARY_ALPHA),
                 text_color: *main_color,
                 highlight_alpha: 0.,
@@ -494,11 +559,11 @@ impl ButtonVariant {
                 bg_hover_color: colors
                     .accent
                     .primary
-                    .apply_delta(&primary_background, HOVER_STRENGTH),
+                    .lerp(&primary_background, HOVER_STRENGTH),
                 bg_focus_color: colors
                     .accent
                     .primary
-                    .apply_delta(&primary_background, FOCUS_STRENGTH),
+                    .lerp(&primary_background, FOCUS_STRENGTH),
                 text_color: colors.text.primary,
                 highlight_alpha: 0.15,
                 highlight_active_alpha: 0.15,

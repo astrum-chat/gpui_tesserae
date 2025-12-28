@@ -4,11 +4,11 @@ use gpui_squircle::{Squircle, SquircleStyled};
 use crate::utils::rgb_a;
 
 pub trait SquircleExt {
-    fn border_highlight_color(self, alpha: f32) -> Self;
+    fn border_highlight(self, alpha: f32) -> Self;
 }
 
 impl SquircleExt for Squircle {
-    fn border_highlight_color(self, alpha: f32) -> Self {
+    fn border_highlight(self, alpha: f32) -> Self {
         self.border_color(
             linear_gradient(
                 180.,

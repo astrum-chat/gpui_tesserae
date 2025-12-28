@@ -4,18 +4,21 @@ version = "0.1.1"
 edition = "2024"
 
 [dependencies]
-# gpui_transitions = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+gpui_transitions = "0.1.2"
 # Local development.
-gpui_transitions = { path = "./crates/gpui_transitions" }
+# gpui_transitions = { path = "../gpui_transitions" }
 
 gpui = "0.2.2"
-gpui_squircle = "1.0.1"
+# gpui = { git = "https://github.com/zed-industries/zed" }
+# gpui_squircle = "1.0.1"
+gpui_squircle = { path = "../gpui_squircle" }
 smallvec = { version = "1.15.1", features = ["serde"] }
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
 anyhow = "1.0.100"
 cfg-if = "1.0.4"
 enum-assoc = "1.2.4"
+thiserror = "2.0.17"
 
 # Input component.
 unicode-segmentation = "1.12.0"
@@ -23,11 +26,9 @@ unicode-segmentation = "1.12.0"
 # Assets feature.
 rust-embed = { version = "8.9.0", optional = true }
 
+[patch.crates-io]
+gpui = { git = "https://github.com/zed-industries/zed" }
+
 [features]
 default = ["assets"]
 assets = ["dep:rust-embed"]
-
-[workspace]
-members = [
-    "crates/gpui_transitions"
-]

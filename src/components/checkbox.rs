@@ -6,7 +6,7 @@ use gpui::{
     prelude::FluentBuilder, px, relative, svg,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_transitions::{TransitionExt, TransitionGoal};
+use gpui_transitions::Lerp;
 
 use crate::{
     TesseraeIconKind, conitional_transition,
@@ -82,10 +82,10 @@ impl RenderOnce for Checkbox {
         let primary_text_color = cx.get_theme().variants.active(cx).colors.text.primary;
         let background_color = self.layer.resolve(cx);
         let border_color = self.layer.next().resolve(cx);
-        let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
-        let border_click_down_color = border_color.apply_delta(&primary_text_color, 0.16);
+        let border_hover_color = border_color.lerp(&primary_text_color, 0.07);
+        let border_click_down_color = border_color.lerp(&primary_text_color, 0.16);
 
-        let checked_state = checked_transition(
+        let checked_transition = checked_transition(
             self.id.clone(),
             window,
             cx,
@@ -116,14 +116,13 @@ impl RenderOnce for Checkbox {
             .clone();
         let is_focus = focus_handle.is_focused(window);
 
-        let disabled_transition_state =
-            disabled_transition(self.id.clone(), window, cx, is_disabled);
+        let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);
 
         if is_focus && is_disabled {
             window.blur();
         }
 
-        let border_color_transition_state = conitional_transition!(
+        let border_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:border_color"),
             window,
             cx,
@@ -150,9 +149,7 @@ impl RenderOnce for Checkbox {
             .flex()
             .items_center()
             .justify_center()
-            .with_transitions(disabled_transition_state, move |_cx, this, opacity| {
-                this.opacity(opacity)
-            })
+            .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
                     .rounded(corner_radius),
@@ -164,19 +161,19 @@ impl RenderOnce for Checkbox {
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
-                    .with_transitions(border_color_transition_state, move |_cx, this, color| {
-                        this.border_color(color)
-                    }),
+                    .border_color(*border_color_transition.evaluate(window, cx)),
             )
-            .with_transitions(checked_state, move |_cx, this, delta| {
+            .map(|this| {
+                let checked_delta = *checked_transition.evaluate(window, cx);
+
                 this.child(
                     squircle()
                         .absolute_expand()
                         .rounded(corner_radius)
                         .border(px(1.))
                         .border_inside()
-                        .bg(primary_accent_color.alpha(delta))
-                        .border_highlight_color(delta * 0.15),
+                        .bg(primary_accent_color.alpha(checked_delta))
+                        .border_highlight(checked_delta * 0.15),
                 )
                 .child(
                     svg()
@@ -185,7 +182,7 @@ impl RenderOnce for Checkbox {
                             this
                         })
                         .size(relative(0.48))
-                        .text_color(primary_text_color.alpha(delta))
+                        .text_color(primary_text_color.alpha(checked_delta))
                         .path(self.icon.clone()),
                 )
             })

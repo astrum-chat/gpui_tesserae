@@ -32,6 +32,9 @@ use enum_assoc::Assoc;
 pub enum TesseraeIconKind {
     #[assoc(path = "icons/checkmark.svg".into())]
     Checkmark,
+
+    #[assoc(path = "icons/arrow_down.svg".into())]
+    ArrowDown,
 }
 
 impl Into<SharedString> for TesseraeIconKind {

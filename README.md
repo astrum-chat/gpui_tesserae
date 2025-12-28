@@ -5,23 +5,27 @@ Tesserae is a WIP component system for [GPUI](https://github.com/zed-industries/
 It currently offers the following components:
 - Checkbox
 
-    ![checkbox](/readme/assets/checkbox.png)
+    ![checkbox](/assets/readme/checkbox.png)
 
 - Switch
 
-    ![switch](/readme/assets/switch.png)
-
-- Single-line Input
-
-    ![input](/readme/assets/input.png)
+    ![switch](/assets/readme/switch.png)
 
 - Button
 
-    ![button](/readme/assets/button.png)
+    ![button](/assets/readme/button.png)
+
+- Single-line Input
+
+    ![input](/assets/readme/input.png)
+
+- Select
+
+    ![select](/assets/readme/select.png)
 
 - Chat bubble
 
-    ![chat bubble](/readme/assets/chat_bubble.png)
+    ![chat bubble](/assets/readme/chat_bubble.png)
 
 Examples can be found [here](https://github.com/astrum-chat/gpui_tesserae/tree/main/examples).
 

@@ -15,3 +15,5 @@ pub use input::*;
 
 mod switch;
 pub use switch::*;
+
+pub mod select;

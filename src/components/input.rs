@@ -6,7 +6,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_transitions::{TransitionExt, TransitionGoal};
+use gpui_transitions::Lerp;
 
 use crate::{
     conitional_transition,
@@ -64,6 +64,11 @@ impl Input {
         self
     }
 
+    pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
+        self.layer = layer;
+        self
+    }
+
     pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
         self.base = self.base.placeholder_text_color(color);
         self
@@ -76,11 +81,6 @@ impl Input {
 
     pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
         self.base = self.base.placeholder(text);
-        self
-    }
-
-    pub fn initial_value(mut self, text: impl Into<SharedString>, cx: &mut App) -> Self {
-        self.base = self.base.initial_value(text, cx);
         self
     }
 
@@ -228,7 +228,7 @@ impl RenderOnce for Input {
         let destructive_accent_color = cx.get_theme().variants.active(cx).colors.accent.destructive;
         let background_color = self.layer.resolve(cx);
         let border_color = self.layer.next().resolve(cx);
-        let border_hover_color = border_color.apply_delta(&primary_text_color, 0.07);
+        let border_hover_color = border_color.lerp(&primary_text_color, 0.07);
         let font_family = cx.get_theme().layout.text.default_font.family[0].clone();
         let line_height = cx.get_theme().layout.text.default_font.line_height;
         let text_size = self
@@ -257,14 +257,13 @@ impl RenderOnce for Input {
         let is_focus = focus_handle.is_focused(window);
 
         let is_disabled = self.disabled;
-        let disabled_transition_state =
-            disabled_transition(self.id.clone(), window, cx, is_disabled);
+        let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);
 
         if is_focus && is_disabled {
             window.blur();
         }
 
-        let border_color_transition_state = conitional_transition!(
+        let border_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:border_color"),
             window,
             cx,
@@ -278,7 +277,7 @@ impl RenderOnce for Input {
         )
         .with_easing(ease_out_quint());
 
-        let focus_ring_color_transition_state = conitional_transition!(
+        let focus_ring_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:focus_ring_color"),
             window,
             cx,
@@ -300,17 +299,11 @@ impl RenderOnce for Input {
             .gap(self.style.gap.unwrap_or(horizontal_padding.into()))
             .flex()
             .flex_col()
-            .with_transitions(
-                (disabled_transition_state, focus_ring_color_transition_state),
-                move |_cx, this, (opacity, color)| {
-                    this.opacity(opacity).child(
-                        FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
-                            .border_color(color)
-                            .map(|this| {
-                                apply_corner_radii!(this, corner_radii_override, corner_radius)
-                            }),
-                    )
-                },
+            .opacity(*disabled_transition.evaluate(window, cx))
+            .child(
+                FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
+                    .border_color(*focus_ring_color_transition.evaluate(window, cx))
+                    .map(|this| apply_corner_radii!(this, corner_radii_override, corner_radius)),
             )
             .child(
                 squircle()
@@ -319,9 +312,7 @@ impl RenderOnce for Input {
                     .bg(background_color)
                     .border(px(1.))
                     .border_inside()
-                    .with_transitions(border_color_transition_state, move |_cx, this, color| {
-                        this.border_color(color)
-                    }),
+                    .border_color(*border_color_transition.evaluate(window, cx)),
             )
             .children(self.children.top)
             .child(

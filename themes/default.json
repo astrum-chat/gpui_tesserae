@@ -72,7 +72,7 @@
                     "primary": "#110F15",
                     "secondary": "#17151C",
                     "tertiary": "#23202A",
-                    "quaternary": "#2C2A35",
+                    "quaternary": "#2D2A37",
                     "quinary": "#383543"
                 },
                 "accent": {
@@ -81,8 +81,8 @@
                     "destructive": "#FF2B5C"
                 },
                 "text": {
-                    "primary": "#E8E4FF",
-                    "secondary": "#C7C2E3"
+                    "primary": "#EBE8FE",
+                    "secondary": "#BEB9D9"
                 }
             }
         }

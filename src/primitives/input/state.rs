@@ -61,6 +61,14 @@ impl InputState {
         self.value.take()
     }
 
+    pub fn initial_value(mut self, text: impl Into<SharedString>) -> Self {
+        if self.value.is_some() {
+            return self;
+        };
+        self.value = Some(text.into());
+        self
+    }
+
     pub fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);

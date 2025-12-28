@@ -6,7 +6,6 @@ use gpui::{
     prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
-use gpui_transitions::TransitionExt;
 use smallvec::SmallVec;
 
 use crate::{
@@ -83,7 +82,7 @@ impl RenderOnce for ChatBubble {
             .map(|this| this.is_focused(window))
             .unwrap_or(false);
 
-        let border_color_transition_state = conitional_transition!(
+        let border_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:border_color"),
             window,
             cx,
@@ -126,13 +125,10 @@ impl RenderOnce for ChatBubble {
                         this.outer_style().corner_radii = corner_radii;
                         this
                     })
-                    .with_transitions(border_color_transition_state, |_cx, this, color| {
-                        this.border_color(color)
-                    }),
+                    .border_color(*border_color_transition.evaluate(window, cx)),
             )
             .child(
                 min_w0_wrapper()
-                    .font_family("Geist")
                     .text_color(secondary_text_color)
                     .text_size(text_size)
                     .font_weight(FontWeight::NORMAL)

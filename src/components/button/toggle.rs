@@ -1,6 +1,6 @@
 use gpui::{
-    App, DefiniteLength, ElementId, IntoElement, Length, RenderOnce, SharedString, Window,
-    prelude::FluentBuilder,
+    App, DefiniteLength, ElementId, IntoElement, Length, Pixels, Radians, RenderOnce, SharedString,
+    Window, prelude::FluentBuilder,
 };
 
 use crate::{
@@ -44,6 +44,11 @@ impl Toggle {
 
     pub fn icon_size(mut self, icon_size: impl Into<Length>) -> Self {
         self.base = self.base.icon_size(icon_size);
+        self
+    }
+
+    pub fn icon_rotation(mut self, rotate: impl Into<Radians>) -> Self {
+        self.base = self.base.icon_rotate(rotate);
         self
     }
 
@@ -110,6 +115,31 @@ impl Toggle {
     /// [Docs](https://tailwindcss.com/docs/justify-content#space-around)
     pub fn justify_around(mut self) -> Self {
         self.base = self.base.justify_around();
+        self
+    }
+
+    pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.base = self.base.rounded(rounded);
+        self
+    }
+
+    pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.base = self.base.rounded_tl(rounded);
+        self
+    }
+
+    pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.base = self.base.rounded_tr(rounded);
+        self
+    }
+
+    pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.base = self.base.rounded_bl(rounded);
+        self
+    }
+
+    pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
+        self.base = self.base.rounded_br(rounded);
         self
     }
 
@@ -252,16 +282,9 @@ impl ToggleVariant {
 }
 
 fn falsey_granular_variant(mut variant: GranularButtonVariant) -> GranularButtonVariant {
-    const ALPHA_MULT: f32 = 0.65;
-
     variant.bg_color = variant.bg_color.alpha(0.);
     variant.highlight_alpha = 0.;
-    variant.bg_hover_color = variant
-        .bg_hover_color
-        .alpha(variant.bg_hover_color.a * ALPHA_MULT);
-    variant.bg_focus_color = variant
-        .bg_focus_color
-        .alpha(variant.bg_focus_color.a * ALPHA_MULT);
-    variant.highlight_active_alpha = variant.highlight_active_alpha * ALPHA_MULT;
+    variant.bg_hover_color = variant.bg_hover_color.alpha(variant.bg_hover_color.a);
+    variant.bg_focus_color = variant.bg_focus_color.alpha(variant.bg_focus_color.a);
     variant
 }
