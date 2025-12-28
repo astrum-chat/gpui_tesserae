@@ -21,20 +21,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         }
     }
 
-    pub fn with_context(cx: &mut Context<Self>) -> Self {
-        Self {
-            items: cx.new(|_cx| SelectItemsMap::new()),
-            selected_item: cx.new(|_cx| None),
-        }
-    }
-
-    pub fn with_app(window: &mut Window, cx: &mut App) -> Self {
-        Self {
-            items: window.use_state(cx, |_window, _cx| SelectItemsMap::new()),
-            selected_item: window.use_state(cx, |_window, _cx| None),
-        }
-    }
-
     pub fn push_item(&self, cx: &mut App, item: I) {
         self.items.update(cx, |this, cx| {
             this.push_item(item);

@@ -383,7 +383,7 @@ impl RenderOnce for Button {
             .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
-                    .rounded(corner_radius.clone()),
+                    .map(|this| apply_corner_radii!(this, self.style.corner_radii, corner_radius)),
             )
             .child(
                 squircle()
