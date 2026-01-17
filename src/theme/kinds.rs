@@ -113,3 +113,206 @@ impl Into<ThemeBackgroundKind> for ThemeLayerKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::{Theme, ThemeExt};
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn test_theme_text_size_kind_variants(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Test that all variants can be resolved
+            let _ = ThemeTextSizeKind::Xl.resolve(cx);
+            let _ = ThemeTextSizeKind::Lg.resolve(cx);
+            let _ = ThemeTextSizeKind::Md.resolve(cx);
+            let _ = ThemeTextSizeKind::Sm.resolve(cx);
+            let _ = ThemeTextSizeKind::Body.resolve(cx);
+            let _ = ThemeTextSizeKind::Caption.resolve(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layout_size_kind_variants(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Test that all variants can be resolved
+            let _ = ThemeLayoutSizeKind::Xl.resolve(cx);
+            let _ = ThemeLayoutSizeKind::Lg.resolve(cx);
+            let _ = ThemeLayoutSizeKind::Md.resolve(cx);
+            let _ = ThemeLayoutSizeKind::Sm.resolve(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layout_size_kind_corner_radii(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            // Test that corner_radii mapping works
+            assert!(matches!(
+                ThemeLayoutSizeKind::Xl.corner_radii(),
+                ThemeLayoutCornerRadiiKind::Xl
+            ));
+            assert!(matches!(
+                ThemeLayoutSizeKind::Lg.corner_radii(),
+                ThemeLayoutCornerRadiiKind::Lg
+            ));
+            assert!(matches!(
+                ThemeLayoutSizeKind::Md.corner_radii(),
+                ThemeLayoutCornerRadiiKind::Md
+            ));
+            assert!(matches!(
+                ThemeLayoutSizeKind::Sm.corner_radii(),
+                ThemeLayoutCornerRadiiKind::Sm
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layout_padding_kind_variants(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Test that all variants can be resolved
+            let _ = ThemeLayoutPaddingKind::Xl.resolve(cx);
+            let _ = ThemeLayoutPaddingKind::Lg.resolve(cx);
+            let _ = ThemeLayoutPaddingKind::Md.resolve(cx);
+            let _ = ThemeLayoutPaddingKind::Sm.resolve(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layout_corner_radii_kind_variants(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Test that all variants can be resolved
+            let _ = ThemeLayoutCornerRadiiKind::Xl.resolve(cx);
+            let _ = ThemeLayoutCornerRadiiKind::Lg.resolve(cx);
+            let _ = ThemeLayoutCornerRadiiKind::Md.resolve(cx);
+            let _ = ThemeLayoutCornerRadiiKind::Sm.resolve(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_background_kind_variants(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Test that all variants can be resolved
+            let _ = ThemeBackgroundKind::Primary.resolve(cx);
+            let _ = ThemeBackgroundKind::Secondary.resolve(cx);
+            let _ = ThemeBackgroundKind::Tertiary.resolve(cx);
+            let _ = ThemeBackgroundKind::Quaternary.resolve(cx);
+            let _ = ThemeBackgroundKind::Quinary.resolve(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layer_kind_variants(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Test that all variants can be resolved
+            let _ = ThemeLayerKind::Primary.resolve(cx);
+            let _ = ThemeLayerKind::Secondary.resolve(cx);
+            let _ = ThemeLayerKind::Tertiary.resolve(cx);
+            let _ = ThemeLayerKind::Quaternary.resolve(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layer_kind_next(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            // Test that next() returns the expected background kind
+            assert!(matches!(
+                ThemeLayerKind::Primary.next(),
+                ThemeBackgroundKind::Secondary
+            ));
+            assert!(matches!(
+                ThemeLayerKind::Secondary.next(),
+                ThemeBackgroundKind::Tertiary
+            ));
+            assert!(matches!(
+                ThemeLayerKind::Tertiary.next(),
+                ThemeBackgroundKind::Quaternary
+            ));
+            assert!(matches!(
+                ThemeLayerKind::Quaternary.next(),
+                ThemeBackgroundKind::Quinary
+            ));
+        });
+    }
+
+    #[gpui::test]
+    fn test_theme_layer_kind_into_background_kind(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            // Test Into<ThemeBackgroundKind> for ThemeLayerKind
+            let bg: ThemeBackgroundKind = ThemeLayerKind::Primary.into();
+            assert!(matches!(bg, ThemeBackgroundKind::Primary));
+
+            let bg: ThemeBackgroundKind = ThemeLayerKind::Secondary.into();
+            assert!(matches!(bg, ThemeBackgroundKind::Secondary));
+
+            let bg: ThemeBackgroundKind = ThemeLayerKind::Tertiary.into();
+            assert!(matches!(bg, ThemeBackgroundKind::Tertiary));
+
+            let bg: ThemeBackgroundKind = ThemeLayerKind::Quaternary.into();
+            assert!(matches!(bg, ThemeBackgroundKind::Quaternary));
+        });
+    }
+
+    #[gpui::test]
+    fn test_size_ordering(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Sizes should generally be ordered: Sm < Md < Lg < Xl
+            let sm = ThemeLayoutSizeKind::Sm.resolve(cx);
+            let md = ThemeLayoutSizeKind::Md.resolve(cx);
+            let lg = ThemeLayoutSizeKind::Lg.resolve(cx);
+            let xl = ThemeLayoutSizeKind::Xl.resolve(cx);
+
+            assert!(sm <= md, "Sm should be <= Md");
+            assert!(md <= lg, "Md should be <= Lg");
+            assert!(lg <= xl, "Lg should be <= Xl");
+        });
+    }
+
+    #[gpui::test]
+    fn test_padding_ordering(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Paddings should generally be ordered: Sm < Md < Lg < Xl
+            let sm = ThemeLayoutPaddingKind::Sm.resolve(cx);
+            let md = ThemeLayoutPaddingKind::Md.resolve(cx);
+            let lg = ThemeLayoutPaddingKind::Lg.resolve(cx);
+            let xl = ThemeLayoutPaddingKind::Xl.resolve(cx);
+
+            assert!(sm <= md, "Sm should be <= Md");
+            assert!(md <= lg, "Md should be <= Lg");
+            assert!(lg <= xl, "Lg should be <= Xl");
+        });
+    }
+
+    #[gpui::test]
+    fn test_corner_radii_ordering(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            // Corner radii should generally be ordered: Sm < Md < Lg < Xl
+            let sm = ThemeLayoutCornerRadiiKind::Sm.resolve(cx);
+            let md = ThemeLayoutCornerRadiiKind::Md.resolve(cx);
+            let lg = ThemeLayoutCornerRadiiKind::Lg.resolve(cx);
+            let xl = ThemeLayoutCornerRadiiKind::Xl.resolve(cx);
+
+            assert!(sm <= md, "Sm should be <= Md");
+            assert!(md <= lg, "Md should be <= Lg");
+            assert!(lg <= xl, "Lg should be <= Xl");
+        });
+    }
+}

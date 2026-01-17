@@ -230,3 +230,150 @@ impl RenderOnce for Checkbox {
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{AppContext, TestAppContext, VisualTestContext};
+
+    #[gpui::test]
+    fn test_checkbox_creation(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let checkbox = Checkbox::new("test-checkbox");
+            assert!(!checkbox.checked, "Checkbox should start unchecked");
+            assert!(!checkbox.disabled, "Checkbox should start enabled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_checked_state(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let checkbox = Checkbox::new("test-checkbox").checked(true);
+            assert!(checkbox.checked, "Checkbox should be checked");
+
+            let checkbox = Checkbox::new("test-checkbox").checked(false);
+            assert!(!checkbox.checked, "Checkbox should be unchecked");
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_disabled_state(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let checkbox = Checkbox::new("test-checkbox").disabled(true);
+            assert!(checkbox.disabled, "Checkbox should be disabled");
+
+            let checkbox = Checkbox::new("test-checkbox").disabled(false);
+            assert!(!checkbox.disabled, "Checkbox should be enabled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_layer(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let checkbox = Checkbox::new("test-checkbox").layer(ThemeLayerKind::Primary);
+            assert!(
+                matches!(checkbox.layer, ThemeLayerKind::Primary),
+                "Checkbox should have primary layer"
+            );
+
+            let checkbox = Checkbox::new("test-checkbox").layer(ThemeLayerKind::Secondary);
+            assert!(
+                matches!(checkbox.layer, ThemeLayerKind::Secondary),
+                "Checkbox should have secondary layer"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_custom_icon(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let custom_icon: SharedString = "custom/icon.svg".into();
+            let checkbox = Checkbox::new("test-checkbox").icon(custom_icon.clone());
+            assert_eq!(
+                checkbox.icon, custom_icon,
+                "Checkbox should have custom icon"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_builder_chain(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let checkbox = Checkbox::new("test-checkbox")
+                .checked(true)
+                .disabled(true)
+                .layer(ThemeLayerKind::Secondary);
+
+            assert!(checkbox.checked, "Checkbox should be checked");
+            assert!(checkbox.disabled, "Checkbox should be disabled");
+            assert!(
+                matches!(checkbox.layer, ThemeLayerKind::Secondary),
+                "Checkbox should have secondary layer"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_on_click_callback(cx: &mut TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let clicked = Rc::new(Cell::new(false));
+        let clicked_value = Rc::new(Cell::new(false));
+
+        cx.update(|_cx| {
+            let clicked_clone = clicked.clone();
+            let clicked_value_clone = clicked_value.clone();
+
+            let checkbox = Checkbox::new("test-checkbox").on_click(move |value, _window, _cx| {
+                clicked_clone.set(true);
+                clicked_value_clone.set(*value);
+            });
+
+            assert!(
+                checkbox.on_click.is_some(),
+                "Checkbox should have on_click callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_checkbox_renders_in_window(cx: &mut TestAppContext) {
+        use crate::theme::{Theme, ThemeExt};
+
+        let window = cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            cx.open_window(Default::default(), |_window, cx| {
+                cx.new(|_cx| CheckboxTestView { checked: false })
+            })
+            .unwrap()
+        });
+
+        let _cx = VisualTestContext::from_window(window.into(), cx);
+
+        // The window creation itself validates rendering works
+    }
+
+    /// Test view that contains a Checkbox
+    struct CheckboxTestView {
+        checked: bool,
+    }
+
+    impl gpui::Render for CheckboxTestView {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div().size_full().child(
+                Checkbox::new("test-checkbox")
+                    .checked(self.checked)
+                    .on_click(cx.listener(|view, checked, _window, cx| {
+                        view.checked = *checked;
+                        cx.notify();
+                    })),
+            )
+        }
+    }
+}

@@ -15,7 +15,7 @@ use crate::utils::rgb_a;
 pub struct Input {
     state: Entity<InputState>,
     disabled: bool,
-    placeholder: SharedString,
+    pub(crate) placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
     style: StyleRefinement,

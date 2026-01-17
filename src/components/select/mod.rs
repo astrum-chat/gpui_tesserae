@@ -219,3 +219,240 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{
+        AnyElement, App, AppContext, SharedString, TestAppContext, VisualTestContext, Window,
+    };
+
+    /// A simple test item for use in Select tests.
+    #[derive(Clone)]
+    struct TestSelectItem {
+        name: SharedString,
+        value: String,
+    }
+
+    impl TestSelectItem {
+        fn new(name: impl Into<SharedString>, value: impl Into<String>) -> Self {
+            Self {
+                name: name.into(),
+                value: value.into(),
+            }
+        }
+    }
+
+    impl SelectItem for TestSelectItem {
+        type Value = String;
+
+        fn name(&self) -> SharedString {
+            self.name.clone()
+        }
+
+        fn value(&self) -> &Self::Value {
+            &self.value
+        }
+
+        fn display(&self, _window: &mut Window, _cx: &mut App) -> AnyElement {
+            gpui::div().child(self.name.clone()).into_any_element()
+        }
+    }
+
+    #[gpui::test]
+    fn test_select_creation(cx: &mut TestAppContext) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+
+        cx.update(|_cx| {
+            let state = SelectState::new(items, selected);
+            let select = Select::new("test-select", state);
+            assert!(!select.disabled, "Select should start enabled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_state_push_item(cx: &mut TestAppContext) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+        let state = SelectState::new(items.clone(), selected);
+
+        // Initially empty
+        items.read_with(cx, |items, _| {
+            assert!(items.iter().count() == 0, "Items should start empty");
+        });
+
+        // Add an item
+        cx.update(|cx| {
+            state.push_item(cx, TestSelectItem::new("item1", "value1"));
+        });
+
+        items.read_with(cx, |items, _| {
+            assert_eq!(items.iter().count(), 1, "Should have one item");
+            assert!(items.get(&"item1".into()).is_some(), "Item should exist");
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_state_select_item(cx: &mut TestAppContext) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+        let state = SelectState::new(items.clone(), selected.clone());
+
+        // Add items first
+        cx.update(|cx| {
+            state.push_item(cx, TestSelectItem::new("item1", "value1"));
+            state.push_item(cx, TestSelectItem::new("item2", "value2"));
+        });
+
+        // Select an item
+        cx.update(|cx| {
+            let result = state.select_item(cx, "item1");
+            assert!(result.is_ok(), "Selecting existing item should succeed");
+        });
+
+        selected.read_with(cx, |selected, _| {
+            assert_eq!(
+                *selected,
+                Some("item1".into()),
+                "Selected item should be item1"
+            );
+        });
+
+        // Select another item
+        cx.update(|cx| {
+            let result = state.select_item(cx, "item2");
+            assert!(result.is_ok(), "Selecting existing item should succeed");
+        });
+
+        selected.read_with(cx, |selected, _| {
+            assert_eq!(
+                *selected,
+                Some("item2".into()),
+                "Selected item should be item2"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_state_select_invalid_item(cx: &mut TestAppContext) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+        let state = SelectState::new(items, selected.clone());
+
+        // Try to select non-existent item
+        cx.update(|cx| {
+            let result = state.select_item(cx, "nonexistent");
+            assert!(result.is_err(), "Selecting non-existent item should fail");
+        });
+
+        selected.read_with(cx, |selected, _| {
+            assert!(selected.is_none(), "Selection should remain empty");
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_state_cancel_selection(cx: &mut TestAppContext) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+        let state = SelectState::new(items.clone(), selected.clone());
+
+        // Add and select an item
+        cx.update(|cx| {
+            state.push_item(cx, TestSelectItem::new("item1", "value1"));
+            let _ = state.select_item(cx, "item1");
+        });
+
+        selected.read_with(cx, |selected, _| {
+            assert!(selected.is_some(), "Should have selection");
+        });
+
+        // Cancel the selection
+        cx.update(|cx| {
+            state.cancel_selection(cx);
+        });
+
+        selected.read_with(cx, |selected, _| {
+            assert!(selected.is_none(), "Selection should be cancelled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_items_map(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let mut items = SelectItemsMap::<String, TestSelectItem>::new();
+
+            items.push_item(TestSelectItem::new("a", "value_a"));
+            items.push_item(TestSelectItem::new("b", "value_b"));
+            items.push_item(TestSelectItem::new("c", "value_c"));
+
+            assert_eq!(items.iter().count(), 3, "Should have 3 items");
+
+            let item_a = items.get(&"a".into());
+            assert!(item_a.is_some(), "Item 'a' should exist");
+            assert_eq!(item_a.unwrap().value(), "value_a");
+
+            let item_b = items.get(&"b".into());
+            assert!(item_b.is_some(), "Item 'b' should exist");
+            assert_eq!(item_b.unwrap().value(), "value_b");
+
+            let item_none = items.get(&"nonexistent".into());
+            assert!(item_none.is_none(), "Nonexistent item should be None");
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_layer(cx: &mut TestAppContext) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+
+        cx.update(|_cx| {
+            let state = SelectState::new(items.clone(), selected.clone());
+            let select = Select::new("test-select", state);
+            assert!(
+                matches!(select.layer, ThemeLayerKind::Tertiary),
+                "Select should default to tertiary layer"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_renders_in_window(cx: &mut TestAppContext) {
+        use crate::theme::{Theme, ThemeExt};
+
+        let window = cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            cx.open_window(Default::default(), |_window, cx| {
+                let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+                let selected = cx.new(|_cx| None::<SharedString>);
+
+                cx.new(|_cx| SelectTestView {
+                    state: Arc::new(SelectState::new(items, selected)),
+                })
+            })
+            .unwrap()
+        });
+
+        let _cx = VisualTestContext::from_window(window.into(), cx);
+
+        // The window creation itself validates rendering works
+    }
+
+    /// Test view that contains a Select
+    struct SelectTestView {
+        state: Arc<SelectState<String, TestSelectItem>>,
+    }
+
+    impl gpui::Render for SelectTestView {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            gpui::div()
+                .size_full()
+                .child(Select::new("test-select", self.state.clone()))
+        }
+    }
+}

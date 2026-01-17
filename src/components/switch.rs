@@ -249,3 +249,158 @@ impl RenderOnce for Switch {
 pub fn remap(value: f32, from_min: f32, from_max: f32, to_min: f32, to_max: f32) -> f32 {
     (value - from_min) / (from_max - from_min) * (to_max - to_min) + to_min
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{AppContext, TestAppContext, VisualTestContext};
+
+    #[gpui::test]
+    fn test_switch_creation(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let switch = Switch::new("test-switch");
+            assert!(!switch.checked, "Switch should start unchecked");
+            assert!(!switch.disabled, "Switch should start enabled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_checked_state(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let switch = Switch::new("test-switch").checked(true);
+            assert!(switch.checked, "Switch should be checked");
+
+            let switch = Switch::new("test-switch").checked(false);
+            assert!(!switch.checked, "Switch should be unchecked");
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_disabled_state(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let switch = Switch::new("test-switch").disabled(true);
+            assert!(switch.disabled, "Switch should be disabled");
+
+            let switch = Switch::new("test-switch").disabled(false);
+            assert!(!switch.disabled, "Switch should be enabled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_layer(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let switch = Switch::new("test-switch").layer(ThemeLayerKind::Primary);
+            assert!(
+                matches!(switch.layer, ThemeLayerKind::Primary),
+                "Switch should have primary layer"
+            );
+
+            let switch = Switch::new("test-switch").layer(ThemeLayerKind::Secondary);
+            assert!(
+                matches!(switch.layer, ThemeLayerKind::Secondary),
+                "Switch should have secondary layer"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_builder_chain(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let switch = Switch::new("test-switch")
+                .checked(true)
+                .disabled(true)
+                .layer(ThemeLayerKind::Secondary);
+
+            assert!(switch.checked, "Switch should be checked");
+            assert!(switch.disabled, "Switch should be disabled");
+            assert!(
+                matches!(switch.layer, ThemeLayerKind::Secondary),
+                "Switch should have secondary layer"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_on_click_callback(cx: &mut TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let clicked = Rc::new(Cell::new(false));
+        let clicked_value = Rc::new(Cell::new(false));
+
+        cx.update(|_cx| {
+            let clicked_clone = clicked.clone();
+            let clicked_value_clone = clicked_value.clone();
+
+            let switch = Switch::new("test-switch").on_click(move |value, _window, _cx| {
+                clicked_clone.set(true);
+                clicked_value_clone.set(*value);
+            });
+
+            assert!(
+                switch.on_click.is_some(),
+                "Switch should have on_click callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_renders_in_window(cx: &mut TestAppContext) {
+        use crate::theme::{Theme, ThemeExt};
+
+        let window = cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            cx.open_window(Default::default(), |_window, cx| {
+                cx.new(|_cx| SwitchTestView { checked: false })
+            })
+            .unwrap()
+        });
+
+        let _cx = VisualTestContext::from_window(window.into(), cx);
+
+        // The window creation itself validates rendering works
+    }
+
+    #[gpui::test]
+    fn test_remap_function(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            // Test remap from 0-1 to 0-100
+            assert_eq!(remap(0.0, 0.0, 1.0, 0.0, 100.0), 0.0);
+            assert_eq!(remap(0.5, 0.0, 1.0, 0.0, 100.0), 50.0);
+            assert_eq!(remap(1.0, 0.0, 1.0, 0.0, 100.0), 100.0);
+
+            // Test remap from 0-10 to 0-1
+            assert_eq!(remap(0.0, 0.0, 10.0, 0.0, 1.0), 0.0);
+            assert_eq!(remap(5.0, 0.0, 10.0, 0.0, 1.0), 0.5);
+            assert_eq!(remap(10.0, 0.0, 10.0, 0.0, 1.0), 1.0);
+
+            // Test remap with negative ranges
+            assert_eq!(remap(0.0, -1.0, 1.0, 0.0, 100.0), 50.0);
+        });
+    }
+
+    /// Test view that contains a Switch
+    struct SwitchTestView {
+        checked: bool,
+    }
+
+    impl gpui::Render for SwitchTestView {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(
+                    Switch::new("test-switch")
+                        .checked(self.checked)
+                        .on_click(cx.listener(|view, checked, _window, cx| {
+                            view.checked = *checked;
+                            cx.notify();
+                        })),
+                )
+        }
+    }
+}

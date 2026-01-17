@@ -629,3 +629,378 @@ impl From<GranularButtonVariant> for ButtonVariantEither {
         ButtonVariantEither::Right(value)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{AppContext, TestAppContext, VisualTestContext};
+
+    #[gpui::test]
+    fn test_button_creation(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button");
+            assert!(!button.disabled, "Button should start enabled");
+            assert!(button.text.is_none(), "Button should start with no text");
+            assert!(button.icon.is_none(), "Button should start with no icon");
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_text(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").text("Click me");
+            assert_eq!(
+                button.text,
+                Some("Click me".into()),
+                "Button should have text"
+            );
+
+            let button = button.no_text();
+            assert!(
+                button.text.is_none(),
+                "Button should have no text after no_text()"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_icon(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let icon_path: SharedString = "icons/test.svg".into();
+            let button = Button::new("test-button").icon(icon_path.clone());
+            assert_eq!(button.icon, Some(icon_path), "Button should have icon");
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_disabled_state(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").disabled(true);
+            assert!(button.disabled, "Button should be disabled");
+
+            let button = Button::new("test-button").disabled(false);
+            assert!(!button.disabled, "Button should be enabled");
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_variants(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").variant(ButtonVariant::Primary);
+            assert!(
+                matches!(
+                    button.variant,
+                    ButtonVariantEither::Left(ButtonVariant::Primary)
+                ),
+                "Button should have primary variant"
+            );
+
+            let button = Button::new("test-button").variant(ButtonVariant::Secondary);
+            assert!(
+                matches!(
+                    button.variant,
+                    ButtonVariantEither::Left(ButtonVariant::Secondary)
+                ),
+                "Button should have secondary variant"
+            );
+
+            let button = Button::new("test-button").variant(ButtonVariant::Destructive);
+            assert!(
+                matches!(
+                    button.variant,
+                    ButtonVariantEither::Left(ButtonVariant::Destructive)
+                ),
+                "Button should have destructive variant"
+            );
+
+            let button = Button::new("test-button").variant(ButtonVariant::Constructive);
+            assert!(
+                matches!(
+                    button.variant,
+                    ButtonVariantEither::Left(ButtonVariant::Constructive)
+                ),
+                "Button should have constructive variant"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_justify_content(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").justify_start();
+            assert!(
+                matches!(button.style.justify_content, JustifyContent::FlexStart),
+                "Button should have justify start"
+            );
+
+            let button = Button::new("test-button").justify_end();
+            assert!(
+                matches!(button.style.justify_content, JustifyContent::FlexEnd),
+                "Button should have justify end"
+            );
+
+            let button = Button::new("test-button").justify_center();
+            assert!(
+                matches!(button.style.justify_content, JustifyContent::Center),
+                "Button should have justify center"
+            );
+
+            let button = Button::new("test-button").justify_between();
+            assert!(
+                matches!(button.style.justify_content, JustifyContent::SpaceBetween),
+                "Button should have justify between"
+            );
+
+            let button = Button::new("test-button").justify_around();
+            assert!(
+                matches!(button.style.justify_content, JustifyContent::SpaceAround),
+                "Button should have justify around"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_width(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").w(px(200.));
+            assert!(
+                matches!(button.style.width, Length::Definite(_)),
+                "Button should have definite width"
+            );
+
+            let button = Button::new("test-button").w_auto();
+            assert!(
+                matches!(button.style.width, Length::Auto),
+                "Button should have auto width"
+            );
+
+            let button = Button::new("test-button").w_full();
+            assert!(
+                matches!(button.style.width, Length::Definite(_)),
+                "Button should have full width"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_rounded(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").rounded(px(8.));
+            assert!(
+                button.style.corner_radii.top_left.is_some(),
+                "Button should have rounded corners"
+            );
+            assert!(
+                button.style.corner_radii.top_right.is_some(),
+                "Button should have rounded corners"
+            );
+            assert!(
+                button.style.corner_radii.bottom_left.is_some(),
+                "Button should have rounded corners"
+            );
+            assert!(
+                button.style.corner_radii.bottom_right.is_some(),
+                "Button should have rounded corners"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_individual_corners(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button")
+                .rounded_tl(px(4.))
+                .rounded_tr(px(8.))
+                .rounded_bl(px(12.))
+                .rounded_br(px(16.));
+
+            assert_eq!(button.style.corner_radii.top_left, Some(px(4.)));
+            assert_eq!(button.style.corner_radii.top_right, Some(px(8.)));
+            assert_eq!(button.style.corner_radii.bottom_left, Some(px(12.)));
+            assert_eq!(button.style.corner_radii.bottom_right, Some(px(16.)));
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_padding(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").p(px(10.));
+            assert!(
+                button.style.padding.top.is_some(),
+                "Button should have top padding"
+            );
+            assert!(
+                button.style.padding.bottom.is_some(),
+                "Button should have bottom padding"
+            );
+            assert!(
+                button.style.padding.left.is_some(),
+                "Button should have left padding"
+            );
+            assert!(
+                button.style.padding.right.is_some(),
+                "Button should have right padding"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_individual_padding(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button")
+                .pt(px(4.))
+                .pb(px(8.))
+                .pl(px(12.))
+                .pr(px(16.));
+
+            assert!(button.style.padding.top.is_some());
+            assert!(button.style.padding.bottom.is_some());
+            assert!(button.style.padding.left.is_some());
+            assert!(button.style.padding.right.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_on_click_callback(cx: &mut TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let clicked = Rc::new(Cell::new(false));
+
+        cx.update(|_cx| {
+            let clicked_clone = clicked.clone();
+
+            let button = Button::new("test-button").on_click(move |_event, _window, _cx| {
+                clicked_clone.set(true);
+            });
+
+            assert!(
+                button.on_click.is_some(),
+                "Button should have on_click callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_on_hover_callback(cx: &mut TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let hovered = Rc::new(Cell::new(false));
+
+        cx.update(|_cx| {
+            let hovered_clone = hovered.clone();
+
+            let button = Button::new("test-button").on_hover(move |is_hover, _window, _cx| {
+                hovered_clone.set(*is_hover);
+            });
+
+            assert!(
+                button.on_hover.is_some(),
+                "Button should have on_hover callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_builder_chain(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button")
+                .text("Click me")
+                .icon("icons/test.svg")
+                .disabled(false)
+                .variant(ButtonVariant::Primary)
+                .justify_center()
+                .rounded(px(8.))
+                .p(px(10.))
+                .w(px(200.));
+
+            assert_eq!(button.text, Some("Click me".into()));
+            assert!(button.icon.is_some());
+            assert!(!button.disabled);
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_icon_rotate(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").icon_rotate(Radians(std::f32::consts::PI));
+            assert_eq!(
+                button.style.icon_rotate.0,
+                std::f32::consts::PI,
+                "Button should have rotated icon"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_icon_size(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let button = Button::new("test-button").icon_size(px(24.));
+            assert!(
+                button.icon_size.width.is_some(),
+                "Button should have custom icon size"
+            );
+            assert!(
+                button.icon_size.height.is_some(),
+                "Button should have custom icon size"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_renders_in_window(cx: &mut TestAppContext) {
+        use crate::theme::{Theme, ThemeExt};
+
+        let window = cx.update(|cx| {
+            cx.set_theme(Theme::DEFAULT);
+
+            cx.open_window(Default::default(), |_window, cx| {
+                cx.new(|_cx| ButtonTestView)
+            })
+            .unwrap()
+        });
+
+        let _cx = VisualTestContext::from_window(window.into(), cx);
+
+        // The window creation itself validates rendering works
+    }
+
+    #[gpui::test]
+    fn test_granular_button_variant(cx: &mut TestAppContext) {
+        use gpui::rgba;
+
+        cx.update(|_cx| {
+            let granular = GranularButtonVariant {
+                bg_color: rgba(0xFF0000FF).into(),
+                bg_hover_color: rgba(0x00FF00FF).into(),
+                bg_focus_color: rgba(0x0000FFFF).into(),
+                text_color: rgba(0xFFFFFFFF).into(),
+                highlight_alpha: 0.1,
+                highlight_active_alpha: 0.2,
+            };
+
+            let button = Button::new("test-button").variant(granular);
+
+            assert!(
+                matches!(button.variant, ButtonVariantEither::Right(_)),
+                "Button should have granular variant"
+            );
+        });
+    }
+
+    /// Test view that contains a Button
+    struct ButtonTestView;
+
+    impl gpui::Render for ButtonTestView {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(Button::new("test-button").text("Click me"))
+        }
+    }
+}
