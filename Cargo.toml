@@ -5,13 +5,9 @@ edition = "2024"
 
 [dependencies]
 gpui_transitions = "0.1.2"
-# Local development.
-# gpui_transitions = { path = "../gpui_transitions" }
 
 gpui = "0.2.2"
-# gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_squircle = "1.0.1"
-# gpui_squircle = { path = "../gpui_squircle" }
 smallvec = { version = "1.15.1", features = ["serde"] }
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -27,8 +23,7 @@ unicode-segmentation = "1.12.0"
 rust-embed = { version = "8.9.0", optional = true }
 
 [patch.crates-io]
-#core-graphics = { git = "https://github.com/servo/core-foundation-rs/core-graphics", rev = "14d8c7fb828a1d2c139dd345a6860b0e9648137b" }
-#gpui = { git = "https://github.com/zed-industries/zed" }
+gpui = { git = "https://github.com/zed-industries/zed" }
 
 [features]
 default = ["assets"]
