@@ -62,10 +62,10 @@ impl RenderOnce for Icon {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
-    use gpui::{TestAppContext, VisualTestContext, hsla};
+    use gpui::{AppContext, ParentElement, TestAppContext, VisualTestContext, hsla};
 
     #[gpui::test]
     fn test_icon_creation(cx: &mut TestAppContext) {

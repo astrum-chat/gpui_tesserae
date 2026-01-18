@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use gpui::{App, AppContext, Context, Entity, SharedString, Window};
+use gpui::{App, Entity, SharedString};
 use thiserror::Error;
 
 use crate::components::select::SelectItem;

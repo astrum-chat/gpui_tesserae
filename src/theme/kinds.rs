@@ -114,7 +114,7 @@ impl Into<ThemeBackgroundKind> for ThemeLayerKind {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
     use crate::theme::{Theme, ThemeExt};

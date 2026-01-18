@@ -162,7 +162,10 @@ pub struct ThemeVariants {
 
 impl ThemeVariants {
     pub fn active(&self, cx: &App) -> &ThemeVariant {
-        &self.variants[cx.global::<ActiveVariantId>().0]
+        &self.variants[cx
+            .try_global::<ActiveVariantId>()
+            .unwrap_or(&ActiveVariantId(0))
+            .0]
     }
 }
 

@@ -250,7 +250,7 @@ pub fn remap(value: f32, from_min: f32, from_max: f32, to_min: f32, to_max: f32)
     (value - from_min) / (from_max - from_min) * (to_max - to_min) + to_min
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext, VisualTestContext};

@@ -132,14 +132,14 @@ impl Button {
     /// Sets the element to justify flex items against the start of the container's main axis.
     /// [Docs](https://tailwindcss.com/docs/justify-content#start)
     pub fn justify_start(mut self) -> Self {
-        self.style.justify_content = JustifyContent::Start;
+        self.style.justify_content = JustifyContent::FlexStart;
         self
     }
 
     /// Sets the element to justify flex items against the end of the container's main axis.
     /// [Docs](https://tailwindcss.com/docs/justify-content#end)
     pub fn justify_end(mut self) -> Self {
-        self.style.justify_content = JustifyContent::End;
+        self.style.justify_content = JustifyContent::FlexEnd;
         self
     }
 
@@ -630,7 +630,7 @@ impl From<GranularButtonVariant> for ButtonVariantEither {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext, VisualTestContext};

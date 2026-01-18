@@ -152,7 +152,7 @@ impl Render for Root {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext, VisualTestContext, point, size};
@@ -303,7 +303,7 @@ mod tests {
                         point(px(i as f32 * 10.), px(i as f32 * 10.)),
                         size(px(50.), px(50.)),
                     ),
-                    |_window, _cx| div().child(format!("Overlay {}", i)).into_any_element(),
+                    move |_window, _cx| div().child(format!("Overlay {}", i)).into_any_element(),
                 );
             }
         });

@@ -358,7 +358,7 @@ impl Focusable for Input {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext, VisualTestContext};

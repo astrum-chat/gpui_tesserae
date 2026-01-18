@@ -1,12 +1,8 @@
 use gpui::{App, Window};
 
-use crate::{
-    primitives::input,
-    theme::{ActiveVariantId, ThemeExt},
-};
+use crate::{primitives::input, theme::ThemeExt};
 
 pub fn init(cx: &mut App) {
-    cx.set_global::<ActiveVariantId>(ActiveVariantId(0));
     input::init(cx);
 }
 

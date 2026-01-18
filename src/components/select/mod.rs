@@ -220,12 +220,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
-    use gpui::{
-        AnyElement, App, AppContext, SharedString, TestAppContext, VisualTestContext, Window,
-    };
+    use gpui::{App, AppContext, SharedString, TestAppContext, VisualTestContext, Window};
 
     /// A simple test item for use in Select tests.
     #[derive(Clone)]
@@ -254,7 +252,7 @@ mod tests {
             &self.value
         }
 
-        fn display(&self, _window: &mut Window, _cx: &mut App) -> AnyElement {
+        fn display(&self, _window: &mut Window, _cx: &App) -> impl IntoElement {
             gpui::div().child(self.name.clone()).into_any_element()
         }
     }
