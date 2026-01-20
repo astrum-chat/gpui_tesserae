@@ -82,7 +82,9 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             )
             .read(cx)
             .clone();
-        let is_focus = focus_handle.is_focused(window);
+        // Use contains_focused instead of is_focused so that the menu stays open
+        // when focus moves to a menu item (which is a descendant of the Select).
+        let is_focus = focus_handle.contains_focused(window, cx);
 
         let is_disabled = self.disabled;
         let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);

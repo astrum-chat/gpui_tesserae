@@ -43,7 +43,7 @@ fn main() {
             assets![TesseraeAssets],
         )
         .run(|cx: &mut App| {
-            /// Tesserae needs to be initialized before it can be used.
+            // Tesserae needs to be initialized before it can be used.
             gpui_tesserae::init(cx);
         });
 }
