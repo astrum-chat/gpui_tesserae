@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    App, ClickEvent, Corners, CursorStyle, DefiniteLength, Edges, ElementId, InteractiveElement,
-    IntoElement, JustifyContent, Length, ParentElement, Pixels, Radians, RenderOnce, Rgba,
-    SharedString, SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    App, Corners, CursorStyle, DefiniteLength, Edges, ElementId, InteractiveElement, IntoElement,
+    JustifyContent, Length, ParentElement, Pixels, Radians, RenderOnce, Rgba, SharedString,
+    SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
     prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
@@ -12,7 +12,7 @@ use gpui_transitions::Lerp;
 use crate::{
     components::Icon,
     conitional_transition,
-    primitives::{FocusRing, min_w0_wrapper},
+    primitives::{ClickHandlers, Clickable, FocusRing, min_w0_wrapper},
     theme::ThemeExt,
     utils::{
         ElementIdExt, PixelsExt, PositionalChildren, PositionalParentElement, RgbaExt, SquircleExt,
@@ -49,7 +49,7 @@ pub struct Button {
     variant: ButtonVariantEither,
     disabled: bool,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
-    on_click: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
+    click_handlers: ClickHandlers,
     children: PositionalChildren,
     style: ButtonStyles,
 }
@@ -67,7 +67,7 @@ impl Button {
             variant: ButtonVariantEither::Left(ButtonVariant::Primary),
             disabled: false,
             on_hover: None,
-            on_click: None,
+            click_handlers: ClickHandlers::new(),
             children: PositionalChildren::default(),
             style: ButtonStyles::default(),
         }
@@ -109,14 +109,6 @@ impl Button {
 
     pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_hover = Some(Box::new(on_hover));
-        self
-    }
-
-    pub fn on_click(
-        mut self,
-        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> Self {
-        self.on_click = Some(Box::new(on_click));
         self
     }
 
@@ -232,16 +224,11 @@ impl Button {
         self.style.width = relative(100.).into();
         self
     }
+}
 
-    fn handle_on_click(
-        window: &mut Window,
-        cx: &mut App,
-        event: &ClickEvent,
-        on_click: Option<&Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
-    ) {
-        if let Some(on_click) = on_click {
-            (on_click)(event, window, cx)
-        }
+impl Clickable for Button {
+    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
+        &mut self.click_handlers
     }
 }
 
@@ -449,15 +436,51 @@ impl RenderOnce for Button {
                     cx.notify(is_hover_state_on_hover.entity_id());
                 })
                 .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
-                    // Prevents focus ring from appearing when clicked.
                     window.prevent_default();
 
                     is_click_down_state_on_mouse_down.update(cx, |this, _cx| *this = true);
                     cx.notify(is_click_down_state_on_mouse_down.entity_id());
                 })
-                .on_click({
-                    move |event, window, cx| {
+                .map(|mut this| {
+                    if let Some((button, handler)) = self.click_handlers.on_mouse_down {
+                        if button != gpui::MouseButton::Left {
+                            this = this.on_mouse_down(button, move |event, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                (handler)(event, window, cx);
+                            });
+                        }
+                    }
+
+                    if let Some((button, handler)) = self.click_handlers.on_mouse_up {
+                        this = this.on_mouse_up(button, move |event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            (handler)(event, window, cx);
+                        });
+                    }
+
+                    if let Some(handler) = self.click_handlers.on_any_mouse_down {
+                        this = this.on_any_mouse_down(move |event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            (handler)(event, window, cx);
+                        });
+                    }
+
+                    if let Some(handler) = self.click_handlers.on_any_mouse_up {
+                        this.interactivity()
+                            .on_any_mouse_up(move |event, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                (handler)(event, window, cx);
+                            });
+                    }
+
+                    let on_click = self.click_handlers.on_click;
+                    this.on_click(move |event, window, cx| {
                         window.prevent_default();
+                        cx.stop_propagation();
 
                         if !is_focus {
                             // We only want to blur if something else may be focused.
@@ -467,8 +490,10 @@ impl RenderOnce for Button {
                         is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
                         cx.notify(is_click_down_state_on_click.entity_id());
 
-                        Self::handle_on_click(window, cx, event, self.on_click.as_ref());
-                    }
+                        if let Some(on_click) = &on_click {
+                            (on_click)(event, window, cx);
+                        }
+                    })
                 })
                 .on_mouse_up_out(gpui::MouseButton::Left, move |_event, _window, cx| {
                     // We need to clean up states when the mouse clicks down on the component, leaves its bounds, then unclicks.
@@ -875,7 +900,7 @@ mod tests {
             });
 
             assert!(
-                button.on_click.is_some(),
+                button.click_handlers.on_click.is_some(),
                 "Button should have on_click callback"
             );
         });
@@ -986,6 +1011,75 @@ mod tests {
                 matches!(button.variant, ButtonVariantEither::Right(_)),
                 "Button should have granular variant"
             );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_on_any_mouse_down_callback(cx: &mut TestAppContext) {
+        use crate::primitives::Clickable;
+
+        cx.update(|_cx| {
+            let button =
+                Button::new("test-button").on_any_mouse_down(move |_event, _window, _cx| {});
+
+            assert!(
+                button.click_handlers.on_any_mouse_down.is_some(),
+                "Button should have on_any_mouse_down callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_on_any_mouse_up_callback(cx: &mut TestAppContext) {
+        use crate::primitives::Clickable;
+
+        cx.update(|_cx| {
+            let button = Button::new("test-button").on_any_mouse_up(move |_event, _window, _cx| {});
+
+            assert!(
+                button.click_handlers.on_any_mouse_up.is_some(),
+                "Button should have on_any_mouse_up callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_on_mouse_down_callback(cx: &mut TestAppContext) {
+        use crate::primitives::Clickable;
+        use gpui::MouseButton;
+
+        cx.update(|_cx| {
+            let button = Button::new("test-button")
+                .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {});
+
+            assert!(
+                button.click_handlers.on_mouse_down.is_some(),
+                "Button should have on_mouse_down callback"
+            );
+
+            let (button, handler) = button.click_handlers.on_mouse_down.unwrap();
+            assert_eq!(button, MouseButton::Left, "Should be left mouse button");
+            drop(handler);
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_on_mouse_up_callback(cx: &mut TestAppContext) {
+        use crate::primitives::Clickable;
+        use gpui::MouseButton;
+
+        cx.update(|_cx| {
+            let button = Button::new("test-button")
+                .on_mouse_up(MouseButton::Right, move |_event, _window, _cx| {});
+
+            assert!(
+                button.click_handlers.on_mouse_up.is_some(),
+                "Button should have on_mouse_up callback"
+            );
+
+            let (button, handler) = button.click_handlers.on_mouse_up.unwrap();
+            assert_eq!(button, MouseButton::Right, "Should be right mouse button");
+            drop(handler);
         });
     }
 

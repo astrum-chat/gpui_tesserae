@@ -629,7 +629,6 @@ mod tests {
     fn test_input_state_read_text(cx: &mut TestAppContext) {
         let state = cx.new(|cx| InputState::new(cx));
 
-        // Initially empty
         let text = state.read_with(cx, |state, _| state.value());
         assert!(text.is_empty(), "Input state should start empty");
     }

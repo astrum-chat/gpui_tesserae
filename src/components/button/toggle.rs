@@ -1,11 +1,12 @@
 use gpui::{
     App, DefiniteLength, ElementId, IntoElement, Length, Pixels, Radians, RenderOnce, SharedString,
-    Window, prelude::FluentBuilder,
+    Window,
 };
 
 use crate::{
     PositionalParentElement,
     components::{Button, ButtonVariant, GranularButtonVariant},
+    primitives::{ClickHandlers, Clickable},
     utils::RgbaExt,
 };
 
@@ -13,7 +14,6 @@ use crate::{
 pub struct Toggle {
     variant: ToggleVariantEither,
     checked: bool,
-    on_click: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     base: Button,
 }
 
@@ -22,7 +22,6 @@ impl Toggle {
         Self {
             checked: false,
             variant: ToggleVariantEither::Left(ToggleVariant::Primary),
-            on_click: None,
             base: Button::new(id),
         }
     }
@@ -64,11 +63,6 @@ impl Toggle {
 
     pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.base = self.base.on_hover(on_hover);
-        self
-    }
-
-    pub fn on_click(mut self, on_click: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
-        self.on_click = Some(Box::new(on_click));
         self
     }
 
@@ -184,21 +178,21 @@ impl Toggle {
     }
 }
 
+impl Clickable for Toggle {
+    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
+        self.base.click_handlers_mut()
+    }
+}
+
 impl RenderOnce for Toggle {
     fn render(self, _window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
-        let is_checked = self.checked;
-
         let variant = self.variant.into_granular(cx);
 
-        self.base
-            .variant(if is_checked {
-                variant.truthy
-            } else {
-                variant.falsey
-            })
-            .when_some(self.on_click, |this, on_click| {
-                this.on_click(move |_event, cx, window| (on_click)(&!self.checked, cx, window))
-            })
+        self.base.variant(if self.checked {
+            variant.truthy
+        } else {
+            variant.falsey
+        })
     }
 }
 

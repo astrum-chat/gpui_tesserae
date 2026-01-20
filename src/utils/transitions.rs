@@ -12,7 +12,7 @@ macro_rules! conitional_transition {
     ) => {{
         use gpui_transitions::{WindowUseTransition};
 
-        let value = conitional_transition!(@condition [ $($rest)+ ]);
+        let value = $crate::conditional_transition_branches!(@condition [ $($rest)+ ]);
 
         let transition = $window.use_keyed_transition(
             $id,
@@ -22,6 +22,8 @@ macro_rules! conitional_transition {
         )
         .with_easing(gpui::ease_out_quint());
 
+        let value = value.into();
+
         if transition.read_goal($cx) != &value {
             transition.update($cx, |this, _cx| *this = value);
             $cx.notify(transition.entity_id());
@@ -29,9 +31,26 @@ macro_rules! conitional_transition {
 
         transition
     }};
+}
 
-    // Match-esque block:
+#[macro_export]
+macro_rules! conitional_transition_update {
+    (
+        $cx:expr, $transition:expr, $($rest:tt)+
+    ) => {{
+        let value = $crate::conditional_transition_branches!(@condition [ $($rest)+ ]).into();
 
+        if $transition.read_goal($cx) != &value {
+            $transition.update($cx, |this, _cx| *this = value);
+            $cx.notify($transition.entity_id());
+        }
+
+        $transition
+    }};
+}
+
+#[macro_export]
+macro_rules! conditional_transition_branches {
     // Default branch wasn't last.
     (@branch_list [ _ => $value:expr, $($rest:tt)+ ]) => {{
         compile_error!("`_ => value` is only allowed on the last branch.");
@@ -39,11 +58,11 @@ macro_rules! conitional_transition {
 
     // Entry point.
     (@condition [ { $cond:expr => $value:expr, $($rest:tt)+ } ]) => {{
-        if $cond { $value } else { conitional_transition!(@branch_list [ $($rest)+ ])  }
+        if $cond { $value } else { $crate::conditional_transition_branches!(@branch_list [ $($rest)+ ])  }
     }};
 
     (@branch_list [ $cond:expr => $value:expr, $($rest:tt)+ ]) => {{
-        if $cond { $value } else { conitional_transition!(@branch_list [ $($rest)+ ])  }
+        if $cond { $value } else { $crate::conditional_transition_branches!(@branch_list [ $($rest)+ ])  }
     }};
 
     // Last branch.

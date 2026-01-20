@@ -1,9 +1,6 @@
 mod button;
 pub use button::*;
 
-mod root;
-pub use root::{OverlayEntry, Root};
-
 mod chat_bubble;
 pub use chat_bubble::*;
 

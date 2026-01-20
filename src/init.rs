@@ -1,9 +1,10 @@
 use gpui::{App, Window};
 
-use crate::{primitives::input, theme::ThemeExt};
+use crate::{components::select, primitives::input, theme::ThemeExt};
 
 pub fn init(cx: &mut App) {
     input::init(cx);
+    select::init(cx);
 }
 
 pub fn init_for_window(window: &mut Window, cx: &mut App) {

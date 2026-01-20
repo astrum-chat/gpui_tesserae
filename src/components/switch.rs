@@ -1,15 +1,15 @@
 use std::time::Duration;
 
 use gpui::{
-    App, CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, Window, div, ease_out_quint, prelude::FluentBuilder, px,
+    CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
 
 use crate::{
     ElementIdExt, conitional_transition,
-    primitives::FocusRing,
+    primitives::{ClickHandlers, Clickable, FocusRing},
     theme::{ThemeExt, ThemeLayerKind},
     utils::{RgbaExt, SquircleExt, checked_transition, disabled_transition},
 };
@@ -20,7 +20,7 @@ pub struct Switch {
     layer: ThemeLayerKind,
     checked: bool,
     disabled: bool,
-    on_click: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
+    click_handlers: ClickHandlers,
 }
 
 impl Switch {
@@ -30,7 +30,7 @@ impl Switch {
             layer: ThemeLayerKind::Tertiary,
             checked: false,
             disabled: false,
-            on_click: None,
+            click_handlers: ClickHandlers::new(),
         }
     }
 
@@ -48,21 +48,11 @@ impl Switch {
         self.disabled = disabled;
         self
     }
+}
 
-    pub fn on_click(mut self, on_click: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
-        self.on_click = Some(Box::new(on_click));
-        self
-    }
-
-    fn handle_on_click(
-        window: &mut Window,
-        cx: &mut App,
-        checked: bool,
-        on_click: Option<&Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
-    ) {
-        if let Some(on_click) = on_click {
-            (on_click)(&checked, window, cx)
-        }
+impl Clickable for Switch {
+    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
+        &mut self.click_handlers
     }
 }
 
@@ -217,9 +207,46 @@ impl RenderOnce for Switch {
                     is_click_down_state_on_mouse_down.update(cx, |this, _cx| *this = true);
                     cx.notify(is_click_down_state_on_mouse_down.entity_id());
                 })
-                .on_click({
-                    move |_, window, cx| {
+                .map(|mut this| {
+                    if let Some((button, handler)) = self.click_handlers.on_mouse_down {
+                        if button != gpui::MouseButton::Left {
+                            this = this.on_mouse_down(button, move |event, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                (handler)(event, window, cx);
+                            });
+                        }
+                    }
+
+                    if let Some((button, handler)) = self.click_handlers.on_mouse_up {
+                        this = this.on_mouse_up(button, move |event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            (handler)(event, window, cx);
+                        });
+                    }
+
+                    if let Some(handler) = self.click_handlers.on_any_mouse_down {
+                        this = this.on_any_mouse_down(move |event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            (handler)(event, window, cx);
+                        });
+                    }
+
+                    if let Some(handler) = self.click_handlers.on_any_mouse_up {
+                        this.interactivity()
+                            .on_any_mouse_up(move |event, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                (handler)(event, window, cx);
+                            });
+                    }
+
+                    let on_click = self.click_handlers.on_click;
+                    this.on_click(move |event, window, cx| {
                         window.prevent_default();
+                        cx.stop_propagation();
 
                         if !is_focus {
                             // We only want to blur if something else may be focused.
@@ -229,8 +256,10 @@ impl RenderOnce for Switch {
                         is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
                         cx.notify(is_click_down_state_on_click.entity_id());
 
-                        Self::handle_on_click(window, cx, !self.checked, self.on_click.as_ref());
-                    }
+                        if let Some(on_click) = &on_click {
+                            (on_click)(event, window, cx);
+                        }
+                    })
                 })
                 .on_mouse_up_out(gpui::MouseButton::Left, move |_event, _window, cx| {
                     // We need to clean up states when the mouse clicks down on the component, leaves its bounds, then unclicks.
@@ -322,24 +351,43 @@ mod tests {
 
     #[gpui::test]
     fn test_switch_on_click_callback(cx: &mut TestAppContext) {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        let clicked = Rc::new(Cell::new(false));
-        let clicked_value = Rc::new(Cell::new(false));
+        use crate::primitives::Clickable;
 
         cx.update(|_cx| {
-            let clicked_clone = clicked.clone();
-            let clicked_value_clone = clicked_value.clone();
-
-            let switch = Switch::new("test-switch").on_click(move |value, _window, _cx| {
-                clicked_clone.set(true);
-                clicked_value_clone.set(*value);
-            });
+            let switch = Switch::new("test-switch").on_click(move |_event, _window, _cx| {});
 
             assert!(
-                switch.on_click.is_some(),
+                switch.click_handlers.on_click.is_some(),
                 "Switch should have on_click callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_on_any_mouse_down_callback(cx: &mut TestAppContext) {
+        use crate::primitives::Clickable;
+
+        cx.update(|_cx| {
+            let switch =
+                Switch::new("test-switch").on_any_mouse_down(move |_event, _window, _cx| {});
+
+            assert!(
+                switch.click_handlers.on_any_mouse_down.is_some(),
+                "Switch should have on_any_mouse_down callback"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_on_any_mouse_up_callback(cx: &mut TestAppContext) {
+        use crate::primitives::Clickable;
+
+        cx.update(|_cx| {
+            let switch = Switch::new("test-switch").on_any_mouse_up(move |_event, _window, _cx| {});
+
+            assert!(
+                switch.click_handlers.on_any_mouse_up.is_some(),
+                "Switch should have on_any_mouse_up callback"
             );
         });
     }
@@ -389,18 +437,11 @@ mod tests {
         fn render(
             &mut self,
             _window: &mut gpui::Window,
-            cx: &mut gpui::Context<Self>,
+            _cx: &mut gpui::Context<Self>,
         ) -> impl IntoElement {
             div()
                 .size_full()
-                .child(
-                    Switch::new("test-switch")
-                        .checked(self.checked)
-                        .on_click(cx.listener(|view, checked, _window, cx| {
-                            view.checked = *checked;
-                            cx.notify();
-                        })),
-                )
+                .child(Switch::new("test-switch").checked(self.checked))
         }
     }
 }

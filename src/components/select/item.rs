@@ -1,4 +1,4 @@
-use gpui::{App, IntoElement, SharedString, Window};
+use gpui::{App, FocusHandle, IntoElement, SharedString, Window};
 
 pub trait SelectItem {
     type Value;
@@ -10,6 +10,22 @@ pub trait SelectItem {
     #[allow(unused)]
     fn display(&self, window: &mut Window, cx: &App) -> impl IntoElement {
         self.name().into_any_element()
+    }
+}
+
+/// Wrapper that holds a SelectItem along with its focus handle.
+/// This is created internally when items are added to SelectState.
+pub struct SelectItemEntry<I: SelectItem> {
+    pub item: I,
+    pub focus_handle: FocusHandle,
+}
+
+impl<I: SelectItem> SelectItemEntry<I> {
+    pub fn new(item: I, cx: &mut App) -> Self {
+        Self {
+            item,
+            focus_handle: cx.focus_handle(),
+        }
     }
 }
 
