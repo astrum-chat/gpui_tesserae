@@ -87,6 +87,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
         let state_for_up = self.state.clone();
         let state_for_down = self.state.clone();
         let state_for_confirm = self.state.clone();
+        let on_item_click_for_confirm = self.on_item_click.clone();
 
         let focus_handle = window
             .use_keyed_state(
@@ -119,8 +120,19 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
             .on_action(move |_: &MoveDown, window, cx| {
                 state_for_down.move_highlight_down(window, cx);
             })
-            .on_action(move |_: &Confirm, _window, cx| {
-                state_for_confirm.confirm_highlight(cx);
+            .on_action(move |_: &Confirm, window, cx| {
+                let highlighted = state_for_confirm.highlighted_item.read(cx).clone();
+                if let Some(item_name) = highlighted {
+                    let selected =
+                        state_for_confirm.selected_item.read(cx).as_ref() == Some(&item_name);
+                    (on_item_click_for_confirm)(
+                        !selected,
+                        state_for_confirm.clone(),
+                        item_name,
+                        window,
+                        cx,
+                    );
+                }
             })
             .when(menu_visible_delta != 0., |this| {
                 // We only want the click event if the menu
@@ -135,10 +147,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                         let state = self.state.clone();
 
                         root.on_any_mouse_down(move |_event, _window, cx| {
-                            if state.menu_visible_transition.read_goal(cx) == &false.into() {
-                                return;
-                            };
-
                             state.hide_menu(cx);
                         });
 
@@ -169,32 +177,25 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                     )
                     .children({
                         let state = self.state.clone();
-                        let highlighted_item = self.state.highlighted_item.read(cx).clone();
 
-                        state
-                            .items
-                            .read(cx)
-                            .iter()
-                            .map(|(item_name, entry)| {
-                                let selected =
-                                    self.state.selected_item.read(cx).as_ref() == Some(item_name);
-                                let highlighted = highlighted_item.as_ref() == Some(item_name);
+                        state.items.read(cx).iter().map(|(item_name, entry)| {
+                            let highlighted_item = self.state.highlighted_item.read(cx).clone();
 
-                                div()
-                                    .w_full()
-                                    .flex()
-                                    .track_focus(&entry.focus_handle)
-                                    .child(
-                                        Toggle::new(
-                                            self.id.with_suffix("item").with_suffix(item_name),
-                                        )
+                            let selected =
+                                self.state.selected_item.read(cx).as_ref() == Some(item_name);
+                            let highlighted = highlighted_item.as_ref() == Some(item_name);
+
+                            div()
+                                .w_full()
+                                .flex()
+                                .track_focus(&entry.focus_handle)
+                                .child(
+                                    Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
                                         .checked(selected || highlighted)
-                                        .variant(if selected {
-                                            ToggleVariant::Secondary
-                                        } else if highlighted {
-                                            ToggleVariant::Secondary
-                                        } else {
+                                        .variant(if highlighted {
                                             ToggleVariant::Tertiary
+                                        } else {
+                                            ToggleVariant::Secondary
                                         })
                                         .justify_start()
                                         .rounded(corner_radius - padding)
@@ -219,9 +220,8 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                                 )
                                             })
                                         }),
-                                    )
-                            })
-                            .collect::<Vec<_>>()
+                                )
+                        })
                     })
             })
     }

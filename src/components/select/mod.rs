@@ -1425,6 +1425,7 @@ mod tests {
             assert_eq!(*h, Some("banana".into()), "Should highlight banana");
         });
 
+        // Dispatch Confirm action to select the highlighted item
         vcx.update(|window, cx| {
             window.dispatch_action(Box::new(Confirm), cx);
         });
