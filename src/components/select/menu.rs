@@ -1,8 +1,8 @@
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{
-    App, ElementId, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled, Window,
-    deferred, div, prelude::*, px,
+    App, ElementId, Entity, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled,
+    Window, deferred, div, prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 
@@ -107,8 +107,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                 .clone()
         });
 
-        //println!("is menu focus: {}", focus_handle.is_focused(window));
-
         // Track whether we've synced for this menu open session
         let has_synced = window.use_keyed_state(
             self.id.with_suffix("state:has_synced"),
@@ -116,10 +114,21 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
             |_window, _cx| false,
         );
 
-        // Reset sync flag when menu is closed
+        // Track which item is currently hovered by mouse
+        let hovered_item: Entity<Option<SharedString>> = window.use_keyed_state(
+            self.id.with_suffix("state:hovered_item"),
+            cx,
+            |_window, _cx| None,
+        );
+
+        // Reset sync flag and hover state when menu is closed
         if menu_visible_delta == 0. && *has_synced.read(cx) {
             has_synced.update(cx, |synced, _cx| *synced = false);
+            hovered_item.update(cx, |hovered, _cx| *hovered = None);
         }
+
+        let hovered_item_for_up = hovered_item.clone();
+        let hovered_item_for_down = hovered_item.clone();
 
         deferred(
             div()
@@ -127,9 +136,13 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                 .key_context("SelectMenu")
                 .track_focus(&focus_handle)
                 .on_action(move |_: &MoveUp, window, cx| {
+                    // Clear hover state when using keyboard navigation
+                    hovered_item_for_up.update(cx, |hovered, _cx| *hovered = None);
                     state_for_up.move_highlight_up(window, cx);
                 })
                 .on_action(move |_: &MoveDown, window, cx| {
+                    // Clear hover state when using keyboard navigation
+                    hovered_item_for_down.update(cx, |hovered, _cx| *hovered = None);
                     state_for_down.move_highlight_down(window, cx);
                 })
                 .on_action(move |_: &Confirm, window, cx| {
@@ -192,21 +205,45 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
 
                             state.items.read(cx).iter().map(|(item_name, entry)| {
                                 let highlighted_item = self.state.highlighted_item.read(cx).clone();
+                                let current_hovered = hovered_item.read(cx).clone();
+                                let is_any_hovered = current_hovered.is_some();
 
                                 let selected =
                                     self.state.selected_item.read(cx).as_ref() == Some(item_name);
-                                let highlighted = highlighted_item.as_ref() == Some(item_name);
+                                let is_keyboard_highlighted =
+                                    highlighted_item.as_ref() == Some(item_name);
+                                let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
+
+                                // Show highlight if:
+                                // - Mouse is hovering this item, OR
+                                // - Keyboard highlighted this item AND no mouse hover is active
+                                let show_highlight = is_mouse_hovered
+                                    || (is_keyboard_highlighted && !is_any_hovered);
+
+                                let hovered_item_for_hover = hovered_item.clone();
+                                let item_name_for_hover = item_name.clone();
 
                                 div()
+                                    .id(self.id.with_suffix("item_row").with_suffix(item_name))
                                     .w_full()
                                     .flex()
                                     .track_focus(&entry.focus_handle)
+                                    .on_hover(move |is_hovered, _window, cx| {
+                                        hovered_item_for_hover.update(cx, |hovered, _cx| {
+                                            if *is_hovered {
+                                                *hovered = Some(item_name_for_hover.clone());
+                                            } else if hovered.as_ref() == Some(&item_name_for_hover)
+                                            {
+                                                *hovered = None;
+                                            }
+                                        });
+                                    })
                                     .child(
                                         Toggle::new(
                                             self.id.with_suffix("item").with_suffix(item_name),
                                         )
-                                        .checked(selected || highlighted)
-                                        .variant(if highlighted {
+                                        .checked(selected || show_highlight)
+                                        .variant(if show_highlight {
                                             ToggleVariant::Tertiary
                                         } else {
                                             ToggleVariant::Secondary
@@ -239,5 +276,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                         })
                 }),
         )
+        .priority(1)
     }
 }

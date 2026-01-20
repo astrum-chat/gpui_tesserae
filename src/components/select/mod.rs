@@ -93,8 +93,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             window.blur();
         }
 
-        println!("is select focus: {}", is_focus);
-
         let border_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:border_color"),
             window,
