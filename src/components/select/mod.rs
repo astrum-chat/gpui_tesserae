@@ -444,19 +444,21 @@ mod tests {
     #[gpui::test]
     fn test_select_renders_in_window(cx: &mut TestAppContext) {
         use crate::theme::{Theme, ThemeExt};
+        use crate::views::Root;
 
         let window = cx.update(|cx| {
             cx.set_theme(Theme::DEFAULT);
 
-            cx.open_window(Default::default(), |_window, cx| {
+            cx.open_window(Default::default(), |window, cx| {
                 let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
                 let selected = cx.new(|_cx| None::<SharedString>);
                 let highlighted = cx.new(|_cx| None::<SharedString>);
                 let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
 
-                cx.new(|_cx| SelectTestView {
+                let test_view = cx.new(|_cx| SelectTestView {
                     state: Arc::new(SelectState::new(items, selected, highlighted, visible)),
-                })
+                });
+                cx.new(|cx| Root::new(test_view, window, cx))
             })
             .unwrap()
         });
@@ -1130,8 +1132,8 @@ mod tests {
 
     #[gpui::test]
     fn test_arrow_down_action_moves_highlight(cx: &mut TestAppContext) {
-        use crate::primitives::Root;
         use crate::theme::{Theme, ThemeExt};
+        use crate::views::Root;
 
         cx.update(|cx| {
             cx.set_theme(Theme::DEFAULT);
@@ -1224,8 +1226,8 @@ mod tests {
 
     #[gpui::test]
     fn test_arrow_up_action_moves_highlight(cx: &mut TestAppContext) {
-        use crate::primitives::Root;
         use crate::theme::{Theme, ThemeExt};
+        use crate::views::Root;
 
         cx.update(|cx| {
             cx.set_theme(Theme::DEFAULT);
@@ -1319,8 +1321,8 @@ mod tests {
 
     #[gpui::test]
     fn test_arrow_keys_with_existing_selection(cx: &mut TestAppContext) {
-        use crate::primitives::Root;
         use crate::theme::{Theme, ThemeExt};
+        use crate::views::Root;
 
         cx.update(|cx| {
             cx.set_theme(Theme::DEFAULT);
@@ -1390,8 +1392,8 @@ mod tests {
 
     #[gpui::test]
     fn test_confirm_action_selects_highlighted_item(cx: &mut TestAppContext) {
-        use crate::primitives::Root;
         use crate::theme::{Theme, ThemeExt};
+        use crate::views::Root;
 
         cx.update(|cx| {
             cx.set_theme(Theme::DEFAULT);
@@ -1460,8 +1462,8 @@ mod tests {
 
     #[gpui::test]
     fn test_highlight_persists_across_multiple_arrow_presses(cx: &mut TestAppContext) {
-        use crate::primitives::Root;
         use crate::theme::{Theme, ThemeExt};
+        use crate::views::Root;
 
         cx.update(|cx| {
             cx.set_theme(Theme::DEFAULT);

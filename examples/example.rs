@@ -13,8 +13,10 @@ use gpui_tesserae::{
         Button, Checkbox, Input, Switch,
         select::{Select, SelectItemsMap, SelectState},
     },
-    primitives::{Clickable, Root, input::InputState},
+    extensions::Clickable,
+    primitives::input::InputState,
     theme::{Theme, ThemeExt},
+    views::Root,
 };
 
 struct Main {

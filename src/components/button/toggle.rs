@@ -6,7 +6,10 @@ use gpui::{
 use crate::{
     PositionalParentElement,
     components::{Button, ButtonVariant, GranularButtonVariant},
-    primitives::{ClickHandlers, Clickable},
+    extensions::{
+        click_behavior::{ClickBehavior, ClickBehaviorExt},
+        clickable::{ClickHandlers, Clickable},
+    },
     utils::RgbaExt,
 };
 
@@ -181,6 +184,12 @@ impl Toggle {
 impl Clickable for Toggle {
     fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
         self.base.click_handlers_mut()
+    }
+}
+
+impl ClickBehaviorExt for Toggle {
+    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
+        self.base.click_behavior_mut()
     }
 }
 

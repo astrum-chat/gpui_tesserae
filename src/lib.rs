@@ -1,5 +1,9 @@
 pub mod primitives;
 
+pub mod extensions;
+
+pub mod views;
+
 pub mod components;
 
 pub mod theme;

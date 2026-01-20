@@ -12,9 +12,11 @@ use crate::{
         Toggle, ToggleVariant,
         select::{Confirm, MoveDown, MoveUp, SelectItem, SelectState},
     },
-    primitives::{Clickable, Deferrable, DeferredConfig, Root},
+    extensions::{ClickBehaviorExt, clickable::Clickable},
+    primitives::{Deferrable, DeferredConfig},
     theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,
+    views::Root,
 };
 
 #[derive(IntoElement)]
@@ -229,12 +231,15 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             let is_keyboard_highlighted =
                                 highlighted_item.as_ref() == Some(item_name);
                             let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
+                            let is_focused = entry.focus_handle.is_focused(window);
 
                             // Show highlight if:
                             // - Mouse is hovering this item, OR
+                            // - Item is focused, OR
                             // - Keyboard highlighted this item AND no mouse hover is active
-                            let show_highlight =
-                                is_mouse_hovered || (is_keyboard_highlighted && !is_any_hovered);
+                            let show_highlight = is_mouse_hovered
+                                || is_focused
+                                || (is_keyboard_highlighted && !is_any_hovered);
 
                             let hovered_item_for_hover = hovered_item.clone();
                             let item_name_for_hover = item_name.clone();
@@ -244,6 +249,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                 .w_full()
                                 .flex()
                                 .track_focus(&entry.focus_handle)
+                                .on_mouse_down(gpui::MouseButton::Left, |_event, window, cx| {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                })
                                 .on_hover(move |is_hovered, _window, cx| {
                                     hovered_item_for_hover.update(cx, |hovered, _cx| {
                                         if *is_hovered {

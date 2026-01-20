@@ -12,7 +12,11 @@ use gpui_transitions::Lerp;
 use crate::{
     components::Icon,
     conitional_transition,
-    primitives::{ClickHandlers, Clickable, FocusRing, min_w0_wrapper},
+    extensions::{
+        click_behavior::{ClickBehavior, ClickBehaviorExt},
+        clickable::{ClickHandlers, Clickable},
+    },
+    primitives::{FocusRing, min_w0_wrapper},
     theme::ThemeExt,
     utils::{
         ElementIdExt, PixelsExt, PositionalChildren, PositionalParentElement, RgbaExt, SquircleExt,
@@ -50,6 +54,7 @@ pub struct Button {
     disabled: bool,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     click_handlers: ClickHandlers,
+    click_behavior: ClickBehavior,
     children: PositionalChildren,
     style: ButtonStyles,
 }
@@ -68,6 +73,7 @@ impl Button {
             disabled: false,
             on_hover: None,
             click_handlers: ClickHandlers::new(),
+            click_behavior: ClickBehavior::default(),
             children: PositionalChildren::default(),
             style: ButtonStyles::default(),
         }
@@ -229,6 +235,12 @@ impl Button {
 impl Clickable for Button {
     fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
         &mut self.click_handlers
+    }
+}
+
+impl ClickBehaviorExt for Button {
+    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
+        &mut self.click_behavior
     }
 }
 
@@ -430,23 +442,27 @@ impl RenderOnce for Button {
                 let is_hover_state_on_hover = is_hover_state.clone();
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();
                 let is_click_down_state_on_click = is_click_down_state.clone();
+                let behavior = self.click_behavior;
 
                 this.on_hover(move |hover, _window, cx| {
                     is_hover_state_on_hover.update(cx, |this, _cx| *this = *hover);
                     cx.notify(is_hover_state_on_hover.entity_id());
                 })
                 .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
-                    window.prevent_default();
+                    if !behavior.allow_default {
+                        window.prevent_default();
+                    }
 
                     is_click_down_state_on_mouse_down.update(cx, |this, _cx| *this = true);
                     cx.notify(is_click_down_state_on_mouse_down.entity_id());
                 })
                 .map(|mut this| {
+                    let behavior = self.click_behavior;
+
                     if let Some((button, handler)) = self.click_handlers.on_mouse_down {
                         if button != gpui::MouseButton::Left {
                             this = this.on_mouse_down(button, move |event, window, cx| {
-                                window.prevent_default();
-                                cx.stop_propagation();
+                                behavior.apply(window, cx);
                                 (handler)(event, window, cx);
                             });
                         }
@@ -454,16 +470,14 @@ impl RenderOnce for Button {
 
                     if let Some((button, handler)) = self.click_handlers.on_mouse_up {
                         this = this.on_mouse_up(button, move |event, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                            behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
                     if let Some(handler) = self.click_handlers.on_any_mouse_down {
                         this = this.on_any_mouse_down(move |event, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                            behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
@@ -471,16 +485,14 @@ impl RenderOnce for Button {
                     if let Some(handler) = self.click_handlers.on_any_mouse_up {
                         this.interactivity()
                             .on_any_mouse_up(move |event, window, cx| {
-                                window.prevent_default();
-                                cx.stop_propagation();
+                                behavior.apply(window, cx);
                                 (handler)(event, window, cx);
                             });
                     }
 
                     let on_click = self.click_handlers.on_click;
                     this.on_click(move |event, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                        behavior.apply(window, cx);
 
                         if !is_focus {
                             // We only want to blur if something else may be focused.
@@ -1016,7 +1028,7 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_any_mouse_down_callback(cx: &mut TestAppContext) {
-        use crate::primitives::Clickable;
+        use crate::extensions::clickable::Clickable;
 
         cx.update(|_cx| {
             let button =
@@ -1031,7 +1043,7 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_any_mouse_up_callback(cx: &mut TestAppContext) {
-        use crate::primitives::Clickable;
+        use crate::extensions::clickable::Clickable;
 
         cx.update(|_cx| {
             let button = Button::new("test-button").on_any_mouse_up(move |_event, _window, _cx| {});
@@ -1045,7 +1057,7 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_mouse_down_callback(cx: &mut TestAppContext) {
-        use crate::primitives::Clickable;
+        use crate::extensions::clickable::Clickable;
         use gpui::MouseButton;
 
         cx.update(|_cx| {
@@ -1065,7 +1077,7 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_mouse_up_callback(cx: &mut TestAppContext) {
-        use crate::primitives::Clickable;
+        use crate::extensions::clickable::Clickable;
         use gpui::MouseButton;
 
         cx.update(|_cx| {
