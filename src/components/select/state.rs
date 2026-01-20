@@ -210,12 +210,9 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
             .find(|(_, entry)| &entry.focus_handle == focus_handle)
             .map(|(name, _)| name.clone());
 
-        println!("{:#?}", focused_item);
-
         if let Some(item_name) = focused_item {
             self.highlighted_item.update(cx, |this, cx| {
                 if this.as_ref() != Some(&item_name) {
-                    println!("{}", item_name);
                     *this = Some(item_name);
                     cx.notify();
                 }
