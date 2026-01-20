@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gpui::{App, Entity, KeyBinding, SharedString, Window, actions, ease_out_quint};
+use gpui::{App, Entity, FocusHandle, KeyBinding, SharedString, Window, actions, ease_out_quint};
 use gpui_transitions::{BoolLerp, Transition, TransitionState};
 use indexmap::IndexMap;
 use thiserror::Error;
@@ -199,6 +199,28 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
                 cx.notify();
             }
         });
+    }
+
+    pub fn sync_highlight_to_focused(&self, cx: &mut App, focus_handle: &FocusHandle) {
+        let items = self.items.read(cx);
+
+        // Find the item whose focus handle is currently focused
+        let focused_item = items
+            .iter()
+            .find(|(_, entry)| &entry.focus_handle == focus_handle)
+            .map(|(name, _)| name.clone());
+
+        println!("{:#?}", focused_item);
+
+        if let Some(item_name) = focused_item {
+            self.highlighted_item.update(cx, |this, cx| {
+                if this.as_ref() != Some(&item_name) {
+                    println!("{}", item_name);
+                    *this = Some(item_name);
+                    cx.notify();
+                }
+            });
+        }
     }
 }
 

@@ -12,7 +12,7 @@ use crate::{
         Toggle, ToggleVariant,
         select::{Confirm, MoveDown, MoveUp, SelectItem, SelectState},
     },
-    extensions::{ClickBehaviorExt, clickable::Clickable},
+    extensions::clickable::Clickable,
     primitives::{Deferrable, DeferredConfig},
     theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,
@@ -120,7 +120,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                     .use_keyed_state(
                         self.id.with_suffix("state:focus_handle"),
                         cx,
-                        |_window, cx| cx.focus_handle().tab_stop(true),
+                        |_window, cx| cx.focus_handle(),
                     )
                     .read(cx)
             })
@@ -156,11 +156,13 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
             .on_action(move |_: &MoveUp, window, cx| {
                 // Clear hover state when using keyboard navigation
                 hovered_item_for_up.update(cx, |hovered, _cx| *hovered = None);
+                // Sync highlight to focused item before moving (handles tab navigation)
                 state_for_up.move_highlight_up(window, cx);
             })
             .on_action(move |_: &MoveDown, window, cx| {
                 // Clear hover state when using keyboard navigation
                 hovered_item_for_down.update(cx, |hovered, _cx| *hovered = None);
+                // Sync highlight to focused item before moving (handles tab navigation)
                 state_for_down.move_highlight_down(window, cx);
             })
             .on_action(move |_: &Confirm, window, cx| {
@@ -204,6 +206,41 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                     has_synced.update(cx, |synced, _cx| *synced = true);
                 }
 
+                let state = self.state.clone();
+
+                // Register focus listeners for each item to sync highlighted state on tab navigation
+                // Store subscriptions in keyed state to keep them alive
+                let focus_handles: Vec<_> = state
+                    .items
+                    .read(cx)
+                    .iter()
+                    .map(|(_, entry)| entry.focus_handle.clone())
+                    .collect();
+
+                let _focus_subscriptions: Entity<Vec<gpui::Subscription>> = window.use_keyed_state(
+                    self.id.with_suffix("state:focus_subscriptions"),
+                    cx,
+                    |window, cx| {
+                        focus_handles
+                            .iter()
+                            .map(|focus_handle| {
+                                let focus_handle = focus_handle.clone();
+
+                                let state_for_focus = state.clone();
+                                window.on_focus_in(&focus_handle.clone(), cx, move |_window, cx| {
+                                    state_for_focus.sync_highlight_to_focused(cx, &focus_handle);
+                                })
+                            })
+                            .collect()
+                    },
+                );
+
+                let any_item_focused = state
+                    .items
+                    .read(cx)
+                    .iter()
+                    .any(|(_, entry)| entry.focus_handle.is_focused(window));
+
                 this.opacity(menu_visible_delta)
                     .w_full()
                     .flex()
@@ -218,81 +255,80 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             .border(px(1.))
                             .border_inside(),
                     )
-                    .children({
-                        let state = self.state.clone();
+                    .children(state.items.read(cx).iter().map(|(item_name, entry)| {
+                        let highlighted_item = self.state.highlighted_item.read(cx).clone();
+                        let current_hovered = hovered_item.read(cx).clone();
+                        let is_any_hovered = current_hovered.is_some();
 
-                        state.items.read(cx).iter().map(|(item_name, entry)| {
-                            let highlighted_item = self.state.highlighted_item.read(cx).clone();
-                            let current_hovered = hovered_item.read(cx).clone();
-                            let is_any_hovered = current_hovered.is_some();
+                        let selected =
+                            self.state.selected_item.read(cx).as_ref() == Some(item_name);
+                        let is_keyboard_highlighted = highlighted_item.as_ref() == Some(item_name);
+                        let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
+                        let is_focused = entry.focus_handle.is_focused(window);
 
-                            let selected =
-                                self.state.selected_item.read(cx).as_ref() == Some(item_name);
-                            let is_keyboard_highlighted =
-                                highlighted_item.as_ref() == Some(item_name);
-                            let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
+                        // Show highlight if:
+                        // - Mouse is hovering this item, OR
+                        // - This item is focused, OR
+                        // - Key arrows highlighted this item AND mouse isn't hovering over
+                        //   any over item AND no item is focused.
+                        let show_highlight = is_mouse_hovered
+                            || is_focused
+                            || (is_keyboard_highlighted && !is_any_hovered && !any_item_focused);
 
-                            // Show highlight if:
-                            // - Mouse is hovering this item, OR
-                            // - Keyboard highlighted this item AND no mouse hover is active
-                            let show_highlight =
-                                is_mouse_hovered || (is_keyboard_highlighted && !is_any_hovered);
+                        let hovered_item_for_hover = hovered_item.clone();
+                        let item_name_for_hover = item_name.clone();
 
-                            let hovered_item_for_hover = hovered_item.clone();
-                            let item_name_for_hover = item_name.clone();
+                        div()
+                            .id(self.id.with_suffix("item_row").with_suffix(item_name))
+                            .w_full()
+                            .flex()
+                            .track_focus(&entry.focus_handle)
+                            .on_mouse_down(gpui::MouseButton::Left, |_event, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                            })
+                            .on_hover(move |is_hovered, _window, cx| {
+                                hovered_item_for_hover.update(cx, |hovered, _cx| {
+                                    if *is_hovered {
+                                        *hovered = Some(item_name_for_hover.clone());
+                                    } else if hovered.as_ref() == Some(&item_name_for_hover) {
+                                        *hovered = None;
+                                    }
+                                });
+                            })
+                            .child(
+                                Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
+                                    .checked(selected || show_highlight)
+                                    .variant(if show_highlight {
+                                        ToggleVariant::Tertiary
+                                    } else {
+                                        ToggleVariant::Secondary
+                                    })
+                                    .justify_start()
+                                    .rounded(corner_radius - padding)
+                                    .child_right(entry.item.display(window, cx))
+                                    .pl(horizontal_padding)
+                                    .pr(horizontal_padding)
+                                    .pt(vertical_padding)
+                                    .pb(vertical_padding)
+                                    .w_full()
+                                    .map(|this| {
+                                        let state = self.state.clone();
+                                        let item_name = item_name.clone();
+                                        let on_item_click = self.on_item_click.clone();
 
-                            div()
-                                .id(self.id.with_suffix("item_row").with_suffix(item_name))
-                                .w_full()
-                                .flex()
-                                .track_focus(&entry.focus_handle)
-                                .on_mouse_down(gpui::MouseButton::Left, |_event, window, cx| {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                })
-                                .on_hover(move |is_hovered, _window, cx| {
-                                    hovered_item_for_hover.update(cx, |hovered, _cx| {
-                                        if *is_hovered {
-                                            *hovered = Some(item_name_for_hover.clone());
-                                        } else if hovered.as_ref() == Some(&item_name_for_hover) {
-                                            *hovered = None;
-                                        }
-                                    });
-                                })
-                                .child(
-                                    Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
-                                        .checked(selected || show_highlight)
-                                        .variant(if show_highlight {
-                                            ToggleVariant::Tertiary
-                                        } else {
-                                            ToggleVariant::Secondary
+                                        Clickable::on_click(this, move |_event, window, cx| {
+                                            (on_item_click)(
+                                                !selected,
+                                                state.clone(),
+                                                item_name.clone(),
+                                                window,
+                                                cx,
+                                            )
                                         })
-                                        .justify_start()
-                                        .rounded(corner_radius - padding)
-                                        .child_right(entry.item.display(window, cx))
-                                        .pl(horizontal_padding)
-                                        .pr(horizontal_padding)
-                                        .pt(vertical_padding)
-                                        .pb(vertical_padding)
-                                        .w_full()
-                                        .map(|this| {
-                                            let state = self.state.clone();
-                                            let item_name = item_name.clone();
-                                            let on_item_click = self.on_item_click.clone();
-
-                                            Clickable::on_click(this, move |_event, window, cx| {
-                                                (on_item_click)(
-                                                    !selected,
-                                                    state.clone(),
-                                                    item_name.clone(),
-                                                    window,
-                                                    cx,
-                                                )
-                                            })
-                                        }),
-                                )
-                        })
-                    })
+                                    }),
+                            )
+                    }))
             })
             .map(|this| self.apply_deferred(this))
     }
