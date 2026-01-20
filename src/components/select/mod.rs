@@ -91,6 +91,8 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             window.blur();
         }
 
+        println!("is select focus: {}", is_focus);
+
         let border_color_transition = conitional_transition!(
             self.id.with_suffix("state:transition:border_color"),
             window,
@@ -199,10 +201,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                         .top_full()
                         .left_0()
                         .pt(cx.get_theme().layout.padding.md)
-                        .child(SelectMenu::new(
-                            self.id.with_suffix("menu"),
-                            self.state.clone(),
-                        )),
+                        .child(
+                            SelectMenu::new(self.id.with_suffix("menu"), self.state.clone())
+                                .focus_handle(focus_handle.clone()),
+                        ),
                 )
             })
             .when(!is_disabled, |this| {
@@ -213,6 +215,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                     // We want to disable the default focus / blur behaviour.
                     window.prevent_default();
+                    cx.stop_propagation();
                     focus_handle.focus(window, cx);
                 })
             })

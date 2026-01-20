@@ -268,6 +268,7 @@ impl Render for Root {
                             .id(format!("root-click-overlay"))
                             .absolute()
                             .size_full()
+                            .bg(gpui::red())
                             .map(|this| {
                                 let on_click = std::mem::take(&mut self.mouse_events.on_click);
 

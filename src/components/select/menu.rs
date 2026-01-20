@@ -1,8 +1,8 @@
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{
-    App, ElementId, InteractiveElement, ParentElement, SharedString, Styled, Window, div,
-    prelude::*, px,
+    App, ElementId, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled, Window,
+    deferred, div, prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 
@@ -23,6 +23,7 @@ pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
     layer: ThemeLayerKind,
     state: Arc<SelectState<V, I>>,
     on_item_click: Rc<dyn Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)>,
+    focus_handle: Option<FocusHandle>,
 }
 
 fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
@@ -46,6 +47,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
             layer: ThemeLayerKind::Tertiary,
             state: state.into(),
             on_item_click: Rc::new(default_on_item_click),
+            focus_handle: None,
         }
     }
 
@@ -60,6 +62,11 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
         + 'static,
     ) -> Self {
         self.on_item_click = Rc::new(on_item_click);
+        self
+    }
+
+    pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
+        self.focus_handle = Some(focus_handle);
         self
     }
 }
@@ -89,14 +96,18 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
         let state_for_confirm = self.state.clone();
         let on_item_click_for_confirm = self.on_item_click.clone();
 
-        let focus_handle = window
-            .use_keyed_state(
-                self.id.with_suffix("state:focus_handle"),
-                cx,
-                |_window, cx| cx.focus_handle().tab_stop(true),
-            )
-            .read(cx)
-            .clone();
+        let focus_handle = self.focus_handle.unwrap_or_else(|| {
+            window
+                .use_keyed_state(
+                    self.id.with_suffix("state:focus_handle"),
+                    cx,
+                    |_window, cx| cx.focus_handle().tab_stop(true),
+                )
+                .read(cx)
+                .clone()
+        });
+
+        //println!("is menu focus: {}", focus_handle.is_focused(window));
 
         // Track whether we've synced for this menu open session
         let has_synced = window.use_keyed_state(
@@ -110,87 +121,90 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
             has_synced.update(cx, |synced, _cx| *synced = false);
         }
 
-        div()
-            .id(self.id.clone())
-            .key_context("SelectMenu")
-            .track_focus(&focus_handle)
-            .on_action(move |_: &MoveUp, window, cx| {
-                state_for_up.move_highlight_up(window, cx);
-            })
-            .on_action(move |_: &MoveDown, window, cx| {
-                state_for_down.move_highlight_down(window, cx);
-            })
-            .on_action(move |_: &Confirm, window, cx| {
-                let highlighted = state_for_confirm.highlighted_item.read(cx).clone();
-                if let Some(item_name) = highlighted {
-                    let selected =
-                        state_for_confirm.selected_item.read(cx).as_ref() == Some(&item_name);
-                    (on_item_click_for_confirm)(
-                        !selected,
-                        state_for_confirm.clone(),
-                        item_name,
-                        window,
-                        cx,
-                    );
-                }
-            })
-            .when(menu_visible_delta != 0., |this| {
-                // We only want the click event if the menu
-                // is transitioning towards the visible state.
-                if menu_visible_transition.read_goal(cx) == &true.into() {
-                    let root = window
-                        .root::<Root>()
-                        .flatten()
-                        .expect("Expected gpui_tesserae::Root to be the root view!");
+        deferred(
+            div()
+                .id(self.id.clone())
+                .key_context("SelectMenu")
+                .track_focus(&focus_handle)
+                .on_action(move |_: &MoveUp, window, cx| {
+                    state_for_up.move_highlight_up(window, cx);
+                })
+                .on_action(move |_: &MoveDown, window, cx| {
+                    state_for_down.move_highlight_down(window, cx);
+                })
+                .on_action(move |_: &Confirm, window, cx| {
+                    let highlighted = state_for_confirm.highlighted_item.read(cx).clone();
+                    if let Some(item_name) = highlighted {
+                        let selected =
+                            state_for_confirm.selected_item.read(cx).as_ref() == Some(&item_name);
+                        (on_item_click_for_confirm)(
+                            !selected,
+                            state_for_confirm.clone(),
+                            item_name,
+                            window,
+                            cx,
+                        );
+                    }
+                })
+                .when(menu_visible_delta != 0., |this| {
+                    // We only want the click event if the menu
+                    // is transitioning towards the visible state.
+                    if menu_visible_transition.read_goal(cx) == &true.into() {
+                        let root = window
+                            .root::<Root>()
+                            .flatten()
+                            .expect("Expected gpui_tesserae::Root to be the root view!");
 
-                    root.update(cx, |root, cx| {
-                        let state = self.state.clone();
+                        root.update(cx, |root, cx| {
+                            let state = self.state.clone();
 
-                        root.on_any_mouse_down(move |_event, _window, cx| {
-                            state.hide_menu(cx);
+                            root.on_any_mouse_down(move |_event, _window, cx| {
+                                state.hide_menu(cx);
+                            });
+
+                            cx.notify();
                         });
+                    }
 
-                        cx.notify();
-                    });
-                }
+                    // Only sync highlight to selection once when menu first opens
+                    if !*has_synced.read(cx) {
+                        self.state.sync_highlight_to_selection(cx);
+                        focus_handle.focus(window, cx);
+                        has_synced.update(cx, |synced, _cx| *synced = true);
+                    }
 
-                // Only sync highlight to selection once when menu first opens
-                if !*has_synced.read(cx) {
-                    self.state.sync_highlight_to_selection(cx);
-                    focus_handle.focus(window, cx);
-                    has_synced.update(cx, |synced, _cx| *synced = true);
-                }
+                    this.opacity(menu_visible_delta)
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .p(padding)
+                        .child(
+                            squircle()
+                                .absolute_expand()
+                                .rounded(corner_radius)
+                                .bg(background_color)
+                                .border_color(border_color)
+                                .border(px(1.))
+                                .border_inside(),
+                        )
+                        .children({
+                            let state = self.state.clone();
 
-                this.opacity(menu_visible_delta)
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .p(padding)
-                    .child(
-                        squircle()
-                            .absolute_expand()
-                            .rounded(corner_radius)
-                            .bg(background_color)
-                            .border_color(border_color)
-                            .border(px(1.))
-                            .border_inside(),
-                    )
-                    .children({
-                        let state = self.state.clone();
+                            state.items.read(cx).iter().map(|(item_name, entry)| {
+                                let highlighted_item = self.state.highlighted_item.read(cx).clone();
 
-                        state.items.read(cx).iter().map(|(item_name, entry)| {
-                            let highlighted_item = self.state.highlighted_item.read(cx).clone();
+                                let selected =
+                                    self.state.selected_item.read(cx).as_ref() == Some(item_name);
+                                let highlighted = highlighted_item.as_ref() == Some(item_name);
 
-                            let selected =
-                                self.state.selected_item.read(cx).as_ref() == Some(item_name);
-                            let highlighted = highlighted_item.as_ref() == Some(item_name);
-
-                            div()
-                                .w_full()
-                                .flex()
-                                .track_focus(&entry.focus_handle)
-                                .child(
-                                    Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .track_focus(&entry.focus_handle)
+                                    .child(
+                                        Toggle::new(
+                                            self.id.with_suffix("item").with_suffix(item_name),
+                                        )
                                         .checked(selected || highlighted)
                                         .variant(if highlighted {
                                             ToggleVariant::Tertiary
@@ -220,9 +234,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                                 )
                                             })
                                         }),
-                                )
+                                    )
+                            })
                         })
-                    })
-            })
+                }),
+        )
     }
 }

@@ -1,26 +1,33 @@
+use std::sync::Arc;
+
 use gpui::{
     App, AppContext, Application, Bounds, Context, ElementId, FocusHandle, KeyBinding, Menu,
-    TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, point, prelude::*, px,
-    size,
+    SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, point,
+    prelude::*, px, size,
 };
+use gpui_transitions::{BoolLerp, TransitionState};
 
 use gpui_tesserae::{
     ElementIdExt, TesseraeAssets, assets,
-    components::{Button, Checkbox, Input, Switch},
-    primitives::{Clickable, input::InputState},
+    components::{
+        Button, Checkbox, Input, Switch,
+        select::{Select, SelectItemsMap, SelectState},
+    },
+    primitives::{Clickable, Root, input::InputState},
     theme::{Theme, ThemeExt},
 };
 
-struct Root {
+struct Main {
     focus_handle: FocusHandle,
 
     checkbox_checked: bool,
     switch_checked: bool,
+    select_state: Arc<SelectState<SharedString, SharedString>>,
 }
 
 actions!(window, [TabNext, TabPrev]);
 
-impl Render for Root {
+impl Render for Main {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         gpui_tesserae::init_for_window(window, cx);
 
@@ -58,22 +65,35 @@ impl Render for Root {
                     })),
             )
             .child(
-                Input::new(
-                    "input",
-                    window.use_keyed_state(
-                        ElementId::from("input").with_suffix("state"),
-                        cx,
-                        |_window, cx| InputState::new(cx),
-                    ),
-                )
-                .disabled(self.checkbox_checked || self.switch_checked)
-                .map(|this| {
-                    let invalid = this.read_text(cx).to_lowercase() == "invalid";
+                div().w(px(200.)).child(
+                    Input::new(
+                        "input",
+                        window.use_keyed_state(
+                            ElementId::from("input").with_suffix("state"),
+                            cx,
+                            |_window, cx| InputState::new(cx),
+                        ),
+                    )
+                    .disabled(self.checkbox_checked || self.switch_checked)
+                    .map(|this| {
+                        let invalid = this.read_text(cx).to_lowercase() == "invalid";
 
-                    this.invalid(invalid)
-                }),
+                        this.invalid(invalid)
+                    }),
+                ),
             )
-            .child(Button::new("button").disabled(self.checkbox_checked || self.switch_checked))
+            .child(
+                div().w(px(200.)).child(
+                    Button::new("button")
+                        .text("Button")
+                        .disabled(self.checkbox_checked || self.switch_checked),
+                ),
+            )
+            .child(
+                div()
+                    .w(px(200.))
+                    .child(Select::new("select", self.select_state.clone())),
+            )
     }
 }
 
@@ -103,12 +123,32 @@ fn main() {
                     }),
                     ..Default::default()
                 },
-                |_window, cx| {
-                    cx.new(|cx| Root {
+                |window, cx| {
+                    let items = cx.new(|_cx| SelectItemsMap::<SharedString, SharedString>::new());
+                    let selected = cx.new(|_cx| None::<SharedString>);
+                    let highlighted = cx.new(|_cx| None::<SharedString>);
+                    let menu_visible = cx.new(|_cx| TransitionState::new(BoolLerp::falsey()));
+
+                    let select_state = Arc::new(SelectState::new(
+                        items.clone(),
+                        selected,
+                        highlighted,
+                        menu_visible,
+                    ));
+
+                    select_state.push_item(cx, SharedString::from("Apple"));
+                    select_state.push_item(cx, SharedString::from("Banana"));
+                    select_state.push_item(cx, SharedString::from("Cherry"));
+                    select_state.push_item(cx, SharedString::from("Date"));
+
+                    let main = cx.new(|cx| Main {
                         focus_handle: cx.focus_handle(),
                         checkbox_checked: false,
                         switch_checked: false,
-                    })
+                        select_state,
+                    });
+
+                    cx.new(|cx| Root::new(main, window, cx))
                 },
             )
             .unwrap();
