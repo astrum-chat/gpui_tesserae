@@ -266,6 +266,7 @@ impl Render for Root {
                     this.child(
                         div()
                             .id(format!("root-click-overlay"))
+                            //.bg(gpui::red())
                             .absolute()
                             .size_full()
                             .map(|this| {

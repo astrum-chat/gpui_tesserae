@@ -11,7 +11,7 @@ use crate::{
     ElementIdExt, TesseraeIconKind,
     components::Icon,
     conitional_transition, conitional_transition_update,
-    primitives::FocusRing,
+    primitives::{Deferrable, DeferredConfig, FocusRing},
     theme::{ThemeExt, ThemeLayerKind},
     utils::{PixelsExt, disabled_transition},
 };
@@ -31,6 +31,7 @@ pub struct Select<V: 'static, I: SelectItem<Value = V> + 'static> {
     disabled: bool,
     layer: ThemeLayerKind,
     state: Arc<SelectState<V, I>>,
+    deferred_config: DeferredConfig,
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
@@ -40,7 +41,20 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
             disabled: false,
             layer: ThemeLayerKind::Tertiary,
             state: state.into(),
+            deferred_config: DeferredConfig::default(),
         }
+    }
+}
+
+impl<V: 'static, I: SelectItem<Value = V> + 'static> Deferrable for Select<V, I> {
+    const DEFAULT_PRIORITY: usize = 1;
+
+    fn deferred_config_mut(&mut self) -> &mut DeferredConfig {
+        &mut self.deferred_config
+    }
+
+    fn deferred_config(&self) -> &DeferredConfig {
+        &self.deferred_config
     }
 }
 
@@ -203,7 +217,8 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                         .pt(cx.get_theme().layout.padding.md)
                         .child(
                             SelectMenu::new(self.id.with_suffix("menu"), self.state.clone())
-                                .focus_handle(focus_handle.clone()),
+                                .focus_handle(focus_handle.clone())
+                                .deferred(false),
                         ),
                 )
             })
@@ -219,6 +234,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                     focus_handle.focus(window, cx);
                 })
             })
+            .map(|this| self.apply_deferred(this))
     }
 }
 

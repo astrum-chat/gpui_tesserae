@@ -3,6 +3,9 @@ pub mod input;
 mod clickable;
 pub use clickable::*;
 
+mod deferrable;
+pub use deferrable::*;
+
 mod focus_ring;
 pub use focus_ring::*;
 

@@ -2,7 +2,7 @@ use std::{rc::Rc, sync::Arc};
 
 use gpui::{
     App, ElementId, Entity, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled,
-    Window, deferred, div, prelude::*, px,
+    Window, div, prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 
@@ -12,7 +12,7 @@ use crate::{
         Toggle, ToggleVariant,
         select::{Confirm, MoveDown, MoveUp, SelectItem, SelectState},
     },
-    primitives::{Clickable, Root},
+    primitives::{Clickable, Deferrable, DeferredConfig, Root},
     theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,
 };
@@ -24,6 +24,7 @@ pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
     state: Arc<SelectState<V, I>>,
     on_item_click: Rc<dyn Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)>,
     focus_handle: Option<FocusHandle>,
+    deferred_config: DeferredConfig,
 }
 
 fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
@@ -48,6 +49,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
             state: state.into(),
             on_item_click: Rc::new(default_on_item_click),
             focus_handle: None,
+            deferred_config: DeferredConfig::default(),
         }
     }
 
@@ -68,6 +70,18 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.focus_handle = Some(focus_handle);
         self
+    }
+}
+
+impl<V: 'static, I: SelectItem<Value = V> + 'static> Deferrable for SelectMenu<V, I> {
+    const DEFAULT_PRIORITY: usize = 1;
+
+    fn deferred_config_mut(&mut self) -> &mut DeferredConfig {
+        &mut self.deferred_config
+    }
+
+    fn deferred_config(&self) -> &DeferredConfig {
+        &self.deferred_config
     }
 }
 
@@ -96,16 +110,19 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
         let state_for_confirm = self.state.clone();
         let on_item_click_for_confirm = self.on_item_click.clone();
 
-        let focus_handle = self.focus_handle.unwrap_or_else(|| {
-            window
-                .use_keyed_state(
-                    self.id.with_suffix("state:focus_handle"),
-                    cx,
-                    |_window, cx| cx.focus_handle().tab_stop(true),
-                )
-                .read(cx)
-                .clone()
-        });
+        let focus_handle = self
+            .focus_handle
+            .as_ref()
+            .unwrap_or_else(|| {
+                window
+                    .use_keyed_state(
+                        self.id.with_suffix("state:focus_handle"),
+                        cx,
+                        |_window, cx| cx.focus_handle().tab_stop(true),
+                    )
+                    .read(cx)
+            })
+            .clone();
 
         // Track whether we've synced for this menu open session
         let has_synced = window.use_keyed_state(
@@ -130,118 +147,114 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
         let hovered_item_for_up = hovered_item.clone();
         let hovered_item_for_down = hovered_item.clone();
 
-        deferred(
-            div()
-                .id(self.id.clone())
-                .key_context("SelectMenu")
-                .track_focus(&focus_handle)
-                .on_action(move |_: &MoveUp, window, cx| {
-                    // Clear hover state when using keyboard navigation
-                    hovered_item_for_up.update(cx, |hovered, _cx| *hovered = None);
-                    state_for_up.move_highlight_up(window, cx);
-                })
-                .on_action(move |_: &MoveDown, window, cx| {
-                    // Clear hover state when using keyboard navigation
-                    hovered_item_for_down.update(cx, |hovered, _cx| *hovered = None);
-                    state_for_down.move_highlight_down(window, cx);
-                })
-                .on_action(move |_: &Confirm, window, cx| {
-                    let highlighted = state_for_confirm.highlighted_item.read(cx).clone();
-                    if let Some(item_name) = highlighted {
-                        let selected =
-                            state_for_confirm.selected_item.read(cx).as_ref() == Some(&item_name);
-                        (on_item_click_for_confirm)(
-                            !selected,
-                            state_for_confirm.clone(),
-                            item_name,
-                            window,
-                            cx,
-                        );
-                    }
-                })
-                .when(menu_visible_delta != 0., |this| {
-                    // We only want the click event if the menu
-                    // is transitioning towards the visible state.
-                    if menu_visible_transition.read_goal(cx) == &true.into() {
-                        let root = window
-                            .root::<Root>()
-                            .flatten()
-                            .expect("Expected gpui_tesserae::Root to be the root view!");
+        div()
+            .id(self.id.clone())
+            .key_context("SelectMenu")
+            .track_focus(&focus_handle)
+            .on_action(move |_: &MoveUp, window, cx| {
+                // Clear hover state when using keyboard navigation
+                hovered_item_for_up.update(cx, |hovered, _cx| *hovered = None);
+                state_for_up.move_highlight_up(window, cx);
+            })
+            .on_action(move |_: &MoveDown, window, cx| {
+                // Clear hover state when using keyboard navigation
+                hovered_item_for_down.update(cx, |hovered, _cx| *hovered = None);
+                state_for_down.move_highlight_down(window, cx);
+            })
+            .on_action(move |_: &Confirm, window, cx| {
+                let highlighted = state_for_confirm.highlighted_item.read(cx).clone();
+                if let Some(item_name) = highlighted {
+                    let selected =
+                        state_for_confirm.selected_item.read(cx).as_ref() == Some(&item_name);
+                    (on_item_click_for_confirm)(
+                        !selected,
+                        state_for_confirm.clone(),
+                        item_name,
+                        window,
+                        cx,
+                    );
+                }
+            })
+            .when(menu_visible_delta != 0., |this| {
+                // We only want the click event if the menu
+                // is transitioning towards the visible state.
+                if menu_visible_transition.read_goal(cx) == &true.into() {
+                    let root = window
+                        .root::<Root>()
+                        .flatten()
+                        .expect("Expected gpui_tesserae::Root to be the root view!");
 
-                        root.update(cx, |root, cx| {
-                            let state = self.state.clone();
+                    root.update(cx, |root, cx| {
+                        let state = self.state.clone();
 
-                            root.on_any_mouse_down(move |_event, _window, cx| {
-                                state.hide_menu(cx);
-                            });
-
-                            cx.notify();
+                        root.on_any_mouse_down(move |_event, _window, cx| {
+                            state.hide_menu(cx);
                         });
-                    }
 
-                    // Only sync highlight to selection once when menu first opens
-                    if !*has_synced.read(cx) {
-                        self.state.sync_highlight_to_selection(cx);
-                        focus_handle.focus(window, cx);
-                        has_synced.update(cx, |synced, _cx| *synced = true);
-                    }
+                        cx.notify();
+                    });
+                }
 
-                    this.opacity(menu_visible_delta)
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .p(padding)
-                        .child(
-                            squircle()
-                                .absolute_expand()
-                                .rounded(corner_radius)
-                                .bg(background_color)
-                                .border_color(border_color)
-                                .border(px(1.))
-                                .border_inside(),
-                        )
-                        .children({
-                            let state = self.state.clone();
+                // Only sync highlight to selection once when menu first opens
+                if !*has_synced.read(cx) {
+                    self.state.sync_highlight_to_selection(cx);
+                    focus_handle.focus(window, cx);
+                    has_synced.update(cx, |synced, _cx| *synced = true);
+                }
 
-                            state.items.read(cx).iter().map(|(item_name, entry)| {
-                                let highlighted_item = self.state.highlighted_item.read(cx).clone();
-                                let current_hovered = hovered_item.read(cx).clone();
-                                let is_any_hovered = current_hovered.is_some();
+                this.opacity(menu_visible_delta)
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .p(padding)
+                    .child(
+                        squircle()
+                            .absolute_expand()
+                            .rounded(corner_radius)
+                            .bg(background_color)
+                            .border_color(border_color)
+                            .border(px(1.))
+                            .border_inside(),
+                    )
+                    .children({
+                        let state = self.state.clone();
 
-                                let selected =
-                                    self.state.selected_item.read(cx).as_ref() == Some(item_name);
-                                let is_keyboard_highlighted =
-                                    highlighted_item.as_ref() == Some(item_name);
-                                let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
+                        state.items.read(cx).iter().map(|(item_name, entry)| {
+                            let highlighted_item = self.state.highlighted_item.read(cx).clone();
+                            let current_hovered = hovered_item.read(cx).clone();
+                            let is_any_hovered = current_hovered.is_some();
 
-                                // Show highlight if:
-                                // - Mouse is hovering this item, OR
-                                // - Keyboard highlighted this item AND no mouse hover is active
-                                let show_highlight = is_mouse_hovered
-                                    || (is_keyboard_highlighted && !is_any_hovered);
+                            let selected =
+                                self.state.selected_item.read(cx).as_ref() == Some(item_name);
+                            let is_keyboard_highlighted =
+                                highlighted_item.as_ref() == Some(item_name);
+                            let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
 
-                                let hovered_item_for_hover = hovered_item.clone();
-                                let item_name_for_hover = item_name.clone();
+                            // Show highlight if:
+                            // - Mouse is hovering this item, OR
+                            // - Keyboard highlighted this item AND no mouse hover is active
+                            let show_highlight =
+                                is_mouse_hovered || (is_keyboard_highlighted && !is_any_hovered);
 
-                                div()
-                                    .id(self.id.with_suffix("item_row").with_suffix(item_name))
-                                    .w_full()
-                                    .flex()
-                                    .track_focus(&entry.focus_handle)
-                                    .on_hover(move |is_hovered, _window, cx| {
-                                        hovered_item_for_hover.update(cx, |hovered, _cx| {
-                                            if *is_hovered {
-                                                *hovered = Some(item_name_for_hover.clone());
-                                            } else if hovered.as_ref() == Some(&item_name_for_hover)
-                                            {
-                                                *hovered = None;
-                                            }
-                                        });
-                                    })
-                                    .child(
-                                        Toggle::new(
-                                            self.id.with_suffix("item").with_suffix(item_name),
-                                        )
+                            let hovered_item_for_hover = hovered_item.clone();
+                            let item_name_for_hover = item_name.clone();
+
+                            div()
+                                .id(self.id.with_suffix("item_row").with_suffix(item_name))
+                                .w_full()
+                                .flex()
+                                .track_focus(&entry.focus_handle)
+                                .on_hover(move |is_hovered, _window, cx| {
+                                    hovered_item_for_hover.update(cx, |hovered, _cx| {
+                                        if *is_hovered {
+                                            *hovered = Some(item_name_for_hover.clone());
+                                        } else if hovered.as_ref() == Some(&item_name_for_hover) {
+                                            *hovered = None;
+                                        }
+                                    });
+                                })
+                                .child(
+                                    Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
                                         .checked(selected || show_highlight)
                                         .variant(if show_highlight {
                                             ToggleVariant::Tertiary
@@ -271,11 +284,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                                 )
                                             })
                                         }),
-                                    )
-                            })
+                                )
                         })
-                }),
-        )
-        .priority(1)
+                    })
+            })
+            .map(|this| self.apply_deferred(this))
     }
 }
