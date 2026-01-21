@@ -51,7 +51,7 @@ fn main() {
                 |window, cx| {
                     let main = cx.new(|cx| MainView::new(cx));
 
-                    // `gpui_tesserae::views::Root` must be the top-level view in a window.
+                    // You must wrap your root view with `gpui_tesserae::views::Root`.
                     // Omitting this will cause crashes.
                     cx.new(|cx| Root::new(main, window, cx))
                 },
