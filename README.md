@@ -31,8 +31,8 @@ Examples can be found [here](https://github.com/astrum-chat/gpui_tesserae/tree/m
 
 # Setup
 ```rs
-use gpui::{App, Application, prelude::*};
-use gpui_tesserae::{TesseraeAssets, assets};
+use gpui::{App, Application, Window, WindowOptions, prelude::*};
+use gpui_tesserae::{TesseraeAssets, assets, views::Root};
 
 fn main() {
     Application::new()
@@ -45,6 +45,18 @@ fn main() {
         .run(|cx: &mut App| {
             // Tesserae needs to be initialized before it can be used.
             gpui_tesserae::init(cx);
+
+            cx.open_window(
+                WindowOptions::default(),
+                |window, cx| {
+                    let main = cx.new(|cx| MainView::new(cx));
+
+                    // `gpui_tesserae::Root` must be the top-level view in a window.
+                    // Omitting this will cause crashes.
+                    cx.new(|cx| Root::new(main, window, cx))
+                },
+            )
+            .unwrap();
         });
 }
 
