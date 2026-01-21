@@ -10,7 +10,10 @@ use gpui_transitions::Lerp;
 
 use crate::{
     TesseraeIconKind, conitional_transition,
-    extensions::{ClickBehavior, ClickBehaviorExt, ClickHandlers, Clickable},
+    extensions::{
+        click_behavior::{ClickBehavior, ClickBehaviorExt},
+        clickable::{ClickHandlers, Clickable},
+    },
     primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
     utils::{ElementIdExt, RgbaExt, SquircleExt, checked_transition, disabled_transition},

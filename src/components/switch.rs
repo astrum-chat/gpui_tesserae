@@ -9,7 +9,10 @@ use gpui_transitions::Lerp;
 
 use crate::{
     ElementIdExt, conitional_transition,
-    extensions::{ClickBehavior, ClickBehaviorExt, ClickHandlers, Clickable},
+    extensions::{
+        click_behavior::{ClickBehavior, ClickBehaviorExt},
+        clickable::{ClickHandlers, Clickable},
+    },
     primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
     utils::{RgbaExt, SquircleExt, checked_transition, disabled_transition},

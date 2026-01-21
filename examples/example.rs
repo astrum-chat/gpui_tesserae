@@ -13,7 +13,7 @@ use gpui_tesserae::{
         Button, Checkbox, Input, Switch,
         select::{Select, SelectItemsMap, SelectState},
     },
-    extensions::Clickable,
+    extensions::clickable::Clickable,
     primitives::input::InputState,
     theme::{Theme, ThemeExt},
     views::Root,
