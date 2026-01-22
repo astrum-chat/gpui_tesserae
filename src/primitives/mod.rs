@@ -1,8 +1,5 @@
 pub mod input;
 
-mod deferrable;
-pub use deferrable::*;
-
 mod focus_ring;
 pub use focus_ring::*;
 

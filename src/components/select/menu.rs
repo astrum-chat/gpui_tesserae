@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use gpui::{
-    ElementId, Entity, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled, div,
-    prelude::*, px,
+    ElementId, Entity, FocusHandle, InteractiveElement, Length, ParentElement, SharedString,
+    Styled, div, prelude::*, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 
@@ -12,12 +12,26 @@ use crate::{
         Toggle, ToggleVariant,
         select::{Confirm, MoveDown, MoveUp, SelectItem, SelectState},
     },
-    extensions::clickable::Clickable,
-    primitives::{Deferrable, DeferredConfig},
+    extensions::{
+        clickable::Clickable,
+        deferrable::{Deferrable, DeferredConfig},
+    },
     theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,
     views::Root,
 };
+
+struct SelectMenuStyles {
+    width: Length,
+}
+
+impl Default for SelectMenuStyles {
+    fn default() -> Self {
+        Self {
+            width: Length::Auto,
+        }
+    }
+}
 
 #[derive(IntoElement)]
 pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
@@ -26,6 +40,7 @@ pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
     state: Arc<SelectState<V, I>>,
     focus_handle: Option<FocusHandle>,
     deferred_config: DeferredConfig,
+    style: SelectMenuStyles,
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
@@ -36,7 +51,23 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
             state: state.into(),
             focus_handle: None,
             deferred_config: DeferredConfig::default(),
+            style: SelectMenuStyles::default(),
         }
+    }
+
+    pub fn w(mut self, width: impl Into<Length>) -> Self {
+        self.style.width = width.into();
+        self
+    }
+
+    pub fn w_auto(mut self) -> Self {
+        self.style.width = Length::Auto;
+        self
+    }
+
+    pub fn w_full(mut self) -> Self {
+        self.style.width = relative(100.).into();
+        self
     }
 
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
@@ -201,7 +232,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                 );
 
                 this.opacity(menu_visible_delta)
-                    .w_full()
+                    .w(self.style.width)
                     .flex()
                     .flex_col()
                     .p(padding)
@@ -234,6 +265,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             .track_focus(&entry.focus_handle)
                             .child(
                                 Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
+                                    .w_full()
                                     .checked(selected)
                                     .variant(if selected {
                                         ToggleVariant::Secondary
@@ -248,7 +280,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                     .pr(horizontal_padding)
                                     .pt(vertical_padding)
                                     .pb(vertical_padding)
-                                    .w_full()
                                     .on_any_mouse_down(|_event, window, _cx| {
                                         window.prevent_default();
                                     })

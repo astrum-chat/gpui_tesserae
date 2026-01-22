@@ -67,35 +67,32 @@ impl Render for Main {
                     })),
             )
             .child(
-                div().w(px(200.)).child(
-                    Input::new(
-                        "input",
-                        window.use_keyed_state(
-                            ElementId::from("input").with_suffix("state"),
-                            cx,
-                            |_window, cx| InputState::new(cx),
-                        ),
-                    )
-                    .disabled(self.checkbox_checked || self.switch_checked)
-                    .map(|this| {
-                        let invalid = this.read_text(cx).to_lowercase() == "invalid";
+                Select::new("select", self.select_state.clone())
+                    .w(px(200.))
+                    .disabled(self.checkbox_checked || self.switch_checked),
+            )
+            .child(
+                Input::new(
+                    "input",
+                    window.use_keyed_state(
+                        ElementId::from("input").with_suffix("state"),
+                        cx,
+                        |_window, cx| InputState::new(cx),
+                    ),
+                )
+                .w(px(200.))
+                .disabled(self.checkbox_checked || self.switch_checked)
+                .map(|this| {
+                    let invalid = this.read_text(cx).to_lowercase() == "invalid";
 
-                        this.invalid(invalid)
-                    }),
-                ),
+                    this.invalid(invalid)
+                }),
             )
             .child(
-                div().w(px(200.)).child(
-                    Button::new("button")
-                        .text("Button")
-                        .disabled(self.checkbox_checked || self.switch_checked),
-                ),
-            )
-            .child(
-                div().w(px(200.)).child(
-                    Select::new("select", self.select_state.clone())
-                        .disabled(self.checkbox_checked || self.switch_checked),
-                ),
+                Button::new("button")
+                    .w(px(200.))
+                    .text("Button")
+                    .disabled(self.checkbox_checked || self.switch_checked),
             )
     }
 }

@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use gpui::{
     AbsoluteLength, App, Corners, DefiniteLength, Edges, ElementId, Entity, FocusHandle, Focusable,
-    Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
+    Hsla, InteractiveElement, IntoElement, Length, ParentElement, Pixels, RenderOnce, SharedString,
+    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -21,13 +21,26 @@ use crate::{
     },
 };
 
-#[derive(Default)]
 struct InputStyles {
     gap: Option<DefiniteLength>,
     padding: Edges<Option<DefiniteLength>>,
     inner_padding: Edges<Option<DefiniteLength>>,
     corner_radii: Corners<Option<Pixels>>,
     text_size: Option<AbsoluteLength>,
+    width: Length,
+}
+
+impl Default for InputStyles {
+    fn default() -> Self {
+        Self {
+            gap: None,
+            padding: Edges::default(),
+            inner_padding: Edges::default(),
+            corner_radii: Corners::default(),
+            text_size: None,
+            width: Length::Auto,
+        }
+    }
 }
 
 #[derive(IntoElement)]
@@ -56,6 +69,21 @@ impl Input {
             style: InputStyles::default(),
             base: PrimitiveInput::new(state),
         }
+    }
+
+    pub fn w(mut self, width: impl Into<Length>) -> Self {
+        self.style.width = width.into();
+        self
+    }
+
+    pub fn w_auto(mut self) -> Self {
+        self.style.width = Length::Auto;
+        self
+    }
+
+    pub fn w_full(mut self) -> Self {
+        self.style.width = relative(100.).into();
+        self
     }
 
     pub fn invalid(mut self, invalid: bool) -> Self {
@@ -308,7 +336,7 @@ impl RenderOnce for Input {
 
         div()
             .id(self.id.clone())
-            .w_full()
+            .w(self.style.width)
             .h_auto()
             .map(|this| {
                 apply_padding!(this, padding_override, vertical_padding, horizontal_padding)

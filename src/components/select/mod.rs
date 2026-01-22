@@ -1,8 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce,
+    ElementId, InteractiveElement, IntoElement, Length, MouseButton, ParentElement, RenderOnce,
     StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px, radians,
+    relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -12,10 +13,22 @@ use crate::{
     components::Icon,
     conitional_transition, conitional_transition_update,
     extensions::click_behavior::{ClickBehavior, ClickBehaviorExt},
-    primitives::{Deferrable, DeferredConfig, FocusRing},
+    primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
     utils::{PixelsExt, disabled_transition},
 };
+
+struct SelectStyles {
+    width: Length,
+}
+
+impl Default for SelectStyles {
+    fn default() -> Self {
+        Self {
+            width: Length::Auto,
+        }
+    }
+}
 
 mod menu;
 pub use menu::*;
@@ -32,8 +45,8 @@ pub struct Select<V: 'static, I: SelectItem<Value = V> + 'static> {
     disabled: bool,
     layer: ThemeLayerKind,
     state: Arc<SelectState<V, I>>,
-    deferred_config: DeferredConfig,
     click_behavior: ClickBehavior,
+    style: SelectStyles,
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
@@ -45,9 +58,24 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
             disabled: false,
             layer: ThemeLayerKind::Tertiary,
             state: state.into(),
-            deferred_config: DeferredConfig::default(),
             click_behavior: ClickBehavior::default(),
+            style: SelectStyles::default(),
         }
+    }
+
+    pub fn w(mut self, width: impl Into<Length>) -> Self {
+        self.style.width = width.into();
+        self
+    }
+
+    pub fn w_auto(mut self) -> Self {
+        self.style.width = Length::Auto;
+        self
+    }
+
+    pub fn w_full(mut self) -> Self {
+        self.style.width = relative(100.).into();
+        self
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -59,18 +87,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
 impl<V: 'static, I: SelectItem<Value = V> + 'static> ClickBehaviorExt for Select<V, I> {
     fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
         &mut self.click_behavior
-    }
-}
-
-impl<V: 'static, I: SelectItem<Value = V> + 'static> Deferrable for Select<V, I> {
-    const DEFAULT_PRIORITY: usize = 1;
-
-    fn deferred_config_mut(&mut self) -> &mut DeferredConfig {
-        &mut self.deferred_config
-    }
-
-    fn deferred_config(&self) -> &DeferredConfig {
-        &self.deferred_config
     }
 }
 
@@ -155,13 +171,12 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
 
         div()
             .id(self.id.clone())
-            .track_focus(&focus_handle)
             .cursor(if is_disabled {
                 gpui::CursorStyle::OperationNotAllowed
             } else {
                 gpui::CursorStyle::PointingHand
             })
-            .w_full()
+            .w(self.style.width)
             .h_auto()
             .pl(horizontal_padding)
             .pr(horizontal_padding)
@@ -237,13 +252,14 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                         .pt(cx.get_theme().layout.padding.md)
                         .child(
                             SelectMenu::new(self.id.with_suffix("menu"), self.state.clone())
-                                .focus_handle(focus_handle.clone())
-                                .deferred(false),
+                                .focus_handle(focus_handle.clone()),
                         ),
                 )
             })
             .when(!is_disabled, |this| {
                 let behavior = self.click_behavior;
+
+                let focus_handle_on_mouse_down = focus_handle.clone();
 
                 this.on_hover(move |hover, _window, cx| {
                     is_hover_state.update(cx, |this, cx| {
@@ -253,10 +269,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 })
                 .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                     behavior.apply(window, cx);
-                    focus_handle.focus(window, cx);
+                    focus_handle_on_mouse_down.focus(window, cx);
                 })
+                .track_focus(&focus_handle)
             })
-            .map(|this| self.apply_deferred(this))
     }
 }
 
