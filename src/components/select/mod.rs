@@ -1,9 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    ElementId, InteractiveElement, IntoElement, Length, MouseButton, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px, radians,
-    relative,
+    App, ElementId, InteractiveElement, IntoElement, Length, MouseButton, ParentElement,
+    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    prelude::FluentBuilder, px, radians, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -274,6 +274,22 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 .track_focus(&focus_handle)
             })
     }
+}
+
+pub fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
+    checked: bool,
+    state: Arc<SelectState<V, I>>,
+    item_name: SharedString,
+    _window: &mut Window,
+    cx: &mut App,
+) {
+    if checked {
+        let _ = state.select_item(cx, item_name.clone());
+    } else {
+        state.remove_selection(cx);
+    }
+
+    state.hide_menu(cx);
 }
 
 #[cfg(all(test, feature = "test-support"))]

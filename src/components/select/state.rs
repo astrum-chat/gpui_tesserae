@@ -1,14 +1,17 @@
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    App, Entity, FocusHandle, KeyBinding, SharedString, WeakFocusHandle, Window, actions,
-    ease_out_quint,
+    App, AppContext, Context, ElementId, Entity, FocusHandle, KeyBinding, SharedString,
+    WeakFocusHandle, Window, actions, ease_out_quint,
 };
 use gpui_transitions::{BoolLerp, Transition, TransitionState};
 use indexmap::IndexMap;
 use thiserror::Error;
 
-use crate::components::select::{SelectItem, SelectItemEntry};
+use crate::{
+    ElementIdExt,
+    components::select::{SelectItem, SelectItemEntry, default_on_item_click},
+};
 
 actions!(select_menu, [MoveUp, MoveDown, Confirm]);
 
@@ -16,29 +19,15 @@ pub type OnItemClickFn<V, I> =
     Rc<dyn Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)>;
 
 pub struct SelectState<V: 'static, I: SelectItem<Value = V> + 'static> {
-    pub items: Entity<SelectItemsMap<V, I>>,
-    pub selected_item: Entity<Option<SharedString>>,
-    pub highlighted_item: Entity<Option<SharedString>>,
+    pub(crate) items: Entity<SelectItemsMap<V, I>>,
+    pub(crate) selected_item: Entity<Option<SharedString>>,
+    pub(crate) highlighted_item: Entity<Option<SharedString>>,
     pub menu_visible_transition: Transition<BoolLerp<f32>>,
-    pub on_item_click: OnItemClickFn<V, I>,
+    pub(crate) on_item_click: OnItemClickFn<V, I>,
     /// Weak focus handles from all Select components using this state.
     /// Used to determine if any associated Select has focus.
     /// Stored as weak references so stale handles can be cleaned up.
     pub(crate) select_focus_handles: Entity<Vec<WeakFocusHandle>>,
-}
-
-fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
-    checked: bool,
-    state: Arc<SelectState<V, I>>,
-    item_name: SharedString,
-    _window: &mut Window,
-    cx: &mut App,
-) {
-    if checked {
-        let _ = state.select_item(cx, item_name.clone());
-    } else {
-        state.remove_selection(cx);
-    }
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
@@ -47,23 +36,92 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         items: Entity<SelectItemsMap<V, I>>,
         selected_item: Entity<Option<SharedString>>,
         highlighted_item: Entity<Option<SharedString>>,
-        menu_visible_state: Entity<TransitionState<BoolLerp<f32>>>,
+        menu_visible: Entity<TransitionState<BoolLerp<f32>>>,
         select_focus_handles: Entity<Vec<WeakFocusHandle>>,
     ) -> Self {
         let state = Self {
             items,
             selected_item,
             highlighted_item,
+            menu_visible_transition: Transition::new(menu_visible, Duration::from_millis(275))
+                .with_easing(ease_out_quint()),
+            on_item_click: Rc::new(default_on_item_click),
+            select_focus_handles,
+        };
+
+        state.cleanup_stale_focus_handles(cx);
+
+        state
+    }
+
+    pub fn from_window(
+        id: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
+        create_items: impl FnOnce(
+            &mut Window,
+            &mut Context<SelectItemsMap<V, I>>,
+        ) -> SelectItemsMap<V, I>,
+    ) -> Self {
+        let id = id.into();
+
+        let state = Self {
+            items: window.use_keyed_state(id.with_suffix("state:items"), cx, create_items),
+            selected_item: window.use_keyed_state(
+                id.with_suffix("state:selected_item"),
+                cx,
+                |_window, _cx| None,
+            ),
+            highlighted_item: window.use_keyed_state(
+                id.with_suffix("state:highlighted_item"),
+                cx,
+                |_window, _cx| None,
+            ),
             menu_visible_transition: Transition::new(
-                menu_visible_state,
+                window.use_keyed_state(id.with_suffix("state:menu_visible"), cx, |_window, _cx| {
+                    TransitionState::new(BoolLerp::falsey())
+                }),
                 Duration::from_millis(275),
             )
             .with_easing(ease_out_quint()),
             on_item_click: Rc::new(default_on_item_click),
-            select_focus_handles,
+            select_focus_handles: window.use_keyed_state(
+                id.with_suffix("state:focus_handles"),
+                cx,
+                |_window, _cx| vec![],
+            ),
         };
+
         state.cleanup_stale_focus_handles(cx);
+
         state
+    }
+
+    pub fn from_cx(cx: &mut App, items: SelectItemsMap<V, I>) -> Self {
+        let state = Self {
+            items: cx.new(|_cx| items),
+            selected_item: cx.new(|_cx| None),
+            highlighted_item: cx.new(|_cx| None),
+            menu_visible_transition: Transition::new(
+                cx.new(|_cx| TransitionState::new(BoolLerp::falsey())),
+                Duration::from_millis(275),
+            )
+            .with_easing(ease_out_quint()),
+            on_item_click: Rc::new(default_on_item_click),
+            select_focus_handles: cx.new(|_cx| vec![]),
+        };
+
+        state.cleanup_stale_focus_handles(cx);
+
+        state
+    }
+
+    pub fn on_item_click(
+        &mut self,
+        on_item_click: impl Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)
+        + 'static,
+    ) {
+        self.on_item_click = Rc::new(on_item_click);
     }
 
     /// Removes focus handles that are no longer valid (i.e., their associated
@@ -111,15 +169,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
             .iter()
             .filter_map(|handle| handle.upgrade())
             .any(|handle| handle.contains_focused(window, cx))
-    }
-
-    pub fn with_on_item_click(
-        mut self,
-        on_item_click: impl Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)
-        + 'static,
-    ) -> Self {
-        self.on_item_click = Rc::new(on_item_click);
-        self
     }
 
     pub fn push_item(&self, cx: &mut App, item: impl Into<I>) {

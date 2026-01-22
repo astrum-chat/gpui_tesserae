@@ -235,6 +235,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                     .w(self.style.width)
                     .flex()
                     .flex_col()
+                    .gap(px(1.))
                     .p(padding)
                     .child(
                         squircle()
