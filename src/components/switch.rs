@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    CursorStyle, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
-    StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder, px,
+    CursorStyle, ElementId, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder,
+    px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -25,6 +26,7 @@ pub struct Switch {
     checked: bool,
     disabled: bool,
     force_hover: bool,
+    focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
     click_handlers: ClickHandlers,
     click_behavior: ClickBehavior,
@@ -38,10 +40,16 @@ impl Switch {
             checked: false,
             disabled: false,
             force_hover: false,
+            focus_handle: None,
             on_hover: None,
             click_handlers: ClickHandlers::new(),
             click_behavior: ClickBehavior::default(),
         }
+    }
+
+    pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
+        self.focus_handle = Some(focus_handle);
+        self
     }
 
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
@@ -125,13 +133,18 @@ impl RenderOnce for Switch {
         );
         let is_click_down = *is_click_down_state.read(cx);
 
-        let focus_handle = window
-            .use_keyed_state(
-                self.id.with_suffix("state:focus_handle"),
-                cx,
-                |_window, cx| cx.focus_handle().tab_stop(true),
-            )
-            .read(cx)
+        let focus_handle = self
+            .focus_handle
+            .as_ref()
+            .unwrap_or_else(|| {
+                window
+                    .use_keyed_state(
+                        self.id.with_suffix("state:focus_handle"),
+                        cx,
+                        |_window, cx| cx.focus_handle().tab_stop(true),
+                    )
+                    .read(cx)
+            })
             .clone();
         let is_focus = focus_handle.is_focused(window);
 
