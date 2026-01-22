@@ -1,6 +1,9 @@
-use std::time::Duration;
+use std::{rc::Rc, sync::Arc, time::Duration};
 
-use gpui::{App, Entity, FocusHandle, KeyBinding, SharedString, Window, actions, ease_out_quint};
+use gpui::{
+    App, Entity, FocusHandle, KeyBinding, SharedString, WeakFocusHandle, Window, actions,
+    ease_out_quint,
+};
 use gpui_transitions::{BoolLerp, Transition, TransitionState};
 use indexmap::IndexMap;
 use thiserror::Error;
@@ -9,21 +12,45 @@ use crate::components::select::{SelectItem, SelectItemEntry};
 
 actions!(select_menu, [MoveUp, MoveDown, Confirm]);
 
+pub type OnItemClickFn<V, I> =
+    Rc<dyn Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)>;
+
 pub struct SelectState<V: 'static, I: SelectItem<Value = V> + 'static> {
     pub items: Entity<SelectItemsMap<V, I>>,
     pub selected_item: Entity<Option<SharedString>>,
     pub highlighted_item: Entity<Option<SharedString>>,
     pub menu_visible_transition: Transition<BoolLerp<f32>>,
+    pub on_item_click: OnItemClickFn<V, I>,
+    /// Weak focus handles from all Select components using this state.
+    /// Used to determine if any associated Select has focus.
+    /// Stored as weak references so stale handles can be cleaned up.
+    pub(crate) select_focus_handles: Entity<Vec<WeakFocusHandle>>,
+}
+
+fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
+    checked: bool,
+    state: Arc<SelectState<V, I>>,
+    item_name: SharedString,
+    _window: &mut Window,
+    cx: &mut App,
+) {
+    if checked {
+        let _ = state.select_item(cx, item_name.clone());
+    } else {
+        state.remove_selection(cx);
+    }
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
     pub fn new(
+        cx: &mut App,
         items: Entity<SelectItemsMap<V, I>>,
         selected_item: Entity<Option<SharedString>>,
         highlighted_item: Entity<Option<SharedString>>,
         menu_visible_state: Entity<TransitionState<BoolLerp<f32>>>,
+        select_focus_handles: Entity<Vec<WeakFocusHandle>>,
     ) -> Self {
-        Self {
+        let state = Self {
             items,
             selected_item,
             highlighted_item,
@@ -32,7 +59,67 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
                 Duration::from_millis(275),
             )
             .with_easing(ease_out_quint()),
-        }
+            on_item_click: Rc::new(default_on_item_click),
+            select_focus_handles,
+        };
+        state.cleanup_stale_focus_handles(cx);
+        state
+    }
+
+    /// Removes focus handles that are no longer valid (i.e., their associated
+    /// component has been removed).
+    pub(crate) fn cleanup_stale_focus_handles(&self, cx: &mut App) {
+        self.select_focus_handles.update(cx, |handles, _cx| {
+            let mut i = 0;
+            while i < handles.len() {
+                if handles[i].upgrade().is_none() {
+                    handles.swap_remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+        });
+    }
+
+    /// Registers a focus handle from a Select component using this state.
+    /// Called automatically when a Select component renders.
+    pub(crate) fn register_focus_handle(&self, cx: &mut App, focus_handle: FocusHandle) {
+        self.select_focus_handles.update(cx, |handles, _cx| {
+            let weak = focus_handle.downgrade();
+
+            // Clean up stale handles
+            let mut i = 0;
+            while i < handles.len() {
+                if handles[i].upgrade().is_none() {
+                    handles.swap_remove(i);
+                } else {
+                    i += 1;
+                }
+            }
+
+            // Only add if not already present
+            if !handles.contains(&weak) {
+                handles.push(weak);
+            }
+        });
+    }
+
+    /// Checks if any Select component using this state has focus.
+    pub fn any_select_focused(&self, window: &Window, cx: &mut App) -> bool {
+        self.select_focus_handles
+            .read(cx)
+            .iter()
+            .filter_map(|handle| handle.upgrade())
+            .any(|handle| handle.contains_focused(window, cx))
+    }
+
+    pub fn with_on_item_click(
+        mut self,
+        on_item_click: impl Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)
+        + 'static,
+    ) -> Self {
+        self.on_item_click = Rc::new(on_item_click);
+        self
     }
 
     pub fn push_item(&self, cx: &mut App, item: impl Into<I>) {
@@ -178,11 +265,11 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         }
     }
 
-    pub fn confirm_highlight(&self, cx: &mut App) {
+    pub fn confirm_highlight(self: &Arc<Self>, window: &mut Window, cx: &mut App) {
         let highlighted = self.highlighted_item.read(cx).clone();
         if let Some(item_name) = highlighted {
-            let _ = self.select_item(cx, item_name);
-            self.hide_menu(cx);
+            let selected = self.selected_item.read(cx).as_ref() == Some(&item_name);
+            (self.on_item_click)(!selected, self.clone(), item_name, window, cx);
         }
     }
 

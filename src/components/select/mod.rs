@@ -11,6 +11,7 @@ use crate::{
     ElementIdExt, TesseraeIconKind,
     components::Icon,
     conitional_transition, conitional_transition_update,
+    extensions::click_behavior::{ClickBehavior, ClickBehaviorExt},
     primitives::{Deferrable, DeferredConfig, FocusRing},
     theme::{ThemeExt, ThemeLayerKind},
     utils::{PixelsExt, disabled_transition},
@@ -32,17 +33,32 @@ pub struct Select<V: 'static, I: SelectItem<Value = V> + 'static> {
     layer: ThemeLayerKind,
     state: Arc<SelectState<V, I>>,
     deferred_config: DeferredConfig,
+    click_behavior: ClickBehavior,
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
     pub fn new(id: impl Into<ElementId>, state: impl Into<Arc<SelectState<V, I>>>) -> Self {
+        let state = state.into();
+
         Self {
             id: id.into(),
             disabled: false,
             layer: ThemeLayerKind::Tertiary,
             state: state.into(),
             deferred_config: DeferredConfig::default(),
+            click_behavior: ClickBehavior::default(),
         }
+    }
+
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+}
+
+impl<V: 'static, I: SelectItem<Value = V> + 'static> ClickBehaviorExt for Select<V, I> {
+    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
+        &mut self.click_behavior
     }
 }
 
@@ -96,14 +112,21 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             )
             .read(cx)
             .clone();
+
+        // Register this Select's focus handle with the shared state
+        self.state.register_focus_handle(cx, focus_handle.clone());
+
         // Use contains_focused instead of is_focused so that the menu stays open
         // when focus moves to a menu item (which is a descendant of the Select).
         let is_focus = focus_handle.contains_focused(window, cx);
 
+        // Check if any Select using this state has focus (for menu visibility)
+        let any_select_focused = self.state.any_select_focused(window, cx);
+
         let is_disabled = self.disabled;
         let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);
 
-        if is_focus && is_disabled {
+        if is_disabled && is_focus {
             window.blur();
         }
 
@@ -126,7 +149,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 .state
                 .menu_visible_transition.clone(),
             {
-                is_focus => true,
+                any_select_focused => true,
                 _ => false
             }
         );
@@ -136,7 +159,11 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
         div()
             .id(self.id.clone())
             .track_focus(&focus_handle)
-            .cursor_pointer()
+            .cursor(if is_disabled {
+                gpui::CursorStyle::OperationNotAllowed
+            } else {
+                gpui::CursorStyle::PointingHand
+            })
             .w_full()
             .h_auto()
             .pl(horizontal_padding)
@@ -146,15 +173,11 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             .gap(horizontal_padding)
             .flex()
             .flex_col()
-            .map(|this| {
-                let focus_handle = focus_handle.clone();
-                let disabled_delta = *disabled_transition.evaluate(window, cx);
-
-                this.opacity(disabled_delta).child(
-                    FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
-                        .rounded(corner_radius),
-                )
-            })
+            .opacity(*disabled_transition.evaluate(window, cx))
+            .child(
+                FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
+                    .rounded(corner_radius),
+            )
             .child(
                 squircle()
                     .absolute_expand()
@@ -223,14 +246,16 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 )
             })
             .when(!is_disabled, |this| {
+                let behavior = self.click_behavior;
+
                 this.on_hover(move |hover, _window, cx| {
-                    is_hover_state.update(cx, |this, _cx| *this = *hover);
-                    cx.notify(is_hover_state.entity_id());
+                    is_hover_state.update(cx, |this, cx| {
+                        *this = *hover;
+                        cx.notify();
+                    });
                 })
                 .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
-                    // We want to disable the default focus / blur behaviour.
-                    window.prevent_default();
-                    cx.stop_propagation();
+                    behavior.apply(window, cx);
                     focus_handle.focus(window, cx);
                 })
             })
@@ -243,6 +268,24 @@ mod tests {
     use super::*;
     use gpui::{App, AppContext, SharedString, TestAppContext, VisualTestContext, Window};
     use gpui_transitions::{BoolLerp, TransitionState};
+
+    /// Helper to create select state entities for tests
+    fn create_test_state_entities(
+        cx: &mut TestAppContext,
+    ) -> (
+        gpui::Entity<SelectItemsMap<String, TestSelectItem>>,
+        gpui::Entity<Option<SharedString>>,
+        gpui::Entity<Option<SharedString>>,
+        gpui::Entity<TransitionState<BoolLerp<f32>>>,
+        gpui::Entity<Vec<gpui::WeakFocusHandle>>,
+    ) {
+        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
+        let selected = cx.new(|_cx| None::<SharedString>);
+        let highlighted = cx.new(|_cx| None::<SharedString>);
+        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+        let focus_handles = cx.new(|_cx| Vec::new());
+        (items, selected, highlighted, visible, focus_handles)
+    }
 
     /// A simple test item for use in Select tests.
     #[derive(Clone)]
@@ -278,13 +321,10 @@ mod tests {
 
     #[gpui::test]
     fn test_select_creation(cx: &mut TestAppContext) {
-        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
-        let selected = cx.new(|_cx| None::<SharedString>);
-        let highlighted = cx.new(|_cx| None::<SharedString>);
-        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
 
-        cx.update(|_cx| {
-            let state = SelectState::new(items, selected, highlighted, visible);
+        cx.update(|cx| {
+            let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
             let select = Select::new("test-select", state);
             assert!(!select.disabled, "Select should start enabled");
         });
@@ -292,11 +332,17 @@ mod tests {
 
     #[gpui::test]
     fn test_select_state_push_item(cx: &mut TestAppContext) {
-        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
-        let selected = cx.new(|_cx| None::<SharedString>);
-        let highlighted = cx.new(|_cx| None::<SharedString>);
-        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(items.clone(), selected, highlighted, visible);
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+        let state = cx.update(|cx| {
+            SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted,
+                visible,
+                focus_handles,
+            )
+        });
 
         items.read_with(cx, |items, _| {
             assert!(items.iter().count() == 0, "Items should start empty");
@@ -314,11 +360,17 @@ mod tests {
 
     #[gpui::test]
     fn test_select_state_select_item(cx: &mut TestAppContext) {
-        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
-        let selected = cx.new(|_cx| None::<SharedString>);
-        let highlighted = cx.new(|_cx| None::<SharedString>);
-        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(items.clone(), selected.clone(), highlighted, visible);
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+        let state = cx.update(|cx| {
+            SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted,
+                visible,
+                focus_handles,
+            )
+        });
 
         cx.update(|cx| {
             state.push_item(cx, TestSelectItem::new("item1", "value1"));
@@ -356,11 +408,17 @@ mod tests {
 
     #[gpui::test]
     fn test_select_state_select_invalid_item(cx: &mut TestAppContext) {
-        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
-        let selected = cx.new(|_cx| None::<SharedString>);
-        let highlighted = cx.new(|_cx| None::<SharedString>);
-        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(items, selected.clone(), highlighted, visible);
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+        let state = cx.update(|cx| {
+            SelectState::new(
+                cx,
+                items,
+                selected.clone(),
+                highlighted,
+                visible,
+                focus_handles,
+            )
+        });
 
         // Try to select non-existent item
         cx.update(|cx| {
@@ -375,11 +433,17 @@ mod tests {
 
     #[gpui::test]
     fn test_select_state_cancel_selection(cx: &mut TestAppContext) {
-        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
-        let selected = cx.new(|_cx| None::<SharedString>);
-        let highlighted = cx.new(|_cx| None::<SharedString>);
-        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(items.clone(), selected.clone(), highlighted, visible);
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+        let state = cx.update(|cx| {
+            SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted,
+                visible,
+                focus_handles,
+            )
+        });
 
         cx.update(|cx| {
             state.push_item(cx, TestSelectItem::new("item1", "value1"));
@@ -426,13 +490,17 @@ mod tests {
 
     #[gpui::test]
     fn test_select_layer(cx: &mut TestAppContext) {
-        let items = cx.new(|_cx| SelectItemsMap::<String, TestSelectItem>::new());
-        let selected = cx.new(|_cx| None::<SharedString>);
-        let highlighted = cx.new(|_cx| None::<SharedString>);
-        let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
 
-        cx.update(|_cx| {
-            let state = SelectState::new(items.clone(), selected.clone(), highlighted, visible);
+        cx.update(|cx| {
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted,
+                visible,
+                focus_handles,
+            );
             let select = Select::new("test-select", state);
             assert!(
                 matches!(select.layer, ThemeLayerKind::Tertiary),
@@ -454,10 +522,17 @@ mod tests {
                 let selected = cx.new(|_cx| None::<SharedString>);
                 let highlighted = cx.new(|_cx| None::<SharedString>);
                 let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+                let focus_handles = cx.new(|_cx| Vec::new());
 
-                let test_view = cx.new(|_cx| SelectTestView {
-                    state: Arc::new(SelectState::new(items, selected, highlighted, visible)),
-                });
+                let state = Arc::new(SelectState::new(
+                    cx,
+                    items,
+                    selected,
+                    highlighted,
+                    visible,
+                    focus_handles,
+                ));
+                let test_view = cx.new(|_cx| SelectTestView { state });
                 cx.new(|cx| Root::new(test_view, window, cx))
             })
             .unwrap()
@@ -475,7 +550,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -510,7 +594,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -569,7 +662,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| Some("item3".into()));
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -601,7 +703,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -633,7 +744,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| Some("item3".into()));
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -680,7 +800,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| Some("item1".into()));
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -712,7 +841,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -744,12 +882,22 @@ mod tests {
         let selected = cx.new(|_cx| None::<SharedString>);
         let highlighted = cx.new(|_cx| Some("item2".into()));
         let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(
-            items.clone(),
-            selected.clone(),
-            highlighted.clone(),
-            visible.clone(),
-        );
+        let focus_handles = cx.new(|_cx| Vec::new());
+
+        let state = cx.update(|cx| {
+            Arc::new(SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted.clone(),
+                visible.clone(),
+                focus_handles,
+            ))
+        });
+
+        let window = cx
+            .update(|cx| cx.open_window(Default::default(), |_window, cx| cx.new(|_| gpui::Empty)))
+            .unwrap();
 
         cx.update(|cx| {
             state.push_item(cx, TestSelectItem::new("item1", "value1"));
@@ -759,9 +907,10 @@ mod tests {
         });
 
         // Confirm the highlight
-        cx.update(|cx| {
-            state.confirm_highlight(cx);
-        });
+        cx.update_window(window.into(), |_view, window, cx| {
+            state.confirm_highlight(window, cx);
+        })
+        .unwrap();
 
         // Selected should now be item2
         selected.read_with(cx, |s, _| {
@@ -779,12 +928,22 @@ mod tests {
         let selected = cx.new(|_cx| None::<SharedString>);
         let highlighted = cx.new(|_cx| None::<SharedString>);
         let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(
-            items.clone(),
-            selected.clone(),
-            highlighted.clone(),
-            visible.clone(),
-        );
+        let focus_handles = cx.new(|_cx| Vec::new());
+
+        let state = cx.update(|cx| {
+            Arc::new(SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted.clone(),
+                visible.clone(),
+                focus_handles,
+            ))
+        });
+
+        let window = cx
+            .update(|cx| cx.open_window(Default::default(), |_window, cx| cx.new(|_| gpui::Empty)))
+            .unwrap();
 
         cx.update(|cx| {
             state.push_item(cx, TestSelectItem::new("item1", "value1"));
@@ -792,9 +951,10 @@ mod tests {
         });
 
         // Confirm with no highlight should do nothing
-        cx.update(|cx| {
-            state.confirm_highlight(cx);
-        });
+        cx.update_window(window.into(), |_view, window, cx| {
+            state.confirm_highlight(window, cx);
+        })
+        .unwrap();
 
         selected.read_with(cx, |s, _| {
             assert!(s.is_none(), "Selected should remain None");
@@ -807,12 +967,18 @@ mod tests {
         let selected = cx.new(|_cx| Some("item2".into()));
         let highlighted = cx.new(|_cx| None::<SharedString>);
         let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(
-            items.clone(),
-            selected.clone(),
-            highlighted.clone(),
-            visible,
-        );
+        let focus_handles = cx.new(|_cx| Vec::new());
+
+        let state = cx.update(|cx| {
+            SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            )
+        });
 
         cx.update(|cx| {
             state.push_item(cx, TestSelectItem::new("item1", "value1"));
@@ -840,12 +1006,18 @@ mod tests {
         let selected = cx.new(|_cx| None::<SharedString>);
         let highlighted = cx.new(|_cx| Some("item1".into()));
         let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-        let state = SelectState::new(
-            items.clone(),
-            selected.clone(),
-            highlighted.clone(),
-            visible,
-        );
+        let focus_handles = cx.new(|_cx| Vec::new());
+
+        let state = cx.update(|cx| {
+            SelectState::new(
+                cx,
+                items.clone(),
+                selected.clone(),
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            )
+        });
 
         cx.update(|cx| {
             state.push_item(cx, TestSelectItem::new("item1", "value1"));
@@ -972,7 +1144,16 @@ mod tests {
             // Set highlighted to an item that doesn't exist
             let highlighted = cx.new(|_cx| Some("nonexistent".into()));
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -1008,7 +1189,16 @@ mod tests {
             // Set highlighted to an item that doesn't exist
             let highlighted = cx.new(|_cx| Some("nonexistent".into()));
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(items.clone(), selected, highlighted.clone(), visible);
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = SelectState::new(
+                cx,
+                items.clone(),
+                selected,
+                highlighted.clone(),
+                visible,
+                focus_handles,
+            );
             (highlighted, state)
         });
 
@@ -1043,12 +1233,16 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
-            let state = SelectState::new(
+            let focus_handles = cx.new(|_cx| Vec::new());
+
+            let state = Arc::new(SelectState::new(
+                cx,
                 items.clone(),
                 selected.clone(),
                 highlighted.clone(),
                 visible.clone(),
-            );
+                focus_handles,
+            ));
             (selected, highlighted, state)
         });
 
@@ -1087,12 +1281,100 @@ mod tests {
         });
 
         // Confirm selection
-        cx.update(|cx| {
-            state.confirm_highlight(cx);
-        });
+        cx.update_window(window.into(), |_view, window, cx| {
+            state.confirm_highlight(window, cx);
+        })
+        .unwrap();
 
         selected.read_with(cx, |s, _| {
             assert_eq!(*s, Some("banana".into()), "Should have selected banana");
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_click_behavior_default(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+
+        cx.update(|cx| {
+            let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
+            let mut select = Select::new("test-select", state);
+            let behavior = select.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Select should not allow propagation by default"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Select should not allow default by default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_allow_click_propagation(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+
+        cx.update(|cx| {
+            let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
+            let mut select = Select::new("test-select", state).allow_click_propagation();
+            let behavior = select.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Select should allow propagation after calling allow_click_propagation"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Select should still not allow default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_allow_default_click_behaviour(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+
+        cx.update(|cx| {
+            let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
+            let mut select = Select::new("test-select", state).allow_default_click_behaviour();
+            let behavior = select.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Select should still not allow propagation"
+            );
+            assert!(
+                behavior.allow_default,
+                "Select should allow default after calling allow_default_click_behaviour"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_click_behavior_chain(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+
+        cx.update(|cx| {
+            let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
+            let mut select = Select::new("test-select", state)
+                .allow_click_propagation()
+                .allow_default_click_behaviour();
+            let behavior = select.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Select should allow propagation"
+            );
+            assert!(behavior.allow_default, "Select should allow default");
         });
     }
 
@@ -1145,11 +1427,15 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+            let focus_handles = cx.new(|_cx| Vec::new());
+
             let state = Arc::new(SelectState::new(
+                cx,
                 items.clone(),
                 selected,
                 highlighted.clone(),
                 visible,
+                focus_handles,
             ));
             (highlighted, state)
         });
@@ -1239,11 +1525,15 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+            let focus_handles = cx.new(|_cx| Vec::new());
+
             let state = Arc::new(SelectState::new(
+                cx,
                 items.clone(),
                 selected,
                 highlighted.clone(),
                 visible,
+                focus_handles,
             ));
             (highlighted, state)
         });
@@ -1334,11 +1624,15 @@ mod tests {
             let selected = cx.new(|_cx| Some("second".into())); // Pre-select second item
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+            let focus_handles = cx.new(|_cx| Vec::new());
+
             let state = Arc::new(SelectState::new(
+                cx,
                 items.clone(),
                 selected,
                 highlighted.clone(),
                 visible,
+                focus_handles,
             ));
             (highlighted, state)
         });
@@ -1405,11 +1699,15 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+            let focus_handles = cx.new(|_cx| Vec::new());
+
             let state = Arc::new(SelectState::new(
+                cx,
                 items.clone(),
                 selected.clone(),
                 highlighted.clone(),
                 visible,
+                focus_handles,
             ));
             (selected, highlighted, state)
         });
@@ -1475,11 +1773,15 @@ mod tests {
             let selected = cx.new(|_cx| None::<SharedString>);
             let highlighted = cx.new(|_cx| None::<SharedString>);
             let visible = cx.new(|_cx| TransitionState::new(BoolLerp::truthy()));
+            let focus_handles = cx.new(|_cx| Vec::new());
+
             let state = Arc::new(SelectState::new(
+                cx,
                 items.clone(),
                 selected,
                 highlighted.clone(),
                 visible,
+                focus_handles,
             ));
             (highlighted, state)
         });
@@ -1541,5 +1843,66 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[gpui::test]
+    fn test_stale_focus_handles_are_cleaned_up(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            super::state::init(cx);
+        });
+
+        let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
+
+        let state = cx.update(|cx| {
+            Arc::new(SelectState::new(
+                cx,
+                items,
+                selected,
+                highlighted,
+                visible,
+                focus_handles,
+            ))
+        });
+
+        // Register some focus handles and verify they persist while alive
+        let (handle1, handle2, handle3) = cx.update(|cx| {
+            let handle1 = cx.focus_handle();
+            let handle2 = cx.focus_handle();
+            let handle3 = cx.focus_handle();
+
+            state.register_focus_handle(cx, handle1.clone());
+            state.register_focus_handle(cx, handle2.clone());
+            state.register_focus_handle(cx, handle3.clone());
+
+            // Verify we have 3 handles registered while they're still alive
+            assert_eq!(
+                state.select_focus_handles.read(cx).len(),
+                3,
+                "Should have 3 focus handles registered"
+            );
+
+            (handle1, handle2, handle3)
+        });
+
+        // Drop one handle and verify cleanup happens on next register
+        drop(handle1);
+
+        cx.update(|cx| {
+            let handle4 = cx.focus_handle();
+            state.register_focus_handle(cx, handle4.clone());
+
+            // Should have 3 handles: handle2, handle3, handle4 (handle1 was cleaned up)
+            assert_eq!(
+                state.select_focus_handles.read(cx).len(),
+                3,
+                "Stale handle should have been cleaned up"
+            );
+
+            drop(handle4);
+        });
+
+        // Keep handles alive until end of test
+        drop(handle2);
+        drop(handle3);
     }
 }

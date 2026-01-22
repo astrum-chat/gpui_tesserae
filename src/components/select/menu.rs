@@ -1,8 +1,8 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use gpui::{
-    App, ElementId, Entity, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled,
-    Window, div, prelude::*, px,
+    ElementId, Entity, FocusHandle, InteractiveElement, ParentElement, SharedString, Styled, div,
+    prelude::*, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 
@@ -24,23 +24,8 @@ pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
     id: ElementId,
     layer: ThemeLayerKind,
     state: Arc<SelectState<V, I>>,
-    on_item_click: Rc<dyn Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)>,
     focus_handle: Option<FocusHandle>,
     deferred_config: DeferredConfig,
-}
-
-fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
-    checked: bool,
-    state: Arc<SelectState<V, I>>,
-    item_name: SharedString,
-    _window: &mut Window,
-    cx: &mut App,
-) {
-    if checked {
-        let _ = state.select_item(cx, item_name.clone()).unwrap();
-    } else {
-        let _ = state.remove_selection(cx);
-    }
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
@@ -49,7 +34,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
             id: id.into(),
             layer: ThemeLayerKind::Tertiary,
             state: state.into(),
-            on_item_click: Rc::new(default_on_item_click),
             focus_handle: None,
             deferred_config: DeferredConfig::default(),
         }
@@ -57,15 +41,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
 
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
         self.layer = layer;
-        self
-    }
-
-    pub fn on_item_click(
-        mut self,
-        on_item_click: impl Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)
-        + 'static,
-    ) -> Self {
-        self.on_item_click = Rc::new(on_item_click);
         self
     }
 
@@ -110,7 +85,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
         let state_for_up = self.state.clone();
         let state_for_down = self.state.clone();
         let state_for_confirm = self.state.clone();
-        let on_item_click_for_confirm = self.on_item_click.clone();
 
         let focus_handle = self
             .focus_handle
@@ -143,7 +117,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
         // Reset sync flag and hover state when menu is closed
         if menu_visible_delta == 0. && *has_synced.read(cx) {
             has_synced.update(cx, |synced, _cx| *synced = false);
-            hovered_item.update(cx, |hovered, _cx| *hovered = None);
         }
 
         let hovered_item_for_up = hovered_item.clone();
@@ -166,18 +139,8 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                 state_for_down.move_highlight_down(window, cx);
             })
             .on_action(move |_: &Confirm, window, cx| {
-                let highlighted = state_for_confirm.highlighted_item.read(cx).clone();
-                if let Some(item_name) = highlighted {
-                    let selected =
-                        state_for_confirm.selected_item.read(cx).as_ref() == Some(&item_name);
-                    (on_item_click_for_confirm)(
-                        !selected,
-                        state_for_confirm.clone(),
-                        item_name,
-                        window,
-                        cx,
-                    );
-                }
+                state_for_confirm.confirm_highlight(window, cx);
+                window.blur();
             })
             .when(menu_visible_delta != 0., |this| {
                 // We only want the click event if the menu
@@ -191,8 +154,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                     root.update(cx, |root, cx| {
                         let state = self.state.clone();
 
-                        root.on_any_mouse_down(move |_event, _window, cx| {
-                            state.hide_menu(cx);
+                        root.on_any_mouse_down(move |_event, window, cx| {
+                            if !state.any_select_focused(window, cx) {
+                                state.hide_menu(cx);
+                            }
                         });
 
                         cx.notify();
@@ -208,19 +173,19 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
 
                 let state = self.state.clone();
 
-                // Register focus listeners for each item to sync highlighted state on tab navigation
-                // Store subscriptions in keyed state to keep them alive
-                let focus_handles: Vec<_> = state
-                    .items
-                    .read(cx)
-                    .iter()
-                    .map(|(_, entry)| entry.focus_handle.clone())
-                    .collect();
-
                 let _focus_subscriptions: Entity<Vec<gpui::Subscription>> = window.use_keyed_state(
                     self.id.with_suffix("state:focus_subscriptions"),
                     cx,
                     |window, cx| {
+                        // Register focus listeners for each item to sync highlighted state on tab navigation
+                        // Store subscriptions in keyed state to keep them alive
+                        let focus_handles: Vec<_> = state
+                            .items
+                            .read(cx)
+                            .iter()
+                            .map(|(_, entry)| entry.focus_handle.clone())
+                            .collect();
+
                         focus_handles
                             .iter()
                             .map(|focus_handle| {
@@ -234,12 +199,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             .collect()
                     },
                 );
-
-                let any_item_focused = state
-                    .items
-                    .read(cx)
-                    .iter()
-                    .any(|(_, entry)| entry.focus_handle.is_focused(window));
 
                 this.opacity(menu_visible_delta)
                     .w_full()
@@ -256,24 +215,14 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             .border_inside(),
                     )
                     .children(state.items.read(cx).iter().map(|(item_name, entry)| {
-                        let highlighted_item = self.state.highlighted_item.read(cx).clone();
-                        let current_hovered = hovered_item.read(cx).clone();
-                        let is_any_hovered = current_hovered.is_some();
+                        let highlighted_item = self.state.highlighted_item.read(cx).as_ref();
+                        let hovered_item_exists = hovered_item.read(cx).is_some();
 
                         let selected =
                             self.state.selected_item.read(cx).as_ref() == Some(item_name);
-                        let is_keyboard_highlighted = highlighted_item.as_ref() == Some(item_name);
-                        let is_mouse_hovered = current_hovered.as_ref() == Some(item_name);
-                        let is_focused = entry.focus_handle.is_focused(window);
 
-                        // Show highlight if:
-                        // - Mouse is hovering this item, OR
-                        // - This item is focused, OR
-                        // - Key arrows highlighted this item AND mouse isn't hovering over
-                        //   any over item AND no item is focused.
-                        let show_highlight = is_mouse_hovered
-                            || is_focused
-                            || (is_keyboard_highlighted && !is_any_hovered && !any_item_focused);
+                        let show_highlight =
+                            !hovered_item_exists && highlighted_item == Some(item_name);
 
                         let hovered_item_for_hover = hovered_item.clone();
                         let item_name_for_hover = item_name.clone();
@@ -283,27 +232,15 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             .w_full()
                             .flex()
                             .track_focus(&entry.focus_handle)
-                            .on_mouse_down(gpui::MouseButton::Left, |_event, window, cx| {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                            })
-                            .on_hover(move |is_hovered, _window, cx| {
-                                hovered_item_for_hover.update(cx, |hovered, _cx| {
-                                    if *is_hovered {
-                                        *hovered = Some(item_name_for_hover.clone());
-                                    } else if hovered.as_ref() == Some(&item_name_for_hover) {
-                                        *hovered = None;
-                                    }
-                                });
-                            })
                             .child(
                                 Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
-                                    .checked(selected || show_highlight)
-                                    .variant(if show_highlight {
+                                    .checked(selected)
+                                    .variant(if selected {
                                         ToggleVariant::Tertiary
                                     } else {
                                         ToggleVariant::Secondary
                                     })
+                                    .force_hover(show_highlight)
                                     .justify_start()
                                     .rounded(corner_radius - padding)
                                     .child_right(entry.item.display(window, cx))
@@ -312,13 +249,25 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                     .pt(vertical_padding)
                                     .pb(vertical_padding)
                                     .w_full()
+                                    .on_any_mouse_down(|_event, window, _cx| {
+                                        window.prevent_default();
+                                    })
+                                    .on_hover(move |is_hovered, _window, cx| {
+                                        hovered_item_for_hover.update(cx, |this, cx| {
+                                            if *is_hovered {
+                                                *this = Some(item_name_for_hover.clone());
+                                            } else if this.as_ref() == Some(&item_name_for_hover) {
+                                                *this = None;
+                                            }
+                                            cx.notify();
+                                        });
+                                    })
                                     .map(|this| {
                                         let state = self.state.clone();
                                         let item_name = item_name.clone();
-                                        let on_item_click = self.on_item_click.clone();
 
-                                        Clickable::on_click(this, move |_event, window, cx| {
-                                            (on_item_click)(
+                                        this.on_click(move |_event, window, cx| {
+                                            (state.on_item_click)(
                                                 !selected,
                                                 state.clone(),
                                                 item_name.clone(),

@@ -52,6 +52,7 @@ pub struct Button {
     icon_size: SizeRefinement<Length>,
     variant: ButtonVariantEither,
     disabled: bool,
+    force_hover: bool,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     click_handlers: ClickHandlers,
     click_behavior: ClickBehavior,
@@ -71,6 +72,7 @@ impl Button {
             },
             variant: ButtonVariantEither::Left(ButtonVariant::Primary),
             disabled: false,
+            force_hover: false,
             on_hover: None,
             click_handlers: ClickHandlers::new(),
             click_behavior: ClickBehavior::default(),
@@ -110,6 +112,11 @@ impl Button {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn force_hover(mut self, force_hover: bool) -> Self {
+        self.force_hover = force_hover;
         self
     }
 
@@ -304,7 +311,7 @@ impl RenderOnce for Button {
 
         let is_hover_state =
             window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
-        let is_hover = *is_hover_state.read(cx);
+        let is_hover = self.force_hover || *is_hover_state.read(cx);
 
         let is_click_down_state = window.use_keyed_state(
             self.id.with_suffix("state:click_down"),
@@ -444,17 +451,23 @@ impl RenderOnce for Button {
                 let is_click_down_state_on_click = is_click_down_state.clone();
                 let behavior = self.click_behavior;
 
-                this.on_hover(move |hover, _window, cx| {
-                    is_hover_state_on_hover.update(cx, |this, _cx| *this = *hover);
-                    cx.notify(is_hover_state_on_hover.entity_id());
+                this.on_hover(move |hover, window, cx| {
+                    is_hover_state_on_hover.update(cx, |this, cx| {
+                        *this = *hover;
+                        cx.notify();
+                    });
+
+                    if let Some(callback) = self.on_hover.as_ref() {
+                        (callback)(hover, window, cx);
+                    }
                 })
                 .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
-                    if !behavior.allow_default {
-                        window.prevent_default();
-                    }
+                    behavior.apply(window, cx);
 
-                    is_click_down_state_on_mouse_down.update(cx, |this, _cx| *this = true);
-                    cx.notify(is_click_down_state_on_mouse_down.entity_id());
+                    is_click_down_state_on_mouse_down.update(cx, |this, cx| {
+                        *this = true;
+                        cx.notify();
+                    });
                 })
                 .map(|mut this| {
                     let behavior = self.click_behavior;
@@ -499,8 +512,10 @@ impl RenderOnce for Button {
                             window.blur();
                         }
 
-                        is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
-                        cx.notify(is_click_down_state_on_click.entity_id());
+                        is_click_down_state_on_click.update(cx, |this, cx| {
+                            *this = false;
+                            cx.notify();
+                        });
 
                         if let Some(on_click) = &on_click {
                             (on_click)(event, window, cx);
@@ -510,11 +525,15 @@ impl RenderOnce for Button {
                 .on_mouse_up_out(gpui::MouseButton::Left, move |_event, _window, cx| {
                     // We need to clean up states when the mouse clicks down on the component, leaves its bounds, then unclicks.
 
-                    is_hover_state.update(cx, |this, _cx| *this = false);
-                    cx.notify(is_hover_state.entity_id());
+                    is_hover_state.update(cx, |this, cx| {
+                        *this = false;
+                        cx.notify();
+                    });
 
-                    is_click_down_state.update(cx, |this, _cx| *this = false);
-                    cx.notify(is_click_down_state.entity_id());
+                    is_click_down_state.update(cx, |this, cx| {
+                        *this = false;
+                        cx.notify();
+                    });
                 })
                 .track_focus(&focus_handle)
             })
@@ -1092,6 +1111,81 @@ mod tests {
             let (button, handler) = button.click_handlers.on_mouse_up.unwrap();
             assert_eq!(button, MouseButton::Right, "Should be right mouse button");
             drop(handler);
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_click_behavior_default(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut button = Button::new("test-button");
+            let behavior = button.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Button should not allow propagation by default"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Button should not allow default by default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_allow_click_propagation(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut button = Button::new("test-button").allow_click_propagation();
+            let behavior = button.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Button should allow propagation after calling allow_click_propagation"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Button should still not allow default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_allow_default_click_behaviour(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut button = Button::new("test-button").allow_default_click_behaviour();
+            let behavior = button.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Button should still not allow propagation"
+            );
+            assert!(
+                behavior.allow_default,
+                "Button should allow default after calling allow_default_click_behaviour"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_button_click_behavior_chain(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut button = Button::new("test-button")
+                .allow_click_propagation()
+                .allow_default_click_behaviour();
+            let behavior = button.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Button should allow propagation"
+            );
+            assert!(behavior.allow_default, "Button should allow default");
         });
     }
 

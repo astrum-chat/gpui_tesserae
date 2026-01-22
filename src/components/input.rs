@@ -35,6 +35,8 @@ pub struct Input {
     id: ElementId,
     invalid: bool,
     disabled: bool,
+    force_hover: bool,
+    on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut App) + 'static>>,
     layer: ThemeLayerKind,
     children: PositionalChildren,
     style: InputStyles,
@@ -47,6 +49,8 @@ impl Input {
             id: id.into(),
             invalid: false,
             disabled: false,
+            force_hover: false,
+            on_hover: None,
             layer: ThemeLayerKind::Tertiary,
             children: PositionalChildren::default(),
             style: InputStyles::default(),
@@ -61,6 +65,19 @@ impl Input {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn force_hover(mut self, force_hover: bool) -> Self {
+        self.force_hover = force_hover;
+        self
+    }
+
+    pub fn on_hover(
+        mut self,
+        on_hover: impl Fn(&bool, &mut gpui::Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_hover = Some(Box::new(on_hover));
         self
     }
 
@@ -251,7 +268,7 @@ impl RenderOnce for Input {
 
         let is_hover_state =
             window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
-        let is_hover = *is_hover_state.read(cx);
+        let is_hover = self.force_hover || *is_hover_state.read(cx);
 
         let focus_handle = self.focus_handle(cx).clone();
         let is_focus = focus_handle.is_focused(window);
@@ -338,9 +355,15 @@ impl RenderOnce for Input {
             )
             .children(self.children.bottom)
             .when(!is_disabled, |this| {
-                this.on_hover(move |hover, _window, cx| {
-                    is_hover_state.update(cx, |this, _cx| *this = *hover);
-                    cx.notify(is_hover_state.entity_id());
+                this.on_hover(move |hover, window, cx| {
+                    is_hover_state.update(cx, |this, cx| {
+                        *this = *hover;
+                        cx.notify();
+                    });
+
+                    if let Some(callback) = self.on_hover.as_ref() {
+                        (callback)(hover, window, cx);
+                    }
                 })
             })
     }
@@ -602,6 +625,28 @@ mod tests {
             assert!(!input.invalid);
             assert!(!input.disabled);
             assert!(matches!(input.layer, ThemeLayerKind::Tertiary));
+        });
+    }
+
+    #[gpui::test]
+    fn test_input_on_hover_callback(cx: &mut TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let state = cx.new(|cx| InputState::new(cx));
+        let hovered = Rc::new(Cell::new(false));
+
+        cx.update(|_cx| {
+            let hovered_clone = hovered.clone();
+
+            let input = Input::new("test-input", state).on_hover(move |is_hover, _window, _cx| {
+                hovered_clone.set(*is_hover);
+            });
+
+            assert!(
+                input.on_hover.is_some(),
+                "Input should have on_hover callback"
+            );
         });
     }
 

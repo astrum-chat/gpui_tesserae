@@ -24,6 +24,8 @@ pub struct Switch {
     layer: ThemeLayerKind,
     checked: bool,
     disabled: bool,
+    force_hover: bool,
+    on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
     click_handlers: ClickHandlers,
     click_behavior: ClickBehavior,
 }
@@ -35,6 +37,8 @@ impl Switch {
             layer: ThemeLayerKind::Tertiary,
             checked: false,
             disabled: false,
+            force_hover: false,
+            on_hover: None,
             click_handlers: ClickHandlers::new(),
             click_behavior: ClickBehavior::default(),
         }
@@ -52,6 +56,19 @@ impl Switch {
 
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    pub fn force_hover(mut self, force_hover: bool) -> Self {
+        self.force_hover = force_hover;
+        self
+    }
+
+    pub fn on_hover(
+        mut self,
+        on_hover: impl Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static,
+    ) -> Self {
+        self.on_hover = Some(Box::new(on_hover));
         self
     }
 }
@@ -99,7 +116,7 @@ impl RenderOnce for Switch {
 
         let is_hover_state =
             window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
-        let is_hover = *is_hover_state.read(cx);
+        let is_hover = self.force_hover || *is_hover_state.read(cx);
 
         let is_click_down_state = window.use_keyed_state(
             self.id.with_suffix("state:click_down"),
@@ -209,18 +226,23 @@ impl RenderOnce for Switch {
                 let is_click_down_state_on_click = is_click_down_state.clone();
                 let behavior = self.click_behavior;
 
-                this.on_hover(move |hover, _window, cx| {
-                    is_hover_state_on_hover.update(cx, |this, _cx| *this = *hover);
-                    cx.notify(is_hover_state_on_hover.entity_id());
+                this.on_hover(move |hover, window, cx| {
+                    is_hover_state_on_hover.update(cx, |this, cx| {
+                        *this = *hover;
+                        cx.notify();
+                    });
+
+                    if let Some(callback) = self.on_hover.as_ref() {
+                        (callback)(hover, window, cx);
+                    }
                 })
                 .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
-                    // Prevents focus ring from appearing when clicked.
-                    if !behavior.allow_default {
-                        window.prevent_default();
-                    }
+                    behavior.apply(window, cx);
 
-                    is_click_down_state_on_mouse_down.update(cx, |this, _cx| *this = true);
-                    cx.notify(is_click_down_state_on_mouse_down.entity_id());
+                    is_click_down_state_on_mouse_down.update(cx, |this, cx| {
+                        *this = true;
+                        cx.notify();
+                    });
                 })
                 .map(|mut this| {
                     let behavior = self.click_behavior;
@@ -265,8 +287,10 @@ impl RenderOnce for Switch {
                             window.blur();
                         }
 
-                        is_click_down_state_on_click.update(cx, |this, _cx| *this = false);
-                        cx.notify(is_click_down_state_on_click.entity_id());
+                        is_click_down_state_on_click.update(cx, |this, cx| {
+                            *this = false;
+                            cx.notify();
+                        });
 
                         if let Some(on_click) = &on_click {
                             (on_click)(event, window, cx);
@@ -276,11 +300,15 @@ impl RenderOnce for Switch {
                 .on_mouse_up_out(gpui::MouseButton::Left, move |_event, _window, cx| {
                     // We need to clean up states when the mouse clicks down on the component, leaves its bounds, then unclicks.
 
-                    is_hover_state.update(cx, |this, _cx| *this = false);
-                    cx.notify(is_hover_state.entity_id());
+                    is_hover_state.update(cx, |this, cx| {
+                        *this = false;
+                        cx.notify();
+                    });
 
-                    is_click_down_state.update(cx, |this, _cx| *this = false);
-                    cx.notify(is_click_down_state.entity_id());
+                    is_click_down_state.update(cx, |this, cx| {
+                        *this = false;
+                        cx.notify();
+                    });
                 })
                 .track_focus(&focus_handle)
             })
@@ -405,6 +433,27 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_switch_on_hover_callback(cx: &mut TestAppContext) {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let hovered = Rc::new(Cell::new(false));
+
+        cx.update(|_cx| {
+            let hovered_clone = hovered.clone();
+
+            let switch = Switch::new("test-switch").on_hover(move |is_hover, _window, _cx| {
+                hovered_clone.set(*is_hover);
+            });
+
+            assert!(
+                switch.on_hover.is_some(),
+                "Switch should have on_hover callback"
+            );
+        });
+    }
+
+    #[gpui::test]
     fn test_switch_renders_in_window(cx: &mut TestAppContext) {
         use crate::theme::{Theme, ThemeExt};
 
@@ -437,6 +486,81 @@ mod tests {
 
             // Test remap with negative ranges
             assert_eq!(remap(0.0, -1.0, 1.0, 0.0, 100.0), 50.0);
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_click_behavior_default(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut switch = Switch::new("test-switch");
+            let behavior = switch.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Switch should not allow propagation by default"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Switch should not allow default by default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_allow_click_propagation(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut switch = Switch::new("test-switch").allow_click_propagation();
+            let behavior = switch.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Switch should allow propagation after calling allow_click_propagation"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Switch should still not allow default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_allow_default_click_behaviour(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut switch = Switch::new("test-switch").allow_default_click_behaviour();
+            let behavior = switch.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Switch should still not allow propagation"
+            );
+            assert!(
+                behavior.allow_default,
+                "Switch should allow default after calling allow_default_click_behaviour"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_switch_click_behavior_chain(cx: &mut TestAppContext) {
+        use crate::extensions::click_behavior::ClickBehaviorExt;
+
+        cx.update(|_cx| {
+            let mut switch = Switch::new("test-switch")
+                .allow_click_propagation()
+                .allow_default_click_behaviour();
+            let behavior = switch.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Switch should allow propagation"
+            );
+            assert!(behavior.allow_default, "Switch should allow default");
         });
     }
 

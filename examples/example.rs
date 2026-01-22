@@ -92,9 +92,10 @@ impl Render for Main {
                 ),
             )
             .child(
-                div()
-                    .w(px(200.))
-                    .child(Select::new("select", self.select_state.clone())),
+                div().w(px(200.)).child(
+                    Select::new("select", self.select_state.clone())
+                        .disabled(self.checkbox_checked || self.switch_checked),
+                ),
             )
     }
 }
@@ -130,12 +131,15 @@ fn main() {
                     let selected = cx.new(|_cx| None::<SharedString>);
                     let highlighted = cx.new(|_cx| None::<SharedString>);
                     let menu_visible = cx.new(|_cx| TransitionState::new(BoolLerp::falsey()));
+                    let focus_handles = cx.new(|_cx| Vec::new());
 
                     let select_state = Arc::new(SelectState::new(
-                        items.clone(),
+                        cx,
+                        items,
                         selected,
                         highlighted,
                         menu_visible,
+                        focus_handles,
                     ));
 
                     select_state.push_item(cx, SharedString::from("Apple"));

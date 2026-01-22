@@ -64,6 +64,11 @@ impl Toggle {
         self
     }
 
+    pub fn force_hover(mut self, force_hover: bool) -> Self {
+        self.base = self.base.force_hover(force_hover);
+        self
+    }
+
     pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.base = self.base.on_hover(on_hover);
         self
@@ -290,4 +295,77 @@ fn falsey_granular_variant(mut variant: GranularButtonVariant) -> GranularButton
     variant.bg_hover_color = variant.bg_hover_color.alpha(variant.bg_hover_color.a);
     variant.bg_focus_color = variant.bg_focus_color.alpha(variant.bg_focus_color.a);
     variant
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn test_toggle_click_behavior_default(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let mut toggle = Toggle::new("test-toggle");
+            let behavior = toggle.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Toggle should not allow propagation by default"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Toggle should not allow default by default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_toggle_allow_click_propagation(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let mut toggle = Toggle::new("test-toggle").allow_click_propagation();
+            let behavior = toggle.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Toggle should allow propagation after calling allow_click_propagation"
+            );
+            assert!(
+                !behavior.allow_default,
+                "Toggle should still not allow default"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_toggle_allow_default_click_behaviour(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let mut toggle = Toggle::new("test-toggle").allow_default_click_behaviour();
+            let behavior = toggle.click_behavior_mut();
+
+            assert!(
+                !behavior.allow_propagation,
+                "Toggle should still not allow propagation"
+            );
+            assert!(
+                behavior.allow_default,
+                "Toggle should allow default after calling allow_default_click_behaviour"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_toggle_click_behavior_chain(cx: &mut TestAppContext) {
+        cx.update(|_cx| {
+            let mut toggle = Toggle::new("test-toggle")
+                .allow_click_propagation()
+                .allow_default_click_behaviour();
+            let behavior = toggle.click_behavior_mut();
+
+            assert!(
+                behavior.allow_propagation,
+                "Toggle should allow propagation"
+            );
+            assert!(behavior.allow_default, "Toggle should allow default");
+        });
+    }
 }

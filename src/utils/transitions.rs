@@ -41,8 +41,11 @@ macro_rules! conitional_transition_update {
         let value = $crate::conditional_transition_branches!(@condition [ $($rest)+ ]).into();
 
         if $transition.read_goal($cx) != &value {
-            $transition.update($cx, |this, _cx| *this = value);
-            $cx.notify($transition.entity_id());
+            $transition.update($cx, |this, cx| {
+                *this = value;
+                cx.notify();
+            });
+
         }
 
         $transition
