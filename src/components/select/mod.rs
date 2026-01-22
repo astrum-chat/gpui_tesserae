@@ -120,9 +120,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
         // when focus moves to a menu item (which is a descendant of the Select).
         let is_focus = focus_handle.contains_focused(window, cx);
 
-        // Check if any Select using this state has focus (for menu visibility)
-        let any_select_focused = self.state.any_select_focused(window, cx);
-
         let is_disabled = self.disabled;
         let disabled_transition = disabled_transition(self.id.clone(), window, cx, is_disabled);
 
@@ -149,7 +146,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 .state
                 .menu_visible_transition.clone(),
             {
-                any_select_focused => true,
+                self.state.any_select_focused(window, cx) => true,
                 _ => false
             }
         );

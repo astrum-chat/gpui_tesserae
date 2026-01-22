@@ -236,9 +236,9 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                 Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
                                     .checked(selected)
                                     .variant(if selected {
-                                        ToggleVariant::Tertiary
-                                    } else {
                                         ToggleVariant::Secondary
+                                    } else {
+                                        ToggleVariant::Tertiary
                                     })
                                     .force_hover(show_highlight)
                                     .justify_start()
