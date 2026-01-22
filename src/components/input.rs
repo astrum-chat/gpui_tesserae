@@ -409,7 +409,9 @@ impl PositionalParentElement for Input {
 
 impl Focusable for Input {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.base.focus_handle(cx)
+        self.focus_handle
+            .clone()
+            .unwrap_or_else(|| self.base.focus_handle(cx))
     }
 }
 

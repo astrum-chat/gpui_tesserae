@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    App, Corners, CursorStyle, DefiniteLength, Edges, ElementId, InteractiveElement, IntoElement,
-    JustifyContent, Length, ParentElement, Pixels, Radians, RenderOnce, Rgba, SharedString,
-    SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    App, Corners, CursorStyle, DefiniteLength, Edges, ElementId, FocusHandle, InteractiveElement,
+    IntoElement, JustifyContent, Length, ParentElement, Pixels, Radians, RenderOnce, Rgba,
+    SharedString, SizeRefinement, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
     prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
@@ -53,6 +53,7 @@ pub struct Button {
     variant: ButtonVariantEither,
     disabled: bool,
     force_hover: bool,
+    focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
     click_handlers: ClickHandlers,
     click_behavior: ClickBehavior,
@@ -73,12 +74,18 @@ impl Button {
             variant: ButtonVariantEither::Left(ButtonVariant::Primary),
             disabled: false,
             force_hover: false,
+            focus_handle: None,
             on_hover: None,
             click_handlers: ClickHandlers::new(),
             click_behavior: ClickBehavior::default(),
             children: PositionalChildren::default(),
             style: ButtonStyles::default(),
         }
+    }
+
+    pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
+        self.focus_handle = Some(focus_handle);
+        self
     }
 
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {
@@ -320,13 +327,18 @@ impl RenderOnce for Button {
         );
         let is_click_down = *is_click_down_state.read(cx);
 
-        let focus_handle = window
-            .use_keyed_state(
-                self.id.with_suffix("state:focus_handle"),
-                cx,
-                |_window, cx| cx.focus_handle().tab_stop(true),
-            )
-            .read(cx)
+        let focus_handle = self
+            .focus_handle
+            .as_ref()
+            .unwrap_or_else(|| {
+                window
+                    .use_keyed_state(
+                        self.id.with_suffix("state:focus_handle"),
+                        cx,
+                        |_window, cx| cx.focus_handle().tab_stop(true),
+                    )
+                    .read(cx)
+            })
             .clone();
         let is_focus = focus_handle.is_focused(window);
 

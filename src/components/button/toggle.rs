@@ -1,6 +1,6 @@
 use gpui::{
-    App, DefiniteLength, ElementId, IntoElement, Length, Pixels, Radians, RenderOnce, SharedString,
-    Window,
+    App, DefiniteLength, ElementId, FocusHandle, IntoElement, Length, Pixels, Radians, RenderOnce,
+    SharedString, Window,
 };
 
 use crate::{
@@ -71,6 +71,11 @@ impl Toggle {
 
     pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.base = self.base.on_hover(on_hover);
+        self
+    }
+
+    pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
+        self.base = self.base.focus_handle(focus_handle);
         self
     }
 
