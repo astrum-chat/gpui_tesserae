@@ -1,7 +1,8 @@
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    ShapedLine, SharedString, UTF16Selection, Window, WrappedLine, actions, div, point,
+    ScrollStrategy, ShapedLine, SharedString, UTF16Selection, UniformListScrollHandle, Window,
+    WrappedLine, actions, div, point, px,
 };
 use std::ops::Range;
 use std::sync::Arc;
@@ -19,6 +20,18 @@ pub struct VisualLineInfo {
     pub wrapped_line_index: usize,
     /// The visual line index within the wrapped line (for multi-wrap scenarios)
     pub visual_index_in_wrapped: usize,
+}
+
+/// Information about a visible line in uniform_list mode (non-wrapped).
+/// Used for accurate mouse hit testing.
+#[derive(Clone)]
+pub struct VisibleLineInfo {
+    /// Absolute line index in the text
+    pub line_index: usize,
+    /// Screen bounds of this line element
+    pub bounds: Bounds<Pixels>,
+    /// Shaped line for X position lookup
+    pub shaped_line: ShapedLine,
 }
 
 /// Function type for transforming text when it changes.
@@ -80,6 +93,14 @@ pub struct InputState {
     pub(crate) wrapped_visual_line_info: Vec<VisualLineInfo>,
     /// The wrapped lines from shape_text (stored for position calculations)
     pub(crate) wrapped_lines: Vec<WrappedLine>,
+    /// Scroll handle for uniform_list (non-wrapped multiline mode)
+    pub scroll_handle: UniformListScrollHandle,
+    /// Scroll offset for wrapped mode (manual scrolling)
+    pub(crate) scroll_offset_y: Pixels,
+    /// Maximum visible lines (for scroll calculations)
+    pub(crate) max_lines: usize,
+    /// Visible line info for uniform_list mode - populated during paint
+    pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
 }
 
 impl InputState {
@@ -103,13 +124,51 @@ impl InputState {
             is_wrapped: false,
             wrapped_visual_line_info: Vec::new(),
             wrapped_lines: Vec::new(),
+            scroll_handle: UniformListScrollHandle::new(),
+            scroll_offset_y: px(0.),
+            max_lines: 1,
+            visible_lines_info: Vec::new(),
         }
     }
 
     /// Set multiline mode parameters (called during render)
-    pub(crate) fn set_multiline_params(&mut self, is_multiline: bool, line_height: Pixels) {
+    pub(crate) fn set_multiline_params(
+        &mut self,
+        is_multiline: bool,
+        line_height: Pixels,
+        max_lines: usize,
+    ) {
         self.is_multiline = is_multiline;
         self.line_height = Some(line_height);
+        self.max_lines = max_lines;
+    }
+
+    /// Ensure the cursor is visible by scrolling if necessary.
+    /// For non-wrapped mode, uses uniform_list scroll handle.
+    /// For wrapped mode, adjusts scroll_offset_y.
+    pub fn ensure_cursor_visible(&mut self) {
+        let cursor_line = self.offset_to_line_col(self.cursor_offset()).0;
+
+        if self.is_wrapped {
+            // For wrapped mode, calculate pixel offset
+            if let Some(line_height) = self.line_height {
+                let cursor_y = line_height * cursor_line as f32;
+                let viewport_height = line_height * self.max_lines as f32;
+
+                // Scroll down if cursor is below viewport
+                if cursor_y >= self.scroll_offset_y + viewport_height {
+                    self.scroll_offset_y = cursor_y - viewport_height + line_height;
+                }
+                // Scroll up if cursor is above viewport
+                if cursor_y < self.scroll_offset_y {
+                    self.scroll_offset_y = cursor_y;
+                }
+            }
+        } else {
+            // For non-wrapped mode, use uniform_list scroll handle
+            self.scroll_handle
+                .scroll_to_item(cursor_line, ScrollStrategy::Center);
+        }
     }
 
     /// Apply map_text transformation if set
@@ -373,6 +432,7 @@ impl InputState {
 
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
+        self.ensure_cursor_visible();
         self.reset_cursor_blink(cx);
         cx.notify()
     }
@@ -445,10 +505,6 @@ impl InputState {
         position: Point<Pixels>,
         line_height: Pixels,
     ) -> usize {
-        let Some(bounds) = self.last_bounds.as_ref() else {
-            return 0;
-        };
-
         let value = self.value();
         if value.is_empty() {
             return 0;
@@ -459,49 +515,80 @@ impl InputState {
             return self.index_for_wrapped_position(position, line_height);
         }
 
-        // Calculate which line the position is on
+        // For non-wrapped (uniform_list) mode, use visible_lines_info for accurate hit testing
+        if !self.visible_lines_info.is_empty() {
+            // Check if position is within any visible line
+            for info in &self.visible_lines_info {
+                if info.bounds.contains(&position) {
+                    let local_x = position.x - info.bounds.left();
+                    let line_start = self.line_start_offset(info.line_index);
+                    let local_index = info.shaped_line.closest_index_for_x(local_x);
+                    return line_start + local_index;
+                }
+            }
+
+            // Position is outside visible lines - find closest line
+            // Check if above visible area
+            if let Some(first) = self.visible_lines_info.first() {
+                if position.y < first.bounds.top() {
+                    let line_start = self.line_start_offset(first.line_index);
+                    if position.x < first.bounds.left() {
+                        return line_start;
+                    }
+                    let local_x = position.x - first.bounds.left();
+                    let local_index = first.shaped_line.closest_index_for_x(local_x);
+                    return line_start + local_index;
+                }
+            }
+
+            // Check if below visible area
+            if let Some(last) = self.visible_lines_info.last() {
+                if position.y >= last.bounds.bottom() {
+                    let line_start = self.line_start_offset(last.line_index);
+                    let line_end = self.line_end_offset(last.line_index);
+                    if position.x > last.bounds.right() {
+                        return line_end;
+                    }
+                    let local_x = position.x - last.bounds.left();
+                    let local_index = last.shaped_line.closest_index_for_x(local_x);
+                    return line_start + local_index;
+                }
+            }
+
+            // Position is horizontally outside but vertically within - find the line by Y
+            for info in &self.visible_lines_info {
+                if position.y >= info.bounds.top() && position.y < info.bounds.bottom() {
+                    let line_start = self.line_start_offset(info.line_index);
+                    let line_end = self.line_end_offset(info.line_index);
+                    if position.x < info.bounds.left() {
+                        return line_start;
+                    }
+                    if position.x > info.bounds.right() {
+                        return line_end;
+                    }
+                }
+            }
+        }
+
+        // Fallback to old calculation if visible_lines_info is empty
+        let Some(bounds) = self.last_bounds.as_ref() else {
+            return 0;
+        };
+
         let relative_y = position.y - bounds.top();
-        let line_index = if relative_y < gpui::px(0.) {
+        let visible_line_index = if relative_y < gpui::px(0.) {
             0
         } else {
             (relative_y / line_height).floor() as usize
         };
 
+        let scroll_offset = self.scroll_handle.logical_scroll_top_index();
+        let line_index = visible_line_index + scroll_offset;
+
         let line_count = self.line_count();
         let clamped_line = line_index.min(line_count.saturating_sub(1));
 
-        // Get the line start and end offsets
-        let line_start = self.line_start_offset(clamped_line);
-        let line_end = self.line_end_offset(clamped_line);
-
-        // If clicking before/after bounds horizontally, select to line start/end
-        if position.x < bounds.left() {
-            return line_start;
-        }
-        if position.x > bounds.right() {
-            return line_end;
-        }
-
-        // Use ShapedLine for accurate positioning if available
-        if let Some(shaped_line) = self.multiline_layouts.get(clamped_line) {
-            let line_left = self
-                .multiline_line_bounds
-                .get(clamped_line)
-                .map(|b| b.left())
-                .unwrap_or(bounds.left());
-
-            let local_x = position.x - line_left;
-            let local_index = shaped_line.closest_index_for_x(local_x);
-            return line_start + local_index;
-        }
-
-        // Fallback: simple linear interpolation (should not happen if rendering worked)
-        let line_content = &value[line_start..line_end];
-        if line_content.is_empty() {
-            return line_start;
-        }
-
-        line_start
+        self.line_start_offset(clamped_line)
     }
 
     /// Calculate the byte offset for a mouse position in wrapped text mode
@@ -795,6 +882,7 @@ impl EntityInputHandler for InputState {
         self.selected_range = new_cursor..new_cursor;
         self.marked_range.take();
 
+        self.ensure_cursor_visible();
         self.reset_cursor_blink(cx);
         cx.notify();
     }

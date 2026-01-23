@@ -2,12 +2,12 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
-    FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement,
+    AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler,
+    Entity, FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement,
     IntoElement, KeyBinding, LayoutId, MouseButton, MouseMoveEvent, PaintQuad, ParentElement,
     Pixels, Refineable, RenderOnce, ShapedLine, SharedString, Style, StyleRefinement, Styled,
     TextRun, UnderlineStyle, Window, WrappedLine, div, fill, hsla, point, prelude::FluentBuilder,
-    px, relative, rgb, size,
+    px, relative, rgb, size, uniform_list,
 };
 
 mod cursor_blink;
@@ -18,7 +18,7 @@ pub use cursor_blink::CursorBlink;
 pub use state::{
     Backspace, Copy, Cut, Delete, Down, End, Home, InputState, InsertNewline, InsertNewlineShift,
     Left, MapTextFn, Paste, Quit, Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp,
-    ShowCharacterPalette, Up, VisualLineInfo,
+    ShowCharacterPalette, Up, VisibleLineInfo, VisualLineInfo,
 };
 
 use crate::utils::rgb_a;
@@ -1065,6 +1065,16 @@ impl Element for LineElement {
         }
 
         let line = prepaint.line.take().unwrap();
+
+        // Store visible line info for mouse hit testing
+        self.input.update(cx, |input, _cx| {
+            input.visible_lines_info.push(VisibleLineInfo {
+                line_index: self.line_index,
+                bounds,
+                shaped_line: line.clone(),
+            });
+        });
+
         line.paint(
             bounds.origin,
             self.line_height,
@@ -1081,6 +1091,108 @@ impl Element for LineElement {
         {
             window.paint_quad(cursor);
         }
+    }
+}
+
+/// Wrapper element that contains a uniform_list and registers the input handler.
+/// This is needed because uniform_list doesn't provide a paint hook where we can
+/// call window.handle_input().
+struct UniformListInputElement {
+    input: Entity<InputState>,
+    child: AnyElement,
+}
+
+impl IntoElement for UniformListInputElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for UniformListInputElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let layout_id = self.child.request_layout(window, cx);
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus_handle = self.input.read(cx).focus_handle.clone();
+
+        // Register input handler for the entire input area
+        window.handle_input(
+            &focus_handle,
+            ElementInputHandler::new(bounds, self.input.clone()),
+            cx,
+        );
+
+        // Register window-level mouse move listener to handle selection
+        // even when cursor leaves the input bounds during drag
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Capture {
+                return;
+            }
+
+            input.update(cx, |input, cx| {
+                if input.is_selecting {
+                    if let Some(line_height) = input.line_height {
+                        input.select_to_multiline(event.position, line_height, cx);
+                    }
+                }
+            });
+        });
+
+        // Clear visible_lines_info before painting - LineElement will repopulate it
+        self.input.update(cx, |input, _cx| {
+            input.visible_lines_info.clear();
+        });
+
+        // Paint the child (uniform_list)
+        self.child.paint(window, cx);
+
+        // Store bounds for mouse position calculations
+        self.input.update(cx, |input, _cx| {
+            input.last_bounds = Some(bounds);
+        });
     }
 }
 
@@ -1106,7 +1218,7 @@ impl RenderOnce for Input {
         let map_text = self.map_text.clone();
         self.state.update(cx, |state, cx| {
             state.update_focus_state(window, cx);
-            state.set_multiline_params(is_multiline, line_height);
+            state.set_multiline_params(is_multiline, line_height, self.max_lines);
             state.map_text = map_text;
         });
 
@@ -1182,8 +1294,69 @@ impl RenderOnce for Input {
                 window.listener_for(&self.state, InputState::on_mouse_up),
             )
             .on_mouse_move(window.listener_for(&self.state, InputState::on_mouse_move))
-            .when(is_multiline, |this| {
-                // Multi-line mode: use MultiLineInputElement for proper input handling
+            .when(is_multiline && !self.wrap, |this| {
+                // Multi-line non-wrapped mode: use uniform_list for efficient scrolling
+                let line_count = state.line_count().max(1);
+                let scroll_handle = state.scroll_handle.clone();
+                let input_state = self.state.clone();
+                let transform_text = self.transform_text.clone();
+                let placeholder = self.placeholder.clone();
+                let max_lines = self.max_lines;
+
+                let list = uniform_list(
+                    self.id.clone(),
+                    line_count,
+                    move |visible_range, _window, cx| {
+                        let state = input_state.read(cx);
+                        let value = state.value();
+                        let selected_range = state.selected_range.clone();
+                        let cursor_offset = state.cursor_offset();
+                        let is_empty = value.is_empty();
+
+                        // Pre-compute line offsets
+                        let mut line_offsets: Vec<(usize, usize)> = Vec::new();
+                        let mut start = 0;
+                        for line in value.split('\n') {
+                            let end = start + line.len();
+                            line_offsets.push((start, end));
+                            start = end + 1;
+                        }
+
+                        visible_range
+                            .map(|line_idx| {
+                                let (line_start, line_end) =
+                                    line_offsets.get(line_idx).copied().unwrap_or((0, 0));
+
+                                LineElement {
+                                    input: input_state.clone(),
+                                    line_index: line_idx,
+                                    line_start_offset: line_start,
+                                    line_end_offset: line_end,
+                                    text_color,
+                                    placeholder_text_color,
+                                    highlight_text_color,
+                                    line_height,
+                                    transform_text: transform_text.clone(),
+                                    cursor_visible,
+                                    selected_range: selected_range.clone(),
+                                    cursor_offset,
+                                    placeholder: placeholder.clone(),
+                                    is_empty,
+                                }
+                            })
+                            .collect()
+                    },
+                )
+                .track_scroll(&scroll_handle)
+                .h(line_height * max_lines.min(line_count).max(1) as f32);
+
+                this.child(UniformListInputElement {
+                    input: self.state.clone(),
+                    child: list.into_any_element(),
+                })
+            })
+            .when(is_multiline && self.wrap, |this| {
+                // Multi-line wrapped mode: use MultiLineInputElement with manual scrolling
                 let line_count = state.line_count().max(1);
                 let selected_range = state.selected_range.clone();
                 let cursor_offset = state.cursor_offset();
