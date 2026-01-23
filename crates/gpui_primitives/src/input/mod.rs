@@ -25,6 +25,12 @@ use crate::utils::rgb_a;
 
 type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
 
+/// Calculates the height for a multiline input, floored to the nearest 0.5 pixel.
+/// This prevents slight layout shifts caused by subpixel height variations.
+fn multiline_height(line_height: Pixels, line_count: usize) -> Pixels {
+    px((line_height.to_f64() as f32 * line_count as f32 * 2.0).floor() / 2.0)
+}
+
 #[derive(IntoElement)]
 pub struct Input {
     id: ElementId,
@@ -1087,7 +1093,10 @@ impl RenderOnce for Input {
                     }
                     list
                 })
-                .h(line_height * max_lines.min(line_count).max(1) as f32);
+                .h(multiline_height(
+                    line_height,
+                    max_lines.min(line_count).max(1),
+                ));
 
                 this.child(UniformListInputElement {
                     input: self.state.clone(),
@@ -1150,7 +1159,10 @@ impl RenderOnce for Input {
                     }
                     list
                 })
-                .h(line_height * max_lines.min(visual_line_count).max(1) as f32);
+                .h(multiline_height(
+                    line_height,
+                    max_lines.min(visual_line_count).max(1),
+                ));
 
                 this.child(UniformListInputElement {
                     input: self.state.clone(),

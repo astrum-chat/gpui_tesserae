@@ -396,7 +396,7 @@ impl RenderOnce for Input {
             .gap(self.style.gap.unwrap_or(horizontal_padding.into()))
             .flex()
             .flex_col()
-            .justify_evenly()
+            .justify_between()
             .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())
@@ -417,6 +417,7 @@ impl RenderOnce for Input {
                 div()
                     .w_full()
                     .flex()
+                    .min_h_auto()
                     .gap(horizontal_padding)
                     .items_center()
                     .map(|this| apply_padding!(this, inner_padding_override, px(0.), px(0.)))
