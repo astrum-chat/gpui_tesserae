@@ -45,6 +45,14 @@ pub struct InputState {
     pub is_selecting: bool,
     pub cursor_blink: Entity<CursorBlink>,
     was_focused: bool,
+    /// Whether the input is in multiline mode (set during render)
+    pub(crate) is_multiline: bool,
+    /// Line height for multiline calculations (set during render)
+    pub(crate) line_height: Option<Pixels>,
+    /// Per-line ShapedLine layouts for multiline mode
+    pub(crate) multiline_layouts: Vec<ShapedLine>,
+    /// Per-line bounds for multiline mode
+    pub(crate) multiline_line_bounds: Vec<Bounds<Pixels>>,
 }
 
 impl InputState {
@@ -60,7 +68,17 @@ impl InputState {
             is_selecting: false,
             cursor_blink: cx.new(|_| CursorBlink::new()),
             was_focused: false,
+            is_multiline: false,
+            line_height: None,
+            multiline_layouts: Vec::new(),
+            multiline_line_bounds: Vec::new(),
         }
+    }
+
+    /// Set multiline mode parameters (called during render)
+    pub(crate) fn set_multiline_params(&mut self, is_multiline: bool, line_height: Pixels) {
+        self.is_multiline = is_multiline;
+        self.line_height = Some(line_height);
     }
 
     /// Call this during render to update focus state and manage cursor blink
@@ -239,10 +257,20 @@ impl InputState {
     ) {
         self.is_selecting = true;
 
-        if event.modifiers.shift {
-            self.select_to(self.index_for_mouse_position(event.position), cx);
+        let index = if self.is_multiline {
+            if let Some(line_height) = self.line_height {
+                self.index_for_multiline_position(event.position, line_height)
+            } else {
+                self.index_for_mouse_position(event.position)
+            }
         } else {
-            self.move_to(self.index_for_mouse_position(event.position), cx)
+            self.index_for_mouse_position(event.position)
+        };
+
+        if event.modifiers.shift {
+            self.select_to(index, cx);
+        } else {
+            self.move_to(index, cx)
         }
     }
 
@@ -257,7 +285,16 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         if self.is_selecting {
-            self.select_to(self.index_for_mouse_position(event.position), cx);
+            let index = if self.is_multiline {
+                if let Some(line_height) = self.line_height {
+                    self.index_for_multiline_position(event.position, line_height)
+                } else {
+                    self.index_for_mouse_position(event.position)
+                }
+            } else {
+                self.index_for_mouse_position(event.position)
+            };
+            self.select_to(index, cx);
         }
     }
 
@@ -400,32 +437,26 @@ impl InputState {
             return line_end;
         }
 
-        // For now, use a simple character-based calculation
-        // In the future, we could use the line's ShapedLine for precise positioning
-        let line_content = &value[line_start..line_end];
-        let relative_x = position.x - bounds.left();
+        // Use ShapedLine for accurate positioning if available
+        if let Some(shaped_line) = self.multiline_layouts.get(clamped_line) {
+            let line_left = self
+                .multiline_line_bounds
+                .get(clamped_line)
+                .map(|b| b.left())
+                .unwrap_or(bounds.left());
 
-        // Estimate character width (this is approximate; proper implementation would use ShapedLine)
-        // For now, we'll estimate based on the line content
+            let local_x = position.x - line_left;
+            let local_index = shaped_line.closest_index_for_x(local_x);
+            return line_start + local_index;
+        }
+
+        // Fallback: simple linear interpolation (should not happen if rendering worked)
+        let line_content = &value[line_start..line_end];
         if line_content.is_empty() {
             return line_start;
         }
 
-        // Simple linear interpolation based on position
-        let ratio = relative_x / bounds.size.width;
-        let estimated_char_index = (ratio * line_content.len() as f32) as usize;
-
-        // Find the grapheme boundary
-        let mut actual_offset = line_start;
-        for (idx, (byte_idx, _)) in line_content.grapheme_indices(true).enumerate() {
-            if idx >= estimated_char_index {
-                actual_offset = line_start + byte_idx;
-                break;
-            }
-            actual_offset = line_start + byte_idx;
-        }
-
-        actual_offset.min(line_end)
+        line_start
     }
 
     pub fn offset_from_utf16(&self, offset: usize) -> usize {

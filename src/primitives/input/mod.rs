@@ -599,8 +599,19 @@ impl Element for MultiLineInputElement {
         if let Some(wrapped_state) = &prepaint.wrapped_lines {
             // Paint wrapped lines
             self.paint_wrapped_lines(bounds, wrapped_state, window, cx);
+
+            // Store bounds for mouse position calculation
+            self.input.update(cx, |input, _cx| {
+                input.last_bounds = Some(bounds);
+                // Clear multiline layouts for wrapped mode (not yet supported)
+                input.multiline_layouts.clear();
+                input.multiline_line_bounds.clear();
+            });
         } else {
-            // Paint non-wrapped lines
+            // Paint non-wrapped lines and collect ShapedLine layouts
+            let mut layouts = Vec::with_capacity(prepaint.line_elements.len());
+            let mut line_bounds_vec = Vec::with_capacity(prepaint.line_elements.len());
+
             let mut y_offset = bounds.origin.y;
             for line_element in &mut prepaint.line_elements {
                 let line_bounds = Bounds::new(
@@ -612,6 +623,13 @@ impl Element for MultiLineInputElement {
                 let mut layout_state = ();
                 let mut line_prepaint =
                     line_element.prepaint(None, None, line_bounds, &mut layout_state, window, cx);
+
+                // Clone the ShapedLine before paint consumes it
+                if let Some(ref shaped_line) = line_prepaint.line {
+                    layouts.push(shaped_line.clone());
+                    line_bounds_vec.push(line_bounds);
+                }
+
                 line_element.paint(
                     None,
                     None,
@@ -624,12 +642,14 @@ impl Element for MultiLineInputElement {
 
                 y_offset += self.line_height;
             }
-        }
 
-        // Store bounds for mouse position calculation
-        self.input.update(cx, |input, _cx| {
-            input.last_bounds = Some(bounds);
-        });
+            // Store bounds and layouts for mouse position calculation
+            self.input.update(cx, |input, _cx| {
+                input.last_bounds = Some(bounds);
+                input.multiline_layouts = layouts;
+                input.multiline_line_bounds = line_bounds_vec;
+            });
+        }
     }
 }
 
@@ -956,19 +976,10 @@ impl Element for LineElement {
 
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        // Update focus state to manage cursor blink and selection
-        self.state.update(cx, |state, cx| {
-            state.update_focus_state(window, cx);
-        });
+        let is_multiline = self.max_lines > 1;
 
-        let state = self.state.read(cx);
-
+        // Calculate line_height early so we can pass it to state
         let text_style = &self.style.text;
-        let text_color = self
-            .style
-            .text
-            .color
-            .unwrap_or_else(|| rgb(0xE8E4FF).into());
         let line_height = text_style
             .line_height
             .map(|this| {
@@ -981,6 +992,20 @@ impl RenderOnce for Input {
             })
             .unwrap_or_else(|| window.line_height());
 
+        // Update focus state and multiline params
+        self.state.update(cx, |state, cx| {
+            state.update_focus_state(window, cx);
+            state.set_multiline_params(is_multiline, line_height);
+        });
+
+        let state = self.state.read(cx);
+
+        let text_color = self
+            .style
+            .text
+            .color
+            .unwrap_or_else(|| rgb(0xE8E4FF).into());
+
         let placeholder_text_color = self
             .placeholder_text_color
             .unwrap_or_else(|| hsla(0., 0., 0., 0.2));
@@ -988,8 +1013,6 @@ impl RenderOnce for Input {
             .selection_color
             .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
         let cursor_visible = state.cursor_visible(cx);
-
-        let is_multiline = self.max_lines > 1;
 
         div()
             .id(self.id.clone())
