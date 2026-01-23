@@ -4,7 +4,12 @@ use gpui::{
     ShapedLine, SharedString, UTF16Selection, Window, actions, div, point,
 };
 use std::ops::Range;
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
+
+/// Function type for transforming text when it changes.
+/// Takes the full text after the change and returns the transformed text.
+pub type MapTextFn = Arc<dyn Fn(SharedString) -> SharedString + Send + Sync>;
 
 use super::CursorBlink;
 
@@ -53,6 +58,8 @@ pub struct InputState {
     pub(crate) multiline_layouts: Vec<ShapedLine>,
     /// Per-line bounds for multiline mode
     pub(crate) multiline_line_bounds: Vec<Bounds<Pixels>>,
+    /// Closure to transform text when it changes (modifies stored value)
+    pub(crate) map_text: Option<MapTextFn>,
 }
 
 impl InputState {
@@ -72,6 +79,7 @@ impl InputState {
             line_height: None,
             multiline_layouts: Vec::new(),
             multiline_line_bounds: Vec::new(),
+            map_text: None,
         }
     }
 
@@ -79,6 +87,15 @@ impl InputState {
     pub(crate) fn set_multiline_params(&mut self, is_multiline: bool, line_height: Pixels) {
         self.is_multiline = is_multiline;
         self.line_height = Some(line_height);
+    }
+
+    /// Apply map_text transformation if set
+    fn apply_map_text(&self, text: String) -> String {
+        if let Some(map_fn) = &self.map_text {
+            map_fn(text.into()).to_string()
+        } else {
+            text
+        }
     }
 
     /// Call this during render to update focus state and manage cursor blink
@@ -653,11 +670,19 @@ impl EntityInputHandler for InputState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        self.value = Some(
-            (self.value()[0..range.start].to_owned() + new_text + &self.value()[range.end..])
-                .into(),
-        );
-        self.selected_range = range.start + new_text.len()..range.start + new_text.len();
+        // Build the new text
+        let before = &self.value()[0..range.start];
+        let after = &self.value()[range.end..];
+        let raw_new_text = format!("{}{}{}", before, new_text, after);
+
+        // Apply map_text transformation
+        let final_text = self.apply_map_text(raw_new_text);
+
+        // Calculate cursor position, clamping to final text length
+        let new_cursor = (range.start + new_text.len()).min(final_text.len());
+
+        self.value = Some(final_text.into());
+        self.selected_range = new_cursor..new_cursor;
         self.marked_range.take();
 
         self.reset_cursor_blink(cx);
@@ -678,10 +703,15 @@ impl EntityInputHandler for InputState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        self.value = Some(
-            (self.value()[0..range.start].to_owned() + new_text + &self.value()[range.end..])
-                .into(),
-        );
+        // Build the new text
+        let before = &self.value()[0..range.start];
+        let after = &self.value()[range.end..];
+        let raw_new_text = format!("{}{}{}", before, new_text, after);
+
+        // Apply map_text transformation
+        let final_text = self.apply_map_text(raw_new_text);
+
+        self.value = Some(final_text.into());
 
         if !new_text.is_empty() {
             self.marked_range = Some(range.start..range.start + new_text.len());

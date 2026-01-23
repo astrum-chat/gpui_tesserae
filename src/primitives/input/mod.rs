@@ -15,7 +15,11 @@ mod state;
 pub mod text_transforms;
 
 pub use cursor_blink::CursorBlink;
-pub use state::*;
+pub use state::{
+    Backspace, Copy, Cut, Delete, Down, End, Home, InputState, InsertNewline, InsertNewlineShift,
+    Left, MapTextFn, Paste, Quit, Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp,
+    ShowCharacterPalette, Up,
+};
 
 use crate::utils::rgb_a;
 
@@ -34,6 +38,7 @@ pub struct Input {
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
     transform_text: Option<TransformTextFn>,
+    map_text: Option<MapTextFn>,
     style: StyleRefinement,
 }
 
@@ -56,6 +61,7 @@ impl Input {
             placeholder_text_color: None,
             selection_color: None,
             transform_text: None,
+            map_text: None,
             style: StyleRefinement::default(),
         }
     }
@@ -97,6 +103,16 @@ impl Input {
         transform: impl Fn(char) -> char + Send + Sync + 'static,
     ) -> Self {
         self.transform_text = Some(Arc::new(transform));
+        self
+    }
+
+    /// Transform the text value whenever it changes.
+    /// Unlike `transform_text`, this actually modifies the stored value.
+    pub fn map_text(
+        mut self,
+        f: impl Fn(SharedString) -> SharedString + Send + Sync + 'static,
+    ) -> Self {
+        self.map_text = Some(Arc::new(f));
         self
     }
 
@@ -992,10 +1008,12 @@ impl RenderOnce for Input {
             })
             .unwrap_or_else(|| window.line_height());
 
-        // Update focus state and multiline params
+        // Update focus state, multiline params, and map_text
+        let map_text = self.map_text.clone();
         self.state.update(cx, |state, cx| {
             state.update_focus_state(window, cx);
             state.set_multiline_params(is_multiline, line_height);
+            state.map_text = map_text;
         });
 
         let state = self.state.read(cx);

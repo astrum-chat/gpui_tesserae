@@ -81,6 +81,12 @@ impl Render for Main {
                     ),
                 )
                 .multiline()
+                .map_text(|text| {
+                    text.chars()
+                        .filter(|char| char.is_alphabetic())
+                        .collect::<String>()
+                        .into()
+                })
                 .newline_on_shift_enter(true)
                 .w(px(200.))
                 .disabled(self.checkbox_checked || self.switch_checked)

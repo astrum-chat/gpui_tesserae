@@ -138,6 +138,18 @@ impl Input {
         self
     }
 
+    /// Transform the text value whenever it changes.
+    /// Unlike `transform_text`, this actually modifies the stored value.
+    /// - `text`: The full text after the raw change was applied
+    /// - `inserted_ranges`: Character ranges where new text was inserted, or None for deletion-only
+    pub fn map_text(
+        mut self,
+        f: impl Fn(SharedString) -> SharedString + Send + Sync + 'static,
+    ) -> Self {
+        self.base = self.base.map_text(f);
+        self
+    }
+
     /// Sets the maximum number of visible lines before scrolling.
     /// - `max_lines == 1` (default): single-line input
     /// - `max_lines > 1`: multi-line input using uniform_list for efficient rendering
