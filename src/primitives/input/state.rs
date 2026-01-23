@@ -254,10 +254,19 @@ impl InputState {
             return 0;
         };
 
+        // Handle positions outside bounds for selection during drag
         if position.y < bounds.top() {
             return 0;
         }
         if position.y > bounds.bottom() {
+            return self.value().len();
+        }
+
+        // For horizontal positions outside bounds, select to start/end
+        if position.x < bounds.left() {
+            return 0;
+        }
+        if position.x > bounds.right() {
             return self.value().len();
         }
 

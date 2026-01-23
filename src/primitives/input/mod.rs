@@ -1,9 +1,10 @@
 use gpui::{
-    App, Bounds, CursorStyle, Element, ElementId, ElementInputHandler, Entity, FocusHandle,
-    Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement, IntoElement,
-    KeyBinding, LayoutId, MouseButton, PaintQuad, ParentElement, Pixels, Refineable, RenderOnce,
-    ShapedLine, SharedString, Style, StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div,
-    fill, hsla, point, prelude::FluentBuilder, px, relative, rgb, size,
+    App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement,
+    IntoElement, KeyBinding, LayoutId, MouseButton, MouseMoveEvent, PaintQuad, ParentElement,
+    Pixels, Refineable, RenderOnce, ShapedLine, SharedString, Style, StyleRefinement, Styled,
+    TextRun, UnderlineStyle, Window, div, fill, hsla, point, prelude::FluentBuilder, px, relative,
+    rgb, size,
 };
 
 mod cursor_blink;
@@ -246,6 +247,21 @@ impl Element for TextElement {
         cx: &mut App,
     ) {
         let focus_handle = self.input.read(cx).focus_handle.clone();
+
+        // Register window-level mouse move listener to handle selection
+        // even when cursor leaves the input bounds during drag
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Capture {
+                return;
+            }
+
+            input.update(cx, |input, cx| {
+                if input.is_selecting {
+                    input.select_to(input.index_for_mouse_position(event.position), cx);
+                }
+            });
+        });
 
         window.handle_input(
             &focus_handle,
