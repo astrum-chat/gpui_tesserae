@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::{
     App, AppContext, Application, Bounds, Context, ElementId, FocusHandle, KeyBinding, Menu,
     SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, point,
-    prelude::*, px, size,
+    prelude::*, px, relative, size,
 };
 use gpui_transitions::{BoolLerp, TransitionState};
 
@@ -80,8 +80,9 @@ impl Render for Main {
                         |_window, cx| InputState::new(cx),
                     ),
                 )
-                .max_lines(5)
-                .w(px(200.))
+                .wrap(true)
+                .max_lines(3)
+                .w(relative(0.5))
                 .disabled(self.checkbox_checked || self.switch_checked),
             )
         /*.child(

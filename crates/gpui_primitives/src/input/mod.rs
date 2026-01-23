@@ -4,10 +4,10 @@ use std::sync::Arc;
 use gpui::{
     AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler,
     Entity, FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement,
-    IntoElement, KeyBinding, LayoutId, MouseButton, MouseMoveEvent, PaintQuad, ParentElement,
-    Pixels, Refineable, RenderOnce, ShapedLine, SharedString, Style, StyleRefinement, Styled,
-    TextRun, UnderlineStyle, Window, WrappedLine, div, fill, hsla, point, prelude::FluentBuilder,
-    px, relative, rgb, size, uniform_list,
+    IntoElement, KeyBinding, LayoutId, MouseButton, MouseMoveEvent, Overflow, PaintQuad,
+    ParentElement, Pixels, Refineable, RenderOnce, ShapedLine, SharedString, Style,
+    StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div, fill, hsla, point,
+    prelude::FluentBuilder, px, relative, rgb, size, uniform_list,
 };
 
 mod cursor_blink;
@@ -365,516 +365,6 @@ impl Element for TextElement {
     }
 }
 
-/// Wrapper element for multi-line input that handles input registration
-/// and contains the uniform_list for rendering lines.
-struct MultiLineInputElement {
-    id: ElementId,
-    input: Entity<InputState>,
-    line_count: usize,
-    line_offsets: Vec<(usize, usize)>,
-    text_color: Hsla,
-    placeholder_text_color: Hsla,
-    highlight_text_color: Hsla,
-    line_height: Pixels,
-    transform_text: Option<TransformTextFn>,
-    cursor_visible: bool,
-    selected_range: Range<usize>,
-    cursor_offset: usize,
-    placeholder: SharedString,
-    is_empty: bool,
-    max_lines: usize,
-    wrap: bool,
-    value: SharedString,
-}
-
-struct MultiLinePrepaintState {
-    /// For non-wrapped mode: individual line elements
-    line_elements: Vec<LineElement>,
-    /// For wrapped mode: the wrapped lines from shape_text
-    wrapped_lines: Option<WrappedTextState>,
-}
-
-struct WrappedTextState {
-    lines: Vec<WrappedLine>,
-    /// Maps visual line index to (logical_line_start_offset, visual_line_start_offset_in_logical)
-    visual_line_info: Vec<VisualLineInfo>,
-}
-
-impl IntoElement for MultiLineInputElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for MultiLineInputElement {
-    type RequestLayoutState = ();
-    type PrepaintState = MultiLinePrepaintState;
-
-    fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        // Height based on visible lines
-        let visible_lines = self.max_lines.min(self.line_count).max(1);
-        style.size.height = (self.line_height * visible_lines as f32).into();
-
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        _cx: &mut App,
-    ) -> Self::PrepaintState {
-        if self.wrap {
-            // Wrapped mode: use shape_text to get wrapped lines
-            let style = window.text_style();
-            let font_size = style.font_size.to_pixels(window.rem_size());
-
-            let display_text: SharedString = if self.is_empty {
-                self.placeholder.clone()
-            } else if let Some(transform) = &self.transform_text {
-                let transformed: String = self.value.chars().map(|c| transform(c)).collect();
-                transformed.into()
-            } else {
-                self.value.clone()
-            };
-
-            let text_color = if self.is_empty {
-                self.placeholder_text_color
-            } else {
-                self.text_color
-            };
-
-            let run = TextRun {
-                len: display_text.len(),
-                font: style.font(),
-                color: text_color,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-
-            // Shape text with wrapping
-            let wrapped_lines = window
-                .text_system()
-                .shape_text(
-                    display_text,
-                    font_size,
-                    &[run],
-                    Some(bounds.size.width),
-                    None,
-                )
-                .unwrap_or_default();
-
-            // Build visual line info - each WrappedLine can contain multiple visual lines
-            // due to wrap boundaries
-            let mut visual_line_info = Vec::new();
-            let mut text_offset = 0;
-
-            for (wrapped_idx, wrapped_line) in wrapped_lines.iter().enumerate() {
-                let line_len = wrapped_line.len();
-                let wrap_boundaries = &wrapped_line.wrap_boundaries;
-
-                if wrap_boundaries.is_empty() {
-                    // No wrapping within this line
-                    visual_line_info.push(VisualLineInfo {
-                        start_offset: text_offset,
-                        end_offset: text_offset + line_len,
-                        wrapped_line_index: wrapped_idx,
-                        visual_index_in_wrapped: 0,
-                    });
-                } else {
-                    // Line has wrap boundaries - create visual line for each segment
-                    let mut segment_start = 0;
-                    for (visual_idx, boundary) in wrap_boundaries.iter().enumerate() {
-                        let segment_end = boundary.glyph_ix;
-                        visual_line_info.push(VisualLineInfo {
-                            start_offset: text_offset + segment_start,
-                            end_offset: text_offset + segment_end,
-                            wrapped_line_index: wrapped_idx,
-                            visual_index_in_wrapped: visual_idx,
-                        });
-                        segment_start = segment_end;
-                    }
-                    // Add final segment after last wrap boundary
-                    visual_line_info.push(VisualLineInfo {
-                        start_offset: text_offset + segment_start,
-                        end_offset: text_offset + line_len,
-                        wrapped_line_index: wrapped_idx,
-                        visual_index_in_wrapped: wrap_boundaries.len(),
-                    });
-                }
-
-                // Account for newline character between logical lines
-                text_offset += line_len + 1;
-            }
-
-            MultiLinePrepaintState {
-                line_elements: Vec::new(),
-                wrapped_lines: Some(WrappedTextState {
-                    lines: wrapped_lines.into_vec(),
-                    visual_line_info,
-                }),
-            }
-        } else {
-            // Non-wrapped mode: create line elements for all visible lines
-            let line_elements: Vec<LineElement> = (0..self.line_count)
-                .map(|line_idx| {
-                    let (line_start, line_end) =
-                        self.line_offsets.get(line_idx).copied().unwrap_or((0, 0));
-
-                    LineElement {
-                        input: self.input.clone(),
-                        line_index: line_idx,
-                        line_start_offset: line_start,
-                        line_end_offset: line_end,
-                        text_color: self.text_color,
-                        placeholder_text_color: self.placeholder_text_color,
-                        highlight_text_color: self.highlight_text_color,
-                        line_height: self.line_height,
-                        transform_text: self.transform_text.clone(),
-                        cursor_visible: self.cursor_visible,
-                        selected_range: self.selected_range.clone(),
-                        cursor_offset: self.cursor_offset,
-                        placeholder: self.placeholder.clone(),
-                        is_empty: self.is_empty,
-                    }
-                })
-                .collect();
-
-            MultiLinePrepaintState {
-                line_elements,
-                wrapped_lines: None,
-            }
-        }
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let focus_handle = self.input.read(cx).focus_handle.clone();
-
-        // Register window-level mouse move listener to handle selection
-        // even when cursor leaves the input bounds during drag
-        let input = self.input.clone();
-        let line_height = self.line_height;
-        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
-            if phase == DispatchPhase::Capture {
-                return;
-            }
-
-            input.update(cx, |input, cx| {
-                if input.is_selecting {
-                    input.select_to_multiline(event.position, line_height, cx);
-                }
-            });
-        });
-
-        // Register input handler for the entire multi-line input area
-        window.handle_input(
-            &focus_handle,
-            ElementInputHandler::new(bounds, self.input.clone()),
-            cx,
-        );
-
-        if let Some(wrapped_state) = prepaint.wrapped_lines.take() {
-            // Paint wrapped lines
-            self.paint_wrapped_lines(bounds, &wrapped_state, window, cx);
-
-            // Store wrapped state for mouse position calculation
-            self.input.update(cx, |input, _cx| {
-                input.last_bounds = Some(bounds);
-                input.is_wrapped = true;
-                input.wrapped_visual_line_info = wrapped_state.visual_line_info;
-                input.wrapped_lines = wrapped_state.lines;
-                // Clear non-wrapped layouts
-                input.multiline_layouts.clear();
-                input.multiline_line_bounds.clear();
-            });
-        } else {
-            // Paint non-wrapped lines and collect ShapedLine layouts
-            let mut layouts = Vec::with_capacity(prepaint.line_elements.len());
-            let mut line_bounds_vec = Vec::with_capacity(prepaint.line_elements.len());
-
-            let mut y_offset = bounds.origin.y;
-            for line_element in &mut prepaint.line_elements {
-                let line_bounds = Bounds::new(
-                    point(bounds.origin.x, y_offset),
-                    size(bounds.size.width, self.line_height),
-                );
-
-                // Prepaint and paint the line element
-                let mut layout_state = ();
-                let mut line_prepaint =
-                    line_element.prepaint(None, None, line_bounds, &mut layout_state, window, cx);
-
-                // Clone the ShapedLine before paint consumes it
-                if let Some(ref shaped_line) = line_prepaint.line {
-                    layouts.push(shaped_line.clone());
-                    line_bounds_vec.push(line_bounds);
-                }
-
-                line_element.paint(
-                    None,
-                    None,
-                    line_bounds,
-                    &mut layout_state,
-                    &mut line_prepaint,
-                    window,
-                    cx,
-                );
-
-                y_offset += self.line_height;
-            }
-
-            // Store bounds and layouts for mouse position calculation
-            self.input.update(cx, |input, _cx| {
-                input.last_bounds = Some(bounds);
-                input.is_wrapped = false;
-                input.multiline_layouts = layouts;
-                input.multiline_line_bounds = line_bounds_vec;
-                // Clear wrapped state
-                input.wrapped_visual_line_info.clear();
-                input.wrapped_lines.clear();
-            });
-        }
-    }
-}
-
-impl MultiLineInputElement {
-    fn paint_wrapped_lines(
-        &self,
-        bounds: Bounds<Pixels>,
-        wrapped_state: &WrappedTextState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let focus_handle = self.input.read(cx).focus_handle.clone();
-        let is_focused = focus_handle.is_focused(window);
-
-        // Paint selection background first (behind text)
-        if !self.selected_range.is_empty() {
-            self.paint_selection_for_wrapped(bounds, wrapped_state, window);
-        }
-
-        // Paint each wrapped line
-        let mut y_offset = bounds.origin.y;
-        for wrapped_line in &wrapped_state.lines {
-            // Calculate height for this wrapped line (accounts for internal wrapping)
-            let wrap_count = wrapped_line.wrap_boundaries.len() + 1;
-            let line_total_height = self.line_height * wrap_count as f32;
-
-            // Paint the wrapped line
-            wrapped_line
-                .paint(
-                    point(bounds.origin.x, y_offset),
-                    self.line_height,
-                    gpui::TextAlign::Left,
-                    Some(bounds),
-                    window,
-                    cx,
-                )
-                .ok();
-
-            y_offset += line_total_height;
-        }
-
-        // Paint cursor if focused and visible
-        if is_focused && self.cursor_visible && !self.is_empty {
-            self.paint_cursor_for_wrapped(bounds, wrapped_state, window);
-        }
-    }
-
-    fn paint_selection_for_wrapped(
-        &self,
-        bounds: Bounds<Pixels>,
-        wrapped_state: &WrappedTextState,
-        window: &mut Window,
-    ) {
-        let selection_start = self.selected_range.start;
-        let selection_end = self.selected_range.end;
-
-        // Iterate through visual lines and paint selection for each that intersects
-        for (visual_idx, info) in wrapped_state.visual_line_info.iter().enumerate() {
-            // Check if this visual line intersects with the selection
-            if selection_end <= info.start_offset || selection_start >= info.end_offset {
-                continue;
-            }
-
-            // Calculate the y position of this visual line
-            let y_offset = self.y_offset_for_visual_line(visual_idx, wrapped_state, bounds);
-
-            // Get the wrapped line
-            let Some(wrapped_line) = wrapped_state.lines.get(info.wrapped_line_index) else {
-                continue;
-            };
-
-            // Calculate local selection bounds within this visual line
-            let local_start = selection_start.saturating_sub(info.start_offset);
-            let local_end =
-                (selection_end - info.start_offset).min(info.end_offset - info.start_offset);
-
-            // Calculate x positions for selection
-            let (start_x, end_x) = if info.visual_index_in_wrapped == 0 {
-                // First visual segment - direct lookup
-                let start_x = wrapped_line.unwrapped_layout.x_for_index(local_start);
-                let end_x = wrapped_line.unwrapped_layout.x_for_index(local_end);
-                (start_x, end_x)
-            } else {
-                // Subsequent visual segments - account for wrap boundary
-                let wrap_start = wrapped_line
-                    .wrap_boundaries
-                    .get(info.visual_index_in_wrapped - 1)
-                    .map(|b| b.glyph_ix)
-                    .unwrap_or(0);
-
-                let wrap_start_x = wrapped_line.unwrapped_layout.x_for_index(wrap_start);
-
-                let start_x = wrapped_line
-                    .unwrapped_layout
-                    .x_for_index(wrap_start + local_start)
-                    - wrap_start_x;
-                let end_x = wrapped_line
-                    .unwrapped_layout
-                    .x_for_index(wrap_start + local_end)
-                    - wrap_start_x;
-
-                (start_x, end_x)
-            };
-
-            // Paint selection rectangle for this visual line
-            window.paint_quad(fill(
-                Bounds::from_corners(
-                    point(bounds.left() + start_x, y_offset),
-                    point(bounds.left() + end_x, y_offset + self.line_height),
-                ),
-                self.highlight_text_color,
-            ));
-        }
-    }
-
-    fn y_offset_for_visual_line(
-        &self,
-        target_visual_idx: usize,
-        wrapped_state: &WrappedTextState,
-        bounds: Bounds<Pixels>,
-    ) -> Pixels {
-        let mut y_offset = bounds.origin.y;
-        let mut current_visual_idx = 0;
-
-        for wrapped_line in &wrapped_state.lines {
-            let wrap_count = wrapped_line.wrap_boundaries.len() + 1;
-
-            for visual_in_wrapped in 0..wrap_count {
-                if current_visual_idx == target_visual_idx {
-                    return y_offset + self.line_height * visual_in_wrapped as f32;
-                }
-                current_visual_idx += 1;
-            }
-
-            y_offset += self.line_height * wrap_count as f32;
-        }
-
-        y_offset
-    }
-
-    fn paint_cursor_for_wrapped(
-        &self,
-        bounds: Bounds<Pixels>,
-        wrapped_state: &WrappedTextState,
-        window: &mut Window,
-    ) {
-        // Find which visual line the cursor is on
-        let cursor = self.cursor_offset;
-        let mut visual_line_idx = 0;
-        for (idx, info) in wrapped_state.visual_line_info.iter().enumerate() {
-            if cursor >= info.start_offset && cursor <= info.end_offset {
-                visual_line_idx = idx;
-                break;
-            }
-        }
-
-        if let Some(info) = wrapped_state.visual_line_info.get(visual_line_idx) {
-            if let Some(wrapped_line) = wrapped_state.lines.get(info.wrapped_line_index) {
-                // Calculate cursor position within the line
-                let local_cursor = cursor.saturating_sub(info.start_offset);
-
-                // Get x position for cursor
-                // For wrapped lines, we need to account for wrap boundaries
-                let cursor_x = if info.visual_index_in_wrapped == 0 {
-                    wrapped_line.unwrapped_layout.x_for_index(local_cursor)
-                } else {
-                    // For subsequent visual lines within a wrap, adjust for wrap boundary
-                    let wrap_start = if info.visual_index_in_wrapped > 0 {
-                        wrapped_line
-                            .wrap_boundaries
-                            .get(info.visual_index_in_wrapped - 1)
-                            .map(|b| b.glyph_ix)
-                            .unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    let offset_in_visual_line = cursor.saturating_sub(info.start_offset);
-                    wrapped_line
-                        .unwrapped_layout
-                        .x_for_index(wrap_start + offset_in_visual_line)
-                        - wrapped_line.unwrapped_layout.x_for_index(wrap_start)
-                };
-
-                // Calculate y position
-                let mut y_offset = bounds.origin.y;
-                for (idx, line) in wrapped_state.lines.iter().enumerate() {
-                    if idx == info.wrapped_line_index {
-                        y_offset += self.line_height * info.visual_index_in_wrapped as f32;
-                        break;
-                    }
-                    let wrap_count = line.wrap_boundaries.len() + 1;
-                    y_offset += self.line_height * wrap_count as f32;
-                }
-
-                let height = self.line_height;
-                let adjusted_height = height * 0.8;
-                let height_diff = height - adjusted_height;
-
-                window.paint_quad(fill(
-                    Bounds::new(
-                        point(bounds.left() + cursor_x, y_offset + height_diff / 2.),
-                        size(px(1.), adjusted_height),
-                    ),
-                    self.text_color,
-                ));
-            }
-        }
-    }
-}
-
 /// Element for rendering a single line in a multi-line input.
 /// Used by uniform_list to render only the visible lines.
 struct LineElement {
@@ -1094,6 +584,244 @@ impl Element for LineElement {
     }
 }
 
+/// Element for rendering a single visual line in wrapped multi-line input.
+/// Used by uniform_list to render only visible wrapped lines.
+struct WrappedLineElement {
+    input: Entity<InputState>,
+    /// Index into precomputed_visual_lines
+    visual_line_index: usize,
+    text_color: Hsla,
+    placeholder_text_color: Hsla,
+    highlight_text_color: Hsla,
+    line_height: Pixels,
+    transform_text: Option<TransformTextFn>,
+    cursor_visible: bool,
+    /// The global selection range from InputState
+    selected_range: Range<usize>,
+    /// The cursor position (byte offset in full text)
+    cursor_offset: usize,
+    /// Placeholder text (only shown on first visual line when empty)
+    placeholder: SharedString,
+    /// Whether the input is empty
+    is_empty: bool,
+}
+
+struct WrappedLinePrepaintState {
+    line: Option<ShapedLine>,
+    cursor: Option<PaintQuad>,
+    selection: Option<PaintQuad>,
+}
+
+impl IntoElement for WrappedLineElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for WrappedLineElement {
+    type RequestLayoutState = ();
+    type PrepaintState = WrappedLinePrepaintState;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = self.line_height.into();
+
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        let input = self.input.read(cx);
+        let style = window.text_style();
+        let font_size = style.font_size.to_pixels(window.rem_size());
+
+        // Get the visual line info
+        let visual_info = input
+            .precomputed_visual_lines
+            .get(self.visual_line_index)
+            .cloned();
+
+        let Some(info) = visual_info else {
+            return WrappedLinePrepaintState {
+                line: None,
+                cursor: None,
+                selection: None,
+            };
+        };
+
+        // Get display text for this visual line
+        let (display_text, text_color): (SharedString, Hsla) =
+            if self.is_empty && self.visual_line_index == 0 {
+                // Show placeholder on first line when empty
+                (self.placeholder.clone(), self.placeholder_text_color)
+            } else {
+                let value = input.value();
+                let segment = &value[info.start_offset..info.end_offset];
+                let text: SharedString = if let Some(transform) = &self.transform_text {
+                    segment
+                        .chars()
+                        .map(|c| transform(c))
+                        .collect::<String>()
+                        .into()
+                } else {
+                    segment.to_string().into()
+                };
+                (text, self.text_color)
+            };
+
+        let run = TextRun {
+            len: display_text.len(),
+            font: style.font(),
+            color: text_color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        let line = window
+            .text_system()
+            .shape_line(display_text, font_size, &[run], None);
+
+        // Calculate selection and cursor for this visual line
+        let line_start = info.start_offset;
+        let line_end = info.end_offset;
+        let line_len = line_end - line_start;
+
+        // Check if cursor is on this visual line
+        let cursor_on_this_line =
+            self.cursor_offset >= line_start && self.cursor_offset <= line_end;
+
+        let local_cursor = if cursor_on_this_line {
+            Some(self.cursor_offset - line_start)
+        } else {
+            None
+        };
+
+        // Calculate selection intersection with this visual line
+        let selection_intersects =
+            self.selected_range.start < line_end && self.selected_range.end > line_start;
+
+        let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
+            let local_start = self
+                .selected_range
+                .start
+                .saturating_sub(line_start)
+                .min(line_len);
+            let local_end = self
+                .selected_range
+                .end
+                .saturating_sub(line_start)
+                .min(line_len);
+
+            (
+                Some(fill(
+                    Bounds::from_corners(
+                        point(bounds.left() + line.x_for_index(local_start), bounds.top()),
+                        point(bounds.left() + line.x_for_index(local_end), bounds.bottom()),
+                    ),
+                    self.highlight_text_color,
+                )),
+                None,
+            )
+        } else if let Some(local_cursor) = local_cursor {
+            let cursor_pos = line.x_for_index(local_cursor);
+            let height = bounds.bottom() - bounds.top();
+            let adjusted_height = height * 0.8;
+            let height_diff = height - adjusted_height;
+
+            (
+                None,
+                Some(fill(
+                    Bounds::new(
+                        point(bounds.left() + cursor_pos, bounds.top() + height_diff / 2.),
+                        size(px(1.), adjusted_height),
+                    ),
+                    self.text_color,
+                )),
+            )
+        } else {
+            (None, None)
+        };
+
+        WrappedLinePrepaintState {
+            line: Some(line),
+            cursor,
+            selection,
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus_handle = self.input.read(cx).focus_handle.clone();
+
+        if let Some(selection) = prepaint.selection.take() {
+            window.paint_quad(selection)
+        }
+
+        let Some(line) = prepaint.line.take() else {
+            return;
+        };
+
+        // Store visible line info for mouse hit testing
+        self.input.update(cx, |input, _cx| {
+            input.visible_lines_info.push(VisibleLineInfo {
+                line_index: self.visual_line_index,
+                bounds,
+                shaped_line: line.clone(),
+            });
+        });
+
+        line.paint(
+            bounds.origin,
+            self.line_height,
+            gpui::TextAlign::Left,
+            None,
+            window,
+            cx,
+        )
+        .unwrap();
+
+        if focus_handle.is_focused(window)
+            && self.cursor_visible
+            && let Some(cursor) = prepaint.cursor.take()
+        {
+            window.paint_quad(cursor);
+        }
+    }
+}
+
 /// Wrapper element that contains a uniform_list and registers the input handler.
 /// This is needed because uniform_list doesn't provide a paint hook where we can
 /// call window.handle_input().
@@ -1189,9 +917,10 @@ impl Element for UniformListInputElement {
         // Paint the child (uniform_list)
         self.child.paint(window, cx);
 
-        // Store bounds for mouse position calculations
+        // Store bounds and cache width for mouse position calculations and wrapped line computation
         self.input.update(cx, |input, _cx| {
             input.last_bounds = Some(bounds);
+            input.cached_wrap_width = Some(bounds.size.width);
         });
     }
 }
@@ -1303,6 +1032,9 @@ impl RenderOnce for Input {
                 let placeholder = self.placeholder.clone();
                 let max_lines = self.max_lines;
 
+                // Only enable scroll tracking when content exceeds max_lines
+                let needs_scroll = line_count > max_lines;
+
                 let list = uniform_list(
                     self.id.clone(),
                     line_count,
@@ -1348,6 +1080,13 @@ impl RenderOnce for Input {
                     },
                 )
                 .track_scroll(&scroll_handle)
+                .map(|mut list| {
+                    if !needs_scroll {
+                        // Override the default overflow.y = Scroll to prevent scrolling
+                        list.style().overflow.y = Some(Overflow::Hidden);
+                    }
+                    list
+                })
                 .h(line_height * max_lines.min(line_count).max(1) as f32);
 
                 this.child(UniformListInputElement {
@@ -1356,40 +1095,66 @@ impl RenderOnce for Input {
                 })
             })
             .when(is_multiline && self.wrap, |this| {
-                // Multi-line wrapped mode: use MultiLineInputElement with manual scrolling
-                let line_count = state.line_count().max(1);
-                let selected_range = state.selected_range.clone();
-                let cursor_offset = state.cursor_offset();
-                let is_empty = state.value().is_empty();
+                // Multi-line wrapped mode: use uniform_list with visual lines
+                // Note: We capture what we need before entering the closure to avoid borrow issues
+                let scroll_handle = self.state.read(cx).scroll_handle.clone();
+                let cached_wrap_width = self.state.read(cx).cached_wrap_width;
+                let input_state = self.state.clone();
+                let transform_text = self.transform_text.clone();
+                let placeholder = self.placeholder.clone();
+                let max_lines = self.max_lines;
 
-                // Pre-compute line offsets
-                let mut line_offsets: Vec<(usize, usize)> = Vec::with_capacity(line_count);
-                let value = state.value();
-                let mut start = 0;
-                for line in value.split('\n') {
-                    let end = start + line.len();
-                    line_offsets.push((start, end));
-                    start = end + 1; // +1 for the newline character
-                }
+                // Pre-compute visual lines using cached width (or default)
+                let wrap_width = cached_wrap_width.unwrap_or(px(300.));
+                let visual_line_count = self.state.update(cx, |state, _cx| {
+                    let count = state.precompute_wrapped_lines(wrap_width, text_color, window);
+                    state.is_wrapped = true;
+                    count
+                });
 
-                this.child(MultiLineInputElement {
-                    id: self.id.clone(),
+                // Only enable scroll tracking when content exceeds max_lines
+                let needs_scroll = visual_line_count > max_lines;
+
+                let list = uniform_list(
+                    self.id.clone(),
+                    visual_line_count,
+                    move |visible_range, _window, cx| {
+                        let state = input_state.read(cx);
+                        let selected_range = state.selected_range.clone();
+                        let cursor_offset = state.cursor_offset();
+                        let is_empty = state.value().is_empty();
+
+                        visible_range
+                            .map(|visual_idx| WrappedLineElement {
+                                input: input_state.clone(),
+                                visual_line_index: visual_idx,
+                                text_color,
+                                placeholder_text_color,
+                                highlight_text_color,
+                                line_height,
+                                transform_text: transform_text.clone(),
+                                cursor_visible,
+                                selected_range: selected_range.clone(),
+                                cursor_offset,
+                                placeholder: placeholder.clone(),
+                                is_empty,
+                            })
+                            .collect()
+                    },
+                )
+                .track_scroll(&scroll_handle)
+                .map(|mut list| {
+                    if !needs_scroll {
+                        // Override the default overflow.y = Scroll to prevent scrolling
+                        list.style().overflow.y = Some(Overflow::Hidden);
+                    }
+                    list
+                })
+                .h(line_height * max_lines.min(visual_line_count).max(1) as f32);
+
+                this.child(UniformListInputElement {
                     input: self.state.clone(),
-                    line_count,
-                    line_offsets,
-                    text_color,
-                    placeholder_text_color,
-                    highlight_text_color,
-                    line_height,
-                    transform_text: self.transform_text.clone(),
-                    cursor_visible,
-                    selected_range,
-                    cursor_offset,
-                    placeholder: self.placeholder.clone(),
-                    is_empty,
-                    max_lines: self.max_lines,
-                    wrap: self.wrap,
-                    value: state.value(),
+                    child: list.into_any_element(),
                 })
             })
             .when(!is_multiline, |this| {

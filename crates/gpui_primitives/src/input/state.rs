@@ -1,8 +1,8 @@
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
-    Focusable, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    ScrollStrategy, ShapedLine, SharedString, UTF16Selection, UniformListScrollHandle, Window,
-    WrappedLine, actions, div, point, px,
+    Focusable, Hsla, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    Render, ScrollStrategy, ShapedLine, SharedString, TextRun, UTF16Selection,
+    UniformListScrollHandle, Window, WrappedLine, actions, div, point,
 };
 use std::ops::Range;
 use std::sync::Arc;
@@ -81,26 +81,27 @@ pub struct InputState {
     pub(crate) is_multiline: bool,
     /// Line height for multiline calculations (set during render)
     pub(crate) line_height: Option<Pixels>,
-    /// Per-line ShapedLine layouts for multiline mode
-    pub(crate) multiline_layouts: Vec<ShapedLine>,
-    /// Per-line bounds for multiline mode
-    pub(crate) multiline_line_bounds: Vec<Bounds<Pixels>>,
     /// Closure to transform text when it changes (modifies stored value)
     pub(crate) map_text: Option<MapTextFn>,
     /// Whether the input is in wrapped mode (text wrapping enabled)
     pub(crate) is_wrapped: bool,
-    /// Visual line info for wrapped text - maps visual lines to byte offsets
-    pub(crate) wrapped_visual_line_info: Vec<VisualLineInfo>,
-    /// The wrapped lines from shape_text (stored for position calculations)
-    pub(crate) wrapped_lines: Vec<WrappedLine>,
-    /// Scroll handle for uniform_list (non-wrapped multiline mode)
+    /// Scroll handle for uniform_list (both wrapped and non-wrapped modes)
     pub scroll_handle: UniformListScrollHandle,
-    /// Scroll offset for wrapped mode (manual scrolling)
-    pub(crate) scroll_offset_y: Pixels,
     /// Maximum visible lines (for scroll calculations)
     pub(crate) max_lines: usize,
     /// Visible line info for uniform_list mode - populated during paint
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
+    /// Cached container width for wrapped text calculations
+    pub(crate) cached_wrap_width: Option<Pixels>,
+    /// Pre-computed visual lines for wrapped uniform_list mode
+    pub(crate) precomputed_visual_lines: Vec<VisualLineInfo>,
+    /// Pre-computed wrapped lines (the actual WrappedLine objects)
+    pub(crate) precomputed_wrapped_lines: Vec<WrappedLine>,
+    /// Cached text length to detect when text changes
+    pub(crate) cached_text_len: usize,
+    /// Flag to scroll cursor into view on next render (for wrapped mode)
+    /// This defers scrolling until after visual lines are recomputed
+    pub(crate) scroll_to_cursor_on_next_render: bool,
 }
 
 impl InputState {
@@ -118,16 +119,16 @@ impl InputState {
             was_focused: false,
             is_multiline: false,
             line_height: None,
-            multiline_layouts: Vec::new(),
-            multiline_line_bounds: Vec::new(),
             map_text: None,
             is_wrapped: false,
-            wrapped_visual_line_info: Vec::new(),
-            wrapped_lines: Vec::new(),
             scroll_handle: UniformListScrollHandle::new(),
-            scroll_offset_y: px(0.),
             max_lines: 1,
             visible_lines_info: Vec::new(),
+            cached_wrap_width: None,
+            precomputed_visual_lines: Vec::new(),
+            precomputed_wrapped_lines: Vec::new(),
+            cached_text_len: 0,
+            scroll_to_cursor_on_next_render: false,
         }
     }
 
@@ -143,29 +144,142 @@ impl InputState {
         self.max_lines = max_lines;
     }
 
+    /// Pre-compute visual line info for wrapped text.
+    /// Called during render to prepare data for uniform_list.
+    /// Returns the number of visual lines.
+    pub(crate) fn precompute_wrapped_lines(
+        &mut self,
+        width: Pixels,
+        text_color: Hsla,
+        window: &Window,
+    ) -> usize {
+        let text = self.value();
+        let text_len = text.len();
+
+        // Check if we need to recompute
+        let width_changed = self.cached_wrap_width != Some(width);
+        let text_changed = self.cached_text_len != text_len;
+
+        if !width_changed && !text_changed && !self.precomputed_visual_lines.is_empty() {
+            return self.precomputed_visual_lines.len();
+        }
+
+        // Update cache
+        self.cached_wrap_width = Some(width);
+        self.cached_text_len = text_len;
+
+        // Clear previous data
+        self.precomputed_visual_lines.clear();
+        self.precomputed_wrapped_lines.clear();
+
+        if text.is_empty() {
+            // For empty text, create one visual line for placeholder
+            self.precomputed_visual_lines.push(VisualLineInfo {
+                start_offset: 0,
+                end_offset: 0,
+                wrapped_line_index: 0,
+                visual_index_in_wrapped: 0,
+            });
+            return 1;
+        }
+
+        // Shape text with wrapping
+        let style = window.text_style();
+        let font_size = style.font_size.to_pixels(window.rem_size());
+
+        let run = TextRun {
+            len: text.len(),
+            font: style.font(),
+            color: text_color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        let wrapped_lines = window
+            .text_system()
+            .shape_text(text.clone(), font_size, &[run], Some(width), None)
+            .unwrap_or_default();
+
+        // Build visual line info from wrap boundaries
+        let mut text_offset = 0;
+
+        for (wrapped_idx, wrapped_line) in wrapped_lines.iter().enumerate() {
+            let line_len = wrapped_line.len();
+            let wrap_boundaries = &wrapped_line.wrap_boundaries;
+
+            if wrap_boundaries.is_empty() {
+                // No wrapping within this line
+                self.precomputed_visual_lines.push(VisualLineInfo {
+                    start_offset: text_offset,
+                    end_offset: text_offset + line_len,
+                    wrapped_line_index: wrapped_idx,
+                    visual_index_in_wrapped: 0,
+                });
+            } else {
+                // Line has wrap boundaries - create visual line for each segment
+                // Note: boundary.glyph_ix is the glyph index, not byte offset.
+                // We need to get the actual byte offset from glyph.index
+                let mut segment_start = 0;
+                for (visual_idx, boundary) in wrap_boundaries.iter().enumerate() {
+                    // Get the actual byte offset from the glyph structure
+                    let run = &wrapped_line.unwrapped_layout.runs[boundary.run_ix];
+                    let glyph = &run.glyphs[boundary.glyph_ix];
+                    let segment_end = glyph.index;
+
+                    self.precomputed_visual_lines.push(VisualLineInfo {
+                        start_offset: text_offset + segment_start,
+                        end_offset: text_offset + segment_end,
+                        wrapped_line_index: wrapped_idx,
+                        visual_index_in_wrapped: visual_idx,
+                    });
+                    segment_start = segment_end;
+                }
+                // Add final segment after last wrap boundary
+                self.precomputed_visual_lines.push(VisualLineInfo {
+                    start_offset: text_offset + segment_start,
+                    end_offset: text_offset + line_len,
+                    wrapped_line_index: wrapped_idx,
+                    visual_index_in_wrapped: wrap_boundaries.len(),
+                });
+            }
+
+            // Account for newline character between logical lines
+            text_offset += line_len + 1;
+        }
+
+        // Store the wrapped lines for rendering
+        self.precomputed_wrapped_lines = wrapped_lines.into_vec();
+
+        // Handle deferred scroll now that visual lines are computed
+        if self.scroll_to_cursor_on_next_render {
+            self.scroll_to_cursor_on_next_render = false;
+            self.ensure_cursor_visible();
+        }
+
+        self.precomputed_visual_lines.len().max(1)
+    }
+
     /// Ensure the cursor is visible by scrolling if necessary.
-    /// For non-wrapped mode, uses uniform_list scroll handle.
-    /// For wrapped mode, adjusts scroll_offset_y.
+    /// Uses uniform_list scroll handle for both wrapped and non-wrapped modes.
     pub fn ensure_cursor_visible(&mut self) {
-        let cursor_line = self.offset_to_line_col(self.cursor_offset()).0;
+        let cursor_offset = self.cursor_offset();
 
         if self.is_wrapped {
-            // For wrapped mode, calculate pixel offset
-            if let Some(line_height) = self.line_height {
-                let cursor_y = line_height * cursor_line as f32;
-                let viewport_height = line_height * self.max_lines as f32;
+            // For wrapped mode, find which visual line the cursor is on
+            let visual_line = self
+                .precomputed_visual_lines
+                .iter()
+                .position(|info| {
+                    cursor_offset >= info.start_offset && cursor_offset <= info.end_offset
+                })
+                .unwrap_or(0);
 
-                // Scroll down if cursor is below viewport
-                if cursor_y >= self.scroll_offset_y + viewport_height {
-                    self.scroll_offset_y = cursor_y - viewport_height + line_height;
-                }
-                // Scroll up if cursor is above viewport
-                if cursor_y < self.scroll_offset_y {
-                    self.scroll_offset_y = cursor_y;
-                }
-            }
+            self.scroll_handle
+                .scroll_to_item(visual_line, ScrollStrategy::Center);
         } else {
-            // For non-wrapped mode, use uniform_list scroll handle
+            // For non-wrapped mode, use logical line
+            let cursor_line = self.offset_to_line_col(cursor_offset).0;
             self.scroll_handle
                 .scroll_to_item(cursor_line, ScrollStrategy::Center);
         }
@@ -432,7 +546,13 @@ impl InputState {
 
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
-        self.ensure_cursor_visible();
+        // For wrapped mode, defer scroll until visual lines are recomputed
+        // For non-wrapped mode, scroll immediately since line calculation is always correct
+        if self.is_wrapped {
+            self.scroll_to_cursor_on_next_render = true;
+        } else {
+            self.ensure_cursor_visible();
+        }
         self.reset_cursor_blink(cx);
         cx.notify()
     }
@@ -488,7 +608,8 @@ impl InputState {
         cx.notify()
     }
 
-    /// Select to a position in multi-line mode, accounting for line height
+    /// Select to a position in multi-line mode, accounting for line height.
+    /// Also auto-scrolls when dragging outside the input bounds.
     pub fn select_to_multiline(
         &mut self,
         position: Point<Pixels>,
@@ -497,6 +618,45 @@ impl InputState {
     ) {
         let offset = self.index_for_multiline_position(position, line_height);
         self.select_to(offset, cx);
+
+        // Auto-scroll when dragging outside bounds
+        if self.is_selecting {
+            if let Some(bounds) = &self.last_bounds {
+                if position.y < bounds.top() {
+                    // Dragging above - scroll up
+                    self.scroll_up_one_line();
+                } else if position.y > bounds.bottom() {
+                    // Dragging below - scroll down
+                    self.scroll_down_one_line();
+                }
+            }
+        }
+    }
+
+    /// Scroll up by one line (used for drag-to-select auto-scrolling)
+    fn scroll_up_one_line(&self) {
+        if let Some(first) = self.visible_lines_info.first() {
+            if first.line_index > 0 {
+                self.scroll_handle
+                    .scroll_to_item(first.line_index - 1, ScrollStrategy::Top);
+            }
+        }
+    }
+
+    /// Scroll down by one line (used for drag-to-select auto-scrolling)
+    fn scroll_down_one_line(&self) {
+        let line_count = if self.is_wrapped {
+            self.precomputed_visual_lines.len()
+        } else {
+            self.line_count()
+        };
+
+        if let Some(last) = self.visible_lines_info.last() {
+            if last.line_index + 1 < line_count {
+                self.scroll_handle
+                    .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
+            }
+        }
     }
 
     /// Calculate the byte offset for a mouse position in multi-line mode
@@ -510,19 +670,24 @@ impl InputState {
             return 0;
         }
 
-        // If wrapped mode, use wrapped position calculation
-        if self.is_wrapped {
-            return self.index_for_wrapped_position(position, line_height);
-        }
-
-        // For non-wrapped (uniform_list) mode, use visible_lines_info for accurate hit testing
+        // Use visible_lines_info for accurate hit testing (works for both wrapped and non-wrapped)
         if !self.visible_lines_info.is_empty() {
             // Check if position is within any visible line
             for info in &self.visible_lines_info {
                 if info.bounds.contains(&position) {
                     let local_x = position.x - info.bounds.left();
-                    let line_start = self.line_start_offset(info.line_index);
                     let local_index = info.shaped_line.closest_index_for_x(local_x);
+
+                    // For wrapped mode, line_index is visual line index - look up byte offset
+                    if self.is_wrapped {
+                        if let Some(visual_info) =
+                            self.precomputed_visual_lines.get(info.line_index)
+                        {
+                            return visual_info.start_offset + local_index;
+                        }
+                    }
+                    // For non-wrapped mode, line_index is actual line index
+                    let line_start = self.line_start_offset(info.line_index);
                     return line_start + local_index;
                 }
             }
@@ -531,12 +696,23 @@ impl InputState {
             // Check if above visible area
             if let Some(first) = self.visible_lines_info.first() {
                 if position.y < first.bounds.top() {
+                    let local_x = position.x - first.bounds.left();
+                    let local_index = first.shaped_line.closest_index_for_x(local_x);
+
+                    if self.is_wrapped {
+                        if let Some(visual_info) =
+                            self.precomputed_visual_lines.get(first.line_index)
+                        {
+                            if position.x < first.bounds.left() {
+                                return visual_info.start_offset;
+                            }
+                            return visual_info.start_offset + local_index;
+                        }
+                    }
                     let line_start = self.line_start_offset(first.line_index);
                     if position.x < first.bounds.left() {
                         return line_start;
                     }
-                    let local_x = position.x - first.bounds.left();
-                    let local_index = first.shaped_line.closest_index_for_x(local_x);
                     return line_start + local_index;
                 }
             }
@@ -544,13 +720,24 @@ impl InputState {
             // Check if below visible area
             if let Some(last) = self.visible_lines_info.last() {
                 if position.y >= last.bounds.bottom() {
+                    let local_x = position.x - last.bounds.left();
+                    let local_index = last.shaped_line.closest_index_for_x(local_x);
+
+                    if self.is_wrapped {
+                        if let Some(visual_info) =
+                            self.precomputed_visual_lines.get(last.line_index)
+                        {
+                            if position.x > last.bounds.right() {
+                                return visual_info.end_offset;
+                            }
+                            return visual_info.start_offset + local_index;
+                        }
+                    }
                     let line_start = self.line_start_offset(last.line_index);
                     let line_end = self.line_end_offset(last.line_index);
                     if position.x > last.bounds.right() {
                         return line_end;
                     }
-                    let local_x = position.x - last.bounds.left();
-                    let local_index = last.shaped_line.closest_index_for_x(local_x);
                     return line_start + local_index;
                 }
             }
@@ -558,13 +745,26 @@ impl InputState {
             // Position is horizontally outside but vertically within - find the line by Y
             for info in &self.visible_lines_info {
                 if position.y >= info.bounds.top() && position.y < info.bounds.bottom() {
-                    let line_start = self.line_start_offset(info.line_index);
-                    let line_end = self.line_end_offset(info.line_index);
-                    if position.x < info.bounds.left() {
-                        return line_start;
-                    }
-                    if position.x > info.bounds.right() {
-                        return line_end;
+                    if self.is_wrapped {
+                        if let Some(visual_info) =
+                            self.precomputed_visual_lines.get(info.line_index)
+                        {
+                            if position.x < info.bounds.left() {
+                                return visual_info.start_offset;
+                            }
+                            if position.x > info.bounds.right() {
+                                return visual_info.end_offset;
+                            }
+                        }
+                    } else {
+                        let line_start = self.line_start_offset(info.line_index);
+                        let line_end = self.line_end_offset(info.line_index);
+                        if position.x < info.bounds.left() {
+                            return line_start;
+                        }
+                        if position.x > info.bounds.right() {
+                            return line_end;
+                        }
                     }
                 }
             }
@@ -585,92 +785,19 @@ impl InputState {
         let scroll_offset = self.scroll_handle.logical_scroll_top_index();
         let line_index = visible_line_index + scroll_offset;
 
+        if self.is_wrapped {
+            // For wrapped mode fallback, use precomputed_visual_lines
+            let visual_line_count = self.precomputed_visual_lines.len();
+            let clamped_visual_line = line_index.min(visual_line_count.saturating_sub(1));
+            if let Some(visual_info) = self.precomputed_visual_lines.get(clamped_visual_line) {
+                return visual_info.start_offset;
+            }
+        }
+
         let line_count = self.line_count();
         let clamped_line = line_index.min(line_count.saturating_sub(1));
 
         self.line_start_offset(clamped_line)
-    }
-
-    /// Calculate the byte offset for a mouse position in wrapped text mode
-    fn index_for_wrapped_position(&self, position: Point<Pixels>, line_height: Pixels) -> usize {
-        let Some(bounds) = self.last_bounds.as_ref() else {
-            return 0;
-        };
-
-        let value = self.value();
-        if value.is_empty() || self.wrapped_visual_line_info.is_empty() {
-            return 0;
-        }
-
-        // Handle positions above the bounds
-        if position.y < bounds.top() {
-            return 0;
-        }
-
-        // Calculate which visual line the position is on
-        let relative_y = position.y - bounds.top();
-        let visual_line_index = (relative_y / line_height).floor() as usize;
-
-        // Clamp to valid visual line range
-        let clamped_visual_line =
-            visual_line_index.min(self.wrapped_visual_line_info.len().saturating_sub(1));
-
-        // Get the visual line info
-        let Some(info) = self.wrapped_visual_line_info.get(clamped_visual_line) else {
-            return value.len();
-        };
-
-        // Handle positions outside bounds horizontally
-        if position.x < bounds.left() {
-            return info.start_offset;
-        }
-        if position.x > bounds.right() {
-            return info.end_offset;
-        }
-
-        // Get the wrapped line for this visual line
-        let Some(wrapped_line) = self.wrapped_lines.get(info.wrapped_line_index) else {
-            return info.start_offset;
-        };
-
-        // Calculate x position relative to line start
-        let local_x = position.x - bounds.left();
-
-        // For the first visual segment within a wrapped line, use direct index lookup
-        if info.visual_index_in_wrapped == 0 {
-            let local_index = wrapped_line.unwrapped_layout.closest_index_for_x(local_x);
-            // Clamp to this visual line's range
-            let clamped_index = local_index.min(info.end_offset - info.start_offset);
-            return info.start_offset + clamped_index;
-        }
-
-        // For subsequent visual segments, we need to account for the wrap boundary offset
-        // The wrap boundary tells us where this visual segment starts within the unwrapped line
-        let wrap_start_glyph = if info.visual_index_in_wrapped > 0 {
-            wrapped_line
-                .wrap_boundaries
-                .get(info.visual_index_in_wrapped - 1)
-                .map(|b| b.glyph_ix)
-                .unwrap_or(0)
-        } else {
-            0
-        };
-
-        // Get the x offset where the wrap boundary starts
-        let wrap_start_x = wrapped_line.unwrapped_layout.x_for_index(wrap_start_glyph);
-
-        // Find the index within the unwrapped layout
-        let absolute_x = local_x + wrap_start_x;
-        let unwrapped_index = wrapped_line
-            .unwrapped_layout
-            .closest_index_for_x(absolute_x);
-
-        // Convert to byte offset, ensuring we stay within this visual line's range
-        let visual_line_len = info.end_offset - info.start_offset;
-        let local_index = unwrapped_index.saturating_sub(wrap_start_glyph);
-        let clamped_index = local_index.min(visual_line_len);
-
-        info.start_offset + clamped_index
     }
 
     pub fn offset_from_utf16(&self, offset: usize) -> usize {
@@ -882,7 +1009,13 @@ impl EntityInputHandler for InputState {
         self.selected_range = new_cursor..new_cursor;
         self.marked_range.take();
 
-        self.ensure_cursor_visible();
+        // For wrapped mode, defer scroll until visual lines are recomputed
+        // For non-wrapped mode, scroll immediately since line calculation is always correct
+        if self.is_wrapped {
+            self.scroll_to_cursor_on_next_render = true;
+        } else {
+            self.ensure_cursor_visible();
+        }
         self.reset_cursor_blink(cx);
         cx.notify();
     }

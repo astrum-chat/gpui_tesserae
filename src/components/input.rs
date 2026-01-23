@@ -389,7 +389,7 @@ impl RenderOnce for Input {
         div()
             .id(self.id.clone())
             .w(self.style.width)
-            .h_auto()
+            .min_h_auto()
             .map(|this| {
                 apply_padding!(this, padding_override, vertical_padding, horizontal_padding)
             })
