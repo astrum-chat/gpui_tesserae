@@ -340,20 +340,23 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
     pub fn sync_highlight_to_focused(&self, cx: &mut App, focus_handle: &FocusHandle) {
         let items = self.items.read(cx);
 
-        // Find the item whose focus handle is currently focused
-        let focused_item = items
+        // Find the item whose focus handle is currently focused.
+        let Some(item_name) = items
             .iter()
             .find(|(_, entry)| &entry.focus_handle == focus_handle)
-            .map(|(name, _)| name.clone());
+            .map(|(name, _)| name)
+        else {
+            return;
+        };
 
-        if let Some(item_name) = focused_item {
-            self.highlighted_item.update(cx, |this, cx| {
-                if this.as_ref() != Some(&item_name) {
-                    *this = Some(item_name);
-                    cx.notify();
-                }
-            });
-        }
+        let item_name = item_name.clone();
+
+        self.highlighted_item.update(cx, |this, cx| {
+            if this.as_ref() != Some(&item_name) {
+                *this = Some(item_name.clone());
+                cx.notify();
+            }
+        });
     }
 }
 
