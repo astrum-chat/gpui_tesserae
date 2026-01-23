@@ -49,9 +49,7 @@ pub struct Input {
     invalid: bool,
     disabled: bool,
     force_hover: bool,
-    focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut App) + 'static>>,
-    on_blur: Option<Box<dyn Fn(&mut gpui::Window, &mut App) + 'static>>,
     layer: ThemeLayerKind,
     children: PositionalChildren,
     style: InputStyles,
@@ -65,9 +63,7 @@ impl Input {
             invalid: false,
             disabled: false,
             force_hover: false,
-            focus_handle: None,
             on_hover: None,
-            on_blur: None,
             layer: ThemeLayerKind::Tertiary,
             children: PositionalChildren::default(),
             style: InputStyles::default(),
@@ -409,9 +405,7 @@ impl PositionalParentElement for Input {
 
 impl Focusable for Input {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.focus_handle
-            .clone()
-            .unwrap_or_else(|| self.base.focus_handle(cx))
+        self.base.focus_handle(cx)
     }
 }
 
