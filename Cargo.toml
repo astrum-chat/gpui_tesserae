@@ -3,9 +3,13 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.dependencies]
+gpui_primitives = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+# Local development
+# gpui_primitives = { path = "crates/gpui_primitives" }
+
+gpui_squircle = { git = "https://github.com/astrum-chat/gpui_squircle" }
 gpui = "0.2.2"
 gpui_transitions = "0.1.5"
-gpui_squircle = { git = "https://github.com/astrum-chat/gpui_squircle" }
 smallvec = { version = "1.15.1", features = ["serde"] }
 unicode-segmentation = "1.12.0"
 
