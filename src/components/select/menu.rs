@@ -212,13 +212,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                 );
                 item_focus_subs.update(cx, |subs, cx| subs.sync(&state, window, cx));
 
-                let select_focus_subs: Entity<SelectFocusSubscriptions> = window.use_keyed_state(
-                    self.id.with_suffix("state:select_focus_subs"),
-                    cx,
-                    |_window, _cx| SelectFocusSubscriptions::default(),
-                );
-                select_focus_subs.update(cx, |subs, cx| subs.sync(&state, window, cx));
-
                 this.opacity(menu_visible_delta)
                     .w(self.style.width)
                     .flex()
@@ -348,59 +341,6 @@ impl ItemFocusSubscriptions {
 
             self.subscriptions
                 .push((weak_focus_handle.clone(), subscription));
-        }
-    }
-}
-
-/// Manages focus subscriptions for Select components, resetting highlight when refocused.
-#[derive(Default)]
-struct SelectFocusSubscriptions {
-    subscriptions: Vec<(WeakFocusHandle, Subscription)>,
-}
-
-impl SelectFocusSubscriptions {
-    fn sync<V: 'static, I: SelectItem<Value = V> + 'static>(
-        &mut self,
-        state: &Arc<SelectState<V, I>>,
-        window: &mut Window,
-        cx: &mut gpui::App,
-    ) {
-        let current_handles: Vec<_> = state
-            .select_focus_handles
-            .read(cx)
-            .iter()
-            .filter_map(|weak| weak.upgrade())
-            .collect();
-
-        // Remove subscriptions for focus handles that no longer exist
-        self.subscriptions
-            .retain(|(weak, _)| weak.upgrade().is_some());
-
-        // Add subscriptions for new focus handles
-        let highlighted_item = state.highlighted_item.clone();
-
-        for focus_handle in current_handles {
-            let downgraded = focus_handle.downgrade();
-
-            if self
-                .subscriptions
-                .iter()
-                .any(|(weak, _)| weak == &downgraded)
-            {
-                continue;
-            }
-
-            let highlighted_item = highlighted_item.clone();
-            let subscription = window.on_focus_in(&focus_handle, cx, move |_window, cx| {
-                highlighted_item.update(cx, |this, cx| {
-                    if this.is_some() {
-                        *this = None;
-                        cx.notify();
-                    }
-                });
-            });
-
-            self.subscriptions.push((downgraded, subscription));
         }
     }
 }

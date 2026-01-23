@@ -341,22 +341,21 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         let items = self.items.read(cx);
 
         // Find the item whose focus handle is currently focused.
-        let Some(item_name) = items
+        let focused_item = items
             .iter()
             .find(|(_, entry)| &entry.focus_handle == focus_handle)
-            .map(|(name, _)| name)
-        else {
-            return;
-        };
+            .map(|(name, _)| name);
 
-        let item_name = item_name.clone();
+        if let Some(item_name) = focused_item {
+            let item_name = item_name.clone();
 
-        self.highlighted_item.update(cx, |this, cx| {
-            if this.as_ref() != Some(&item_name) {
-                *this = Some(item_name.clone());
-                cx.notify();
-            }
-        });
+            self.highlighted_item.update(cx, |this, cx| {
+                if this.as_ref() != Some(&item_name) {
+                    *this = Some(item_name.clone());
+                    cx.notify();
+                }
+            });
+        }
     }
 }
 
