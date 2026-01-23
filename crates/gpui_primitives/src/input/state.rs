@@ -1,11 +1,25 @@
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    ShapedLine, SharedString, UTF16Selection, Window, actions, div, point,
+    ShapedLine, SharedString, UTF16Selection, Window, WrappedLine, actions, div, point,
 };
 use std::ops::Range;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
+
+/// Information about a visual line in wrapped text.
+/// Maps visual lines (what the user sees) to byte offsets in the text.
+#[derive(Clone, Debug)]
+pub struct VisualLineInfo {
+    /// Byte offset where this visual line starts in the full text
+    pub start_offset: usize,
+    /// Byte offset where this visual line ends in the full text
+    pub end_offset: usize,
+    /// The wrapped line this belongs to (index into WrappedLine vec)
+    pub wrapped_line_index: usize,
+    /// The visual line index within the wrapped line (for multi-wrap scenarios)
+    pub visual_index_in_wrapped: usize,
+}
 
 /// Function type for transforming text when it changes.
 /// Takes the full text after the change and returns the transformed text.
@@ -60,6 +74,12 @@ pub struct InputState {
     pub(crate) multiline_line_bounds: Vec<Bounds<Pixels>>,
     /// Closure to transform text when it changes (modifies stored value)
     pub(crate) map_text: Option<MapTextFn>,
+    /// Whether the input is in wrapped mode (text wrapping enabled)
+    pub(crate) is_wrapped: bool,
+    /// Visual line info for wrapped text - maps visual lines to byte offsets
+    pub(crate) wrapped_visual_line_info: Vec<VisualLineInfo>,
+    /// The wrapped lines from shape_text (stored for position calculations)
+    pub(crate) wrapped_lines: Vec<WrappedLine>,
 }
 
 impl InputState {
@@ -80,6 +100,9 @@ impl InputState {
             multiline_layouts: Vec::new(),
             multiline_line_bounds: Vec::new(),
             map_text: None,
+            is_wrapped: false,
+            wrapped_visual_line_info: Vec::new(),
+            wrapped_lines: Vec::new(),
         }
     }
 
@@ -431,6 +454,11 @@ impl InputState {
             return 0;
         }
 
+        // If wrapped mode, use wrapped position calculation
+        if self.is_wrapped {
+            return self.index_for_wrapped_position(position, line_height);
+        }
+
         // Calculate which line the position is on
         let relative_y = position.y - bounds.top();
         let line_index = if relative_y < gpui::px(0.) {
@@ -474,6 +502,88 @@ impl InputState {
         }
 
         line_start
+    }
+
+    /// Calculate the byte offset for a mouse position in wrapped text mode
+    fn index_for_wrapped_position(&self, position: Point<Pixels>, line_height: Pixels) -> usize {
+        let Some(bounds) = self.last_bounds.as_ref() else {
+            return 0;
+        };
+
+        let value = self.value();
+        if value.is_empty() || self.wrapped_visual_line_info.is_empty() {
+            return 0;
+        }
+
+        // Handle positions above the bounds
+        if position.y < bounds.top() {
+            return 0;
+        }
+
+        // Calculate which visual line the position is on
+        let relative_y = position.y - bounds.top();
+        let visual_line_index = (relative_y / line_height).floor() as usize;
+
+        // Clamp to valid visual line range
+        let clamped_visual_line =
+            visual_line_index.min(self.wrapped_visual_line_info.len().saturating_sub(1));
+
+        // Get the visual line info
+        let Some(info) = self.wrapped_visual_line_info.get(clamped_visual_line) else {
+            return value.len();
+        };
+
+        // Handle positions outside bounds horizontally
+        if position.x < bounds.left() {
+            return info.start_offset;
+        }
+        if position.x > bounds.right() {
+            return info.end_offset;
+        }
+
+        // Get the wrapped line for this visual line
+        let Some(wrapped_line) = self.wrapped_lines.get(info.wrapped_line_index) else {
+            return info.start_offset;
+        };
+
+        // Calculate x position relative to line start
+        let local_x = position.x - bounds.left();
+
+        // For the first visual segment within a wrapped line, use direct index lookup
+        if info.visual_index_in_wrapped == 0 {
+            let local_index = wrapped_line.unwrapped_layout.closest_index_for_x(local_x);
+            // Clamp to this visual line's range
+            let clamped_index = local_index.min(info.end_offset - info.start_offset);
+            return info.start_offset + clamped_index;
+        }
+
+        // For subsequent visual segments, we need to account for the wrap boundary offset
+        // The wrap boundary tells us where this visual segment starts within the unwrapped line
+        let wrap_start_glyph = if info.visual_index_in_wrapped > 0 {
+            wrapped_line
+                .wrap_boundaries
+                .get(info.visual_index_in_wrapped - 1)
+                .map(|b| b.glyph_ix)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        // Get the x offset where the wrap boundary starts
+        let wrap_start_x = wrapped_line.unwrapped_layout.x_for_index(wrap_start_glyph);
+
+        // Find the index within the unwrapped layout
+        let absolute_x = local_x + wrap_start_x;
+        let unwrapped_index = wrapped_line
+            .unwrapped_layout
+            .closest_index_for_x(absolute_x);
+
+        // Convert to byte offset, ensuring we stay within this visual line's range
+        let visual_line_len = info.end_offset - info.start_offset;
+        let local_index = unwrapped_index.saturating_sub(wrap_start_glyph);
+        let clamped_index = local_index.min(visual_line_len);
+
+        info.start_offset + clamped_index
     }
 
     pub fn offset_from_utf16(&self, offset: usize) -> usize {
@@ -785,5 +895,186 @@ impl Render for InputState {
 impl Focusable for InputState {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test helper that only tests methods that use `value` field.
+    /// We avoid creating full InputState since FocusHandle/Entity require App context.
+    struct TestValue {
+        value: Option<SharedString>,
+    }
+
+    impl TestValue {
+        fn new(s: &str) -> Self {
+            Self {
+                value: Some(SharedString::from(s.to_string())),
+            }
+        }
+
+        fn value(&self) -> SharedString {
+            self.value
+                .clone()
+                .unwrap_or_else(|| SharedString::new_static(""))
+        }
+
+        fn line_count(&self) -> usize {
+            let value = self.value();
+            if value.is_empty() {
+                1
+            } else {
+                value.chars().filter(|&c| c == '\n').count() + 1
+            }
+        }
+
+        fn line_start_offset(&self, line: usize) -> usize {
+            let value = self.value();
+            let mut offset = 0;
+            for (i, _) in value.split('\n').enumerate() {
+                if i == line {
+                    return offset;
+                }
+                offset += value[offset..].find('\n').map(|p| p + 1).unwrap_or(0);
+            }
+            value.len()
+        }
+
+        fn line_end_offset(&self, line: usize) -> usize {
+            let start = self.line_start_offset(line);
+            let value = self.value();
+            value[start..]
+                .find('\n')
+                .map(|p| start + p)
+                .unwrap_or(value.len())
+        }
+
+        fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
+            let value = self.value();
+            let mut line = 0;
+            let mut line_start = 0;
+
+            for (i, c) in value.char_indices() {
+                if i >= offset {
+                    break;
+                }
+                if c == '\n' {
+                    line += 1;
+                    line_start = i + 1;
+                }
+            }
+
+            (line, offset.saturating_sub(line_start))
+        }
+
+        fn line_col_to_offset(&self, line: usize, col: usize) -> usize {
+            let line_start = self.line_start_offset(line);
+            let line_end = self.line_end_offset(line);
+            let line_len = line_end - line_start;
+            line_start + col.min(line_len)
+        }
+
+        fn line_content(&self, line: usize) -> &str {
+            let start = self.line_start_offset(line);
+            let end = self.line_end_offset(line);
+            &self.value.as_ref().map(|v| v.as_ref()).unwrap_or("")[start..end]
+        }
+    }
+
+    #[test]
+    fn test_line_count_empty() {
+        let state = TestValue::new("");
+        assert_eq!(state.line_count(), 1);
+    }
+
+    #[test]
+    fn test_line_count_single_line() {
+        let state = TestValue::new("hello world");
+        assert_eq!(state.line_count(), 1);
+    }
+
+    #[test]
+    fn test_line_count_multiple_lines() {
+        let state = TestValue::new("line1\nline2\nline3");
+        assert_eq!(state.line_count(), 3);
+    }
+
+    #[test]
+    fn test_line_count_trailing_newline() {
+        let state = TestValue::new("line1\n");
+        assert_eq!(state.line_count(), 2);
+    }
+
+    #[test]
+    fn test_line_start_offset() {
+        let state = TestValue::new("abc\ndefgh\nij");
+        // "abc\ndefgh\nij"
+        //  0123 45678 9 10 11
+        assert_eq!(state.line_start_offset(0), 0);
+        assert_eq!(state.line_start_offset(1), 4); // after "abc\n"
+        assert_eq!(state.line_start_offset(2), 10); // after "abc\ndefgh\n"
+    }
+
+    #[test]
+    fn test_line_end_offset() {
+        let state = TestValue::new("abc\ndefgh\nij");
+        assert_eq!(state.line_end_offset(0), 3); // "abc"
+        assert_eq!(state.line_end_offset(1), 9); // "defgh"
+        assert_eq!(state.line_end_offset(2), 12); // "ij"
+    }
+
+    #[test]
+    fn test_offset_to_line_col() {
+        let state = TestValue::new("abc\ndefgh\nij");
+        assert_eq!(state.offset_to_line_col(0), (0, 0)); // start of line 0
+        assert_eq!(state.offset_to_line_col(2), (0, 2)); // 'c' in line 0
+        assert_eq!(state.offset_to_line_col(4), (1, 0)); // start of line 1
+        assert_eq!(state.offset_to_line_col(7), (1, 3)); // 'g' in line 1
+        assert_eq!(state.offset_to_line_col(10), (2, 0)); // start of line 2
+        assert_eq!(state.offset_to_line_col(11), (2, 1)); // 'j' in line 2
+    }
+
+    #[test]
+    fn test_line_col_to_offset() {
+        let state = TestValue::new("abc\ndefgh\nij");
+        assert_eq!(state.line_col_to_offset(0, 0), 0);
+        assert_eq!(state.line_col_to_offset(0, 2), 2);
+        assert_eq!(state.line_col_to_offset(1, 0), 4);
+        assert_eq!(state.line_col_to_offset(1, 3), 7);
+        assert_eq!(state.line_col_to_offset(2, 0), 10);
+        assert_eq!(state.line_col_to_offset(2, 1), 11);
+    }
+
+    #[test]
+    fn test_line_col_to_offset_clamps_column() {
+        let state = TestValue::new("abc\nde");
+        // Column 100 on line 0 (len 3) should clamp to 3
+        assert_eq!(state.line_col_to_offset(0, 100), 3);
+        // Column 100 on line 1 (len 2) should clamp to 6
+        assert_eq!(state.line_col_to_offset(1, 100), 6);
+    }
+
+    #[test]
+    fn test_line_content() {
+        let state = TestValue::new("abc\ndefgh\nij");
+        assert_eq!(state.line_content(0), "abc");
+        assert_eq!(state.line_content(1), "defgh");
+        assert_eq!(state.line_content(2), "ij");
+    }
+
+    #[test]
+    fn test_visual_line_info_struct() {
+        let info = VisualLineInfo {
+            start_offset: 0,
+            end_offset: 10,
+            wrapped_line_index: 0,
+            visual_index_in_wrapped: 0,
+        };
+        assert_eq!(info.start_offset, 0);
+        assert_eq!(info.end_offset, 10);
+        assert_eq!(info.wrapped_line_index, 0);
+        assert_eq!(info.visual_index_in_wrapped, 0);
     }
 }

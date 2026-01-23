@@ -1,4 +1,4 @@
-pub mod input;
+pub use gpui_primitives::input;
 
 mod focus_ring;
 pub use focus_ring::*;

@@ -80,21 +80,10 @@ impl Render for Main {
                         |_window, cx| InputState::new(cx),
                     ),
                 )
-                .multiline()
-                .map_text(|text| {
-                    text.chars()
-                        .filter(|char| char.is_alphabetic())
-                        .collect::<String>()
-                        .into()
-                })
-                .newline_on_shift_enter(true)
+                .wrap(true)
+                .max_lines(5)
                 .w(px(200.))
-                .disabled(self.checkbox_checked || self.switch_checked)
-                .map(|this| {
-                    let invalid = this.read_text(cx).to_lowercase() == "invalid";
-
-                    this.invalid(invalid)
-                }),
+                .disabled(self.checkbox_checked || self.switch_checked),
             )
             .child(
                 Button::new("button")

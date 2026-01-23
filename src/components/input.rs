@@ -530,7 +530,8 @@ mod tests {
             let placeholder: SharedString = "Enter text here...".into();
             let input = Input::new("test-input", state).placeholder(placeholder.clone());
             assert_eq!(
-                input.base.placeholder, placeholder,
+                input.base.get_placeholder(),
+                &placeholder,
                 "Input should have custom placeholder"
             );
         });
