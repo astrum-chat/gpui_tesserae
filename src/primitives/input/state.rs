@@ -1,10 +1,12 @@
 use gpui::{
-    App, Bounds, ClipboardItem, Context, EntityInputHandler, FocusHandle, Focusable, IntoElement,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ShapedLine, SharedString,
-    UTF16Selection, Window, actions, div, point,
+    App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
+    Focusable, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
+    ShapedLine, SharedString, UTF16Selection, Window, actions, div, point,
 };
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
+
+use super::CursorBlink;
 
 actions!(
     text_input,
@@ -35,6 +37,8 @@ pub struct InputState {
     pub last_layout: Option<ShapedLine>,
     pub last_bounds: Option<Bounds<Pixels>>,
     pub is_selecting: bool,
+    pub cursor_blink: Entity<CursorBlink>,
+    was_focused: bool,
 }
 
 impl InputState {
@@ -48,7 +52,48 @@ impl InputState {
             last_layout: None,
             last_bounds: None,
             is_selecting: false,
+            cursor_blink: cx.new(|_| CursorBlink::new()),
+            was_focused: false,
         }
+    }
+
+    /// Call this during render to update focus state and manage cursor blink
+    pub fn update_focus_state(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let is_focused = self.focus_handle.is_focused(window);
+        if is_focused != self.was_focused {
+            self.was_focused = is_focused;
+            if is_focused {
+                self.start_cursor_blink(cx);
+            } else {
+                self.stop_cursor_blink(cx);
+                // Clear selection when blurred
+                let cursor = self.cursor_offset();
+                self.selected_range = cursor..cursor;
+            }
+        }
+    }
+
+    pub fn cursor_visible(&self, cx: &App) -> bool {
+        self.cursor_blink.read(cx).visible()
+    }
+
+    pub fn start_cursor_blink(&self, cx: &mut Context<Self>) {
+        self.cursor_blink.update(cx, |blink, cx| {
+            blink.start(cx);
+        });
+    }
+
+    pub fn stop_cursor_blink(&self, cx: &mut Context<Self>) {
+        self.cursor_blink.update(cx, |blink, cx| {
+            blink.stop();
+            cx.notify();
+        });
+    }
+
+    fn reset_cursor_blink(&self, cx: &mut Context<Self>) {
+        self.cursor_blink.update(cx, |blink, cx| {
+            blink.reset(cx);
+        });
     }
 
     pub fn value(&self) -> SharedString {
@@ -187,6 +232,7 @@ impl InputState {
 
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
+        self.reset_cursor_blink(cx);
         cx.notify()
     }
 
@@ -228,6 +274,7 @@ impl InputState {
             self.selection_reversed = !self.selection_reversed;
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
+        self.reset_cursor_blink(cx);
         cx.notify()
     }
 
@@ -354,6 +401,7 @@ impl EntityInputHandler for InputState {
         self.selected_range = range.start + new_text.len()..range.start + new_text.len();
         self.marked_range.take();
 
+        self.reset_cursor_blink(cx);
         cx.notify();
     }
 
@@ -388,6 +436,7 @@ impl EntityInputHandler for InputState {
             .map(|new_range| new_range.start + range.start..new_range.end + range.end)
             .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
 
+        self.reset_cursor_blink(cx);
         cx.notify();
     }
 

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 gpui = "0.2.2"
+smol = "2"
 gpui_transitions = "0.1.5"
 gpui_squircle = { git = "https://github.com/astrum-chat/gpui_squircle" }
 smallvec = { version = "1.15.1", features = ["serde"] }

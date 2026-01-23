@@ -6,9 +6,11 @@ use gpui::{
     fill, hsla, point, prelude::FluentBuilder, px, relative, rgb, size,
 };
 
+mod cursor_blink;
 mod state;
 pub mod text_transforms;
 
+pub use cursor_blink::CursorBlink;
 pub use state::*;
 
 use crate::utils::rgb_a;
@@ -83,6 +85,7 @@ struct TextElement {
     highlight_text_color: Hsla,
     line_height: Pixels,
     transform_text: Option<TransformTextFn>,
+    cursor_visible: bool,
 }
 
 struct PrepaintState {
@@ -266,6 +269,7 @@ impl Element for TextElement {
         .unwrap();
 
         if focus_handle.is_focused(window)
+            && self.cursor_visible
             && let Some(cursor) = prepaint.cursor.take()
         {
             window.paint_quad(cursor);
@@ -280,6 +284,11 @@ impl Element for TextElement {
 
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Update focus state to manage cursor blink and selection
+        self.state.update(cx, |state, cx| {
+            state.update_focus_state(window, cx);
+        });
+
         let state = self.state.read(cx);
 
         let text_style = &self.style.text;
@@ -351,6 +360,7 @@ impl RenderOnce for Input {
                     .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into()),
                 line_height,
                 transform_text: self.transform_text,
+                cursor_visible: state.cursor_visible(cx),
             })
     }
 }
