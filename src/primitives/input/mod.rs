@@ -7,9 +7,13 @@ use gpui::{
 };
 
 mod state;
+pub mod text_transforms;
+
 pub use state::*;
 
 use crate::utils::rgb_a;
+
+type TransformTextFn = Box<dyn Fn(char) -> char>;
 
 #[derive(IntoElement)]
 pub struct Input {
@@ -18,6 +22,7 @@ pub struct Input {
     pub(crate) placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
+    transform_text: Option<TransformTextFn>,
     style: StyleRefinement,
 }
 
@@ -35,8 +40,14 @@ impl Input {
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
             selection_color: None,
+            transform_text: None,
             style: StyleRefinement::default(),
         }
+    }
+
+    pub fn transform_text(mut self, transform: impl Fn(char) -> char + 'static) -> Self {
+        self.transform_text = Some(Box::new(transform));
+        self
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -71,6 +82,7 @@ struct TextElement {
     placeholder_text_color: Hsla,
     highlight_text_color: Hsla,
     line_height: Pixels,
+    transform_text: Option<TransformTextFn>,
 }
 
 struct PrepaintState {
@@ -130,6 +142,9 @@ impl Element for TextElement {
 
         let (display_text, text_color) = if content.is_empty() {
             (self.placeholder.clone(), self.placeholder_text_color)
+        } else if let Some(transform) = &self.transform_text {
+            let transformed: String = content.chars().map(|c| transform(c)).collect();
+            (transformed.into(), self.text_color)
         } else {
             (content, self.text_color)
         };
@@ -335,6 +350,7 @@ impl RenderOnce for Input {
                     .selection_color
                     .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into()),
                 line_height,
+                transform_text: self.transform_text,
             })
     }
 }

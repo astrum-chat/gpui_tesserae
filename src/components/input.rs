@@ -129,6 +129,11 @@ impl Input {
         self
     }
 
+    pub fn transform_text(mut self, transform: impl Fn(char) -> char + 'static) -> Self {
+        self.base = self.base.transform_text(transform);
+        self
+    }
+
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.base.read_text(cx)
     }
