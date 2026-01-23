@@ -15,8 +15,12 @@ actions!(
         Delete,
         Left,
         Right,
+        Up,
+        Down,
         SelectLeft,
         SelectRight,
+        SelectUp,
+        SelectDown,
         SelectAll,
         Home,
         End,
@@ -24,6 +28,8 @@ actions!(
         Paste,
         Cut,
         Copy,
+        InsertNewline,
+        InsertNewlineShift,
         Quit,
     ]
 );
@@ -136,6 +142,64 @@ impl InputState {
 
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
+    }
+
+    pub fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_range.is_empty() {
+            let (line, col) = self.offset_to_line_col(self.cursor_offset());
+            if line > 0 {
+                let new_offset = self.line_col_to_offset(line - 1, col);
+                self.move_to(new_offset, cx);
+            }
+        } else {
+            self.move_to(self.selected_range.start, cx)
+        }
+    }
+
+    pub fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selected_range.is_empty() {
+            let (line, col) = self.offset_to_line_col(self.cursor_offset());
+            if line < self.line_count().saturating_sub(1) {
+                let new_offset = self.line_col_to_offset(line + 1, col);
+                self.move_to(new_offset, cx);
+            }
+        } else {
+            self.move_to(self.selected_range.end, cx)
+        }
+    }
+
+    pub fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        let (line, col) = self.offset_to_line_col(self.cursor_offset());
+        if line > 0 {
+            let new_offset = self.line_col_to_offset(line - 1, col);
+            self.select_to(new_offset, cx);
+        }
+    }
+
+    pub fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
+        let (line, col) = self.offset_to_line_col(self.cursor_offset());
+        if line < self.line_count().saturating_sub(1) {
+            let new_offset = self.line_col_to_offset(line + 1, col);
+            self.select_to(new_offset, cx);
+        }
+    }
+
+    pub fn insert_newline(
+        &mut self,
+        _: &InsertNewline,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.replace_text_in_range(None, "\n", window, cx);
+    }
+
+    pub fn insert_newline_shift(
+        &mut self,
+        _: &InsertNewlineShift,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.replace_text_in_range(None, "\n", window, cx);
     }
 
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
@@ -287,6 +351,83 @@ impl InputState {
         cx.notify()
     }
 
+    /// Select to a position in multi-line mode, accounting for line height
+    pub fn select_to_multiline(
+        &mut self,
+        position: Point<Pixels>,
+        line_height: Pixels,
+        cx: &mut Context<Self>,
+    ) {
+        let offset = self.index_for_multiline_position(position, line_height);
+        self.select_to(offset, cx);
+    }
+
+    /// Calculate the byte offset for a mouse position in multi-line mode
+    pub fn index_for_multiline_position(
+        &self,
+        position: Point<Pixels>,
+        line_height: Pixels,
+    ) -> usize {
+        let Some(bounds) = self.last_bounds.as_ref() else {
+            return 0;
+        };
+
+        let value = self.value();
+        if value.is_empty() {
+            return 0;
+        }
+
+        // Calculate which line the position is on
+        let relative_y = position.y - bounds.top();
+        let line_index = if relative_y < gpui::px(0.) {
+            0
+        } else {
+            (relative_y / line_height).floor() as usize
+        };
+
+        let line_count = self.line_count();
+        let clamped_line = line_index.min(line_count.saturating_sub(1));
+
+        // Get the line start and end offsets
+        let line_start = self.line_start_offset(clamped_line);
+        let line_end = self.line_end_offset(clamped_line);
+
+        // If clicking before/after bounds horizontally, select to line start/end
+        if position.x < bounds.left() {
+            return line_start;
+        }
+        if position.x > bounds.right() {
+            return line_end;
+        }
+
+        // For now, use a simple character-based calculation
+        // In the future, we could use the line's ShapedLine for precise positioning
+        let line_content = &value[line_start..line_end];
+        let relative_x = position.x - bounds.left();
+
+        // Estimate character width (this is approximate; proper implementation would use ShapedLine)
+        // For now, we'll estimate based on the line content
+        if line_content.is_empty() {
+            return line_start;
+        }
+
+        // Simple linear interpolation based on position
+        let ratio = relative_x / bounds.size.width;
+        let estimated_char_index = (ratio * line_content.len() as f32) as usize;
+
+        // Find the grapheme boundary
+        let mut actual_offset = line_start;
+        for (idx, (byte_idx, _)) in line_content.grapheme_indices(true).enumerate() {
+            if idx >= estimated_char_index {
+                actual_offset = line_start + byte_idx;
+                break;
+            }
+            actual_offset = line_start + byte_idx;
+        }
+
+        actual_offset.min(line_end)
+    }
+
     pub fn offset_from_utf16(&self, offset: usize) -> usize {
         let mut utf8_offset = 0;
         let mut utf16_count = 0;
@@ -338,6 +479,84 @@ impl InputState {
             .grapheme_indices(true)
             .find_map(|(idx, _)| (idx > offset).then_some(idx))
             .unwrap_or(self.value().len())
+    }
+
+    // Multi-line helper methods
+
+    /// Returns the number of lines in the text
+    pub fn line_count(&self) -> usize {
+        let value = self.value();
+        if value.is_empty() {
+            1
+        } else {
+            value.chars().filter(|&c| c == '\n').count() + 1
+        }
+    }
+
+    /// Returns an iterator over the lines in the text
+    pub fn lines(&self) -> impl Iterator<Item = &str> {
+        self.value
+            .as_ref()
+            .map(|v| v.as_ref())
+            .unwrap_or("")
+            .split('\n')
+    }
+
+    /// Returns the byte offset where a line starts
+    pub fn line_start_offset(&self, line: usize) -> usize {
+        let value = self.value();
+        let mut offset = 0;
+        for (i, _) in value.split('\n').enumerate() {
+            if i == line {
+                return offset;
+            }
+            offset += value[offset..].find('\n').map(|p| p + 1).unwrap_or(0);
+        }
+        value.len()
+    }
+
+    /// Returns the byte offset where a line ends (before the newline, or at text end)
+    pub fn line_end_offset(&self, line: usize) -> usize {
+        let start = self.line_start_offset(line);
+        let value = self.value();
+        value[start..]
+            .find('\n')
+            .map(|p| start + p)
+            .unwrap_or(value.len())
+    }
+
+    /// Converts a byte offset to (line, column) where column is byte offset within the line
+    pub fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
+        let value = self.value();
+        let mut line = 0;
+        let mut line_start = 0;
+
+        for (i, c) in value.char_indices() {
+            if i >= offset {
+                break;
+            }
+            if c == '\n' {
+                line += 1;
+                line_start = i + 1;
+            }
+        }
+
+        (line, offset.saturating_sub(line_start))
+    }
+
+    /// Converts (line, column) to byte offset, clamping column to line length
+    pub fn line_col_to_offset(&self, line: usize, col: usize) -> usize {
+        let line_start = self.line_start_offset(line);
+        let line_end = self.line_end_offset(line);
+        let line_len = line_end - line_start;
+        line_start + col.min(line_len)
+    }
+
+    /// Returns the content of a specific line (without the trailing newline)
+    pub fn line_content(&self, line: usize) -> &str {
+        let start = self.line_start_offset(line);
+        let end = self.line_end_offset(line);
+        &self.value.as_ref().map(|v| v.as_ref()).unwrap_or("")[start..end]
     }
 
     /*pub fn reset(&mut self) {

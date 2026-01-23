@@ -58,8 +58,9 @@ pub struct Input {
 
 impl Input {
     pub fn new(id: impl Into<ElementId>, state: Entity<InputState>) -> Self {
+        let id = id.into();
         Self {
-            id: id.into(),
+            id: id.clone(),
             invalid: false,
             disabled: false,
             force_hover: false,
@@ -67,7 +68,7 @@ impl Input {
             layer: ThemeLayerKind::Tertiary,
             children: PositionalChildren::default(),
             style: InputStyles::default(),
-            base: PrimitiveInput::new(state),
+            base: PrimitiveInput::new(id, state),
         }
     }
 
@@ -129,8 +130,42 @@ impl Input {
         self
     }
 
-    pub fn transform_text(mut self, transform: impl Fn(char) -> char + 'static) -> Self {
+    pub fn transform_text(
+        mut self,
+        transform: impl Fn(char) -> char + Send + Sync + 'static,
+    ) -> Self {
         self.base = self.base.transform_text(transform);
+        self
+    }
+
+    /// Sets the maximum number of visible lines before scrolling.
+    /// - `max_lines == 1` (default): single-line input
+    /// - `max_lines > 1`: multi-line input using uniform_list for efficient rendering
+    pub fn max_lines(mut self, max_lines: usize) -> Self {
+        self.base = self.base.max_lines(max_lines);
+        self
+    }
+
+    /// Enables multi-line mode with unconstrained height (no scrolling).
+    /// Equivalent to `.max_lines(usize::MAX)`.
+    pub fn multiline(mut self) -> Self {
+        self.base = self.base.multiline();
+        self
+    }
+
+    /// Enables word wrapping for multi-line input.
+    /// Text will wrap at word boundaries when it exceeds the input width.
+    /// Only effective when `max_lines > 1`.
+    pub fn wrap(mut self, wrap: bool) -> Self {
+        self.base = self.base.wrap(wrap);
+        self
+    }
+
+    /// When enabled, use shift+enter to insert newlines instead of enter.
+    /// This is useful for form inputs where enter should submit the form.
+    /// Only effective when `max_lines > 1`.
+    pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
+        self.base = self.base.newline_on_shift_enter(enabled);
         self
     }
 
