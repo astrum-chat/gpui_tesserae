@@ -168,8 +168,8 @@ impl Input {
     /// Enables word wrapping for multi-line input.
     /// Text will wrap at word boundaries when it exceeds the input width.
     /// Only effective when `line_clamp > 1`.
-    pub fn word_wrap(mut self, word_wrap: bool) -> Self {
-        self.base = self.base.word_wrap(word_wrap);
+    pub fn word_wrap(mut self, enabled: bool) -> Self {
+        self.base = self.base.word_wrap(enabled);
         self
     }
 

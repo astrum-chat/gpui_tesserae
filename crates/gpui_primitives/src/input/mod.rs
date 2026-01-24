@@ -113,8 +113,8 @@ impl Input {
         self
     }
 
-    pub fn word_wrap(mut self, word_wrap: bool) -> Self {
-        self.word_wrap = word_wrap;
+    pub fn word_wrap(mut self, enabled: bool) -> Self {
+        self.word_wrap = enabled;
         self
     }
 
