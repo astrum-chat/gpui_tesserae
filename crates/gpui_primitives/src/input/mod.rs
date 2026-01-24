@@ -318,9 +318,12 @@ impl Element for TextElement {
         // Get cursor position in text coordinates
         let cursor_x = line.x_for_index(cursor);
         let container_width = bounds.size.width;
+        let text_width = line.width;
 
-        // Update horizontal scroll to keep cursor visible
+        // Update horizontal scroll to keep cursor visible, and store metrics for scroll wheel
         let scroll_offset = self.input.update(cx, |input, _cx| {
+            input.last_text_width = text_width;
+            input.last_bounds = Some(bounds);
             input.ensure_cursor_visible_horizontal(cursor_x, container_width)
         });
 
@@ -611,7 +614,13 @@ impl Element for LineElement {
                 }
             };
 
+            let text_width = line.width;
             self.input.update(cx, |input, _cx| {
+                // Update max text width across all lines for scroll wheel
+                if text_width > input.last_text_width {
+                    input.last_text_width = text_width;
+                }
+                input.last_bounds = Some(bounds);
                 input.ensure_cursor_visible_horizontal(cursor_x, container_width)
             })
         };
@@ -1249,6 +1258,7 @@ impl RenderOnce for Input {
                 window.listener_for(&self.state, InputState::on_mouse_up),
             )
             .on_mouse_move(window.listener_for(&self.state, InputState::on_mouse_move))
+            .on_scroll_wheel(window.listener_for(&self.state, InputState::on_scroll_wheel))
             .when(is_multiline && !self.wrap, |this| {
                 // Multi-line non-wrapped mode: use uniform_list for efficient scrolling
                 let font = font.clone();

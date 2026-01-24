@@ -1,8 +1,8 @@
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, Font, Hsla, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, Render, ScrollStrategy, ShapedLine, SharedString, TextRun, UTF16Selection,
-    UniformListScrollHandle, Window, WrappedLine, actions, div, point, px,
+    Point, Render, ScrollStrategy, ScrollWheelEvent, ShapedLine, SharedString, TextRun,
+    UTF16Selection, UniformListScrollHandle, Window, WrappedLine, actions, div, point, px,
 };
 use std::ops::Range;
 use std::sync::Arc;
@@ -114,6 +114,10 @@ pub struct InputState {
 
     /// Horizontal scroll offset for single-line mode (in pixels)
     pub(crate) horizontal_scroll_offset: Pixels,
+    /// Last measured text width (for scroll wheel calculations)
+    pub(crate) last_text_width: Pixels,
+    /// When true, skip auto-scroll to cursor (user is manually scrolling)
+    pub(crate) is_manually_scrolling: bool,
 }
 
 impl InputState {
@@ -144,6 +148,8 @@ impl InputState {
             needs_wrap_recompute: false,
             scroll_to_cursor_on_next_render: false,
             horizontal_scroll_offset: Pixels::ZERO,
+            last_text_width: Pixels::ZERO,
+            is_manually_scrolling: false,
         }
     }
 
@@ -306,6 +312,11 @@ impl InputState {
         // Don't scroll in wrapped mode (text wraps, so horizontal scroll not needed)
         if self.is_wrapped {
             return Pixels::ZERO;
+        }
+
+        // If user is manually scrolling, don't auto-scroll to cursor
+        if self.is_manually_scrolling {
+            return self.horizontal_scroll_offset;
         }
 
         let scroll_margin = px(2.0); // Small margin to keep cursor slightly away from edges
@@ -556,6 +567,49 @@ impl InputState {
         }
     }
 
+    pub fn on_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Don't handle horizontal scroll in wrapped mode (text wraps instead)
+        if self.is_wrapped {
+            return;
+        }
+
+        let line_height = self.line_height.unwrap_or(px(16.0));
+        let delta = event.delta.pixel_delta(line_height);
+
+        // Only handle horizontal scroll (use px comparison)
+        if delta.x.abs() < px(0.01) {
+            return;
+        }
+
+        // Get container width from last_bounds
+        let container_width = self.last_bounds.map(|b| b.size.width).unwrap_or(px(100.0));
+
+        // Calculate max scroll (text_width - container_width, but not negative)
+        let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
+
+        // Apply horizontal scroll (negative delta.x = scroll right, positive = scroll left)
+        // Note: delta.x is positive when scrolling left (content moves right)
+        let new_offset = (self.horizontal_scroll_offset - delta.x)
+            .max(Pixels::ZERO)
+            .min(max_scroll);
+
+        if new_offset != self.horizontal_scroll_offset {
+            self.horizontal_scroll_offset = new_offset;
+            self.is_manually_scrolling = true;
+            cx.notify();
+        }
+    }
+
+    /// Reset manual scrolling flag (called when user types or moves cursor)
+    pub(crate) fn reset_manual_scroll(&mut self) {
+        self.is_manually_scrolling = false;
+    }
+
     pub fn show_character_palette(
         &mut self,
         _: &ShowCharacterPalette,
@@ -597,6 +651,8 @@ impl InputState {
 
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
+        // Reset manual scroll so auto-scroll to cursor works
+        self.reset_manual_scroll();
         // For wrapped mode, defer scroll until visual lines are recomputed
         // For non-wrapped mode, scroll immediately since line calculation is always correct
         if self.is_wrapped {
@@ -1155,6 +1211,9 @@ impl EntityInputHandler for InputState {
 
         // Clear precomputed visual lines so they get recomputed with new text
         self.precomputed_visual_lines.clear();
+
+        // Reset manual scroll so auto-scroll to cursor works
+        self.reset_manual_scroll();
 
         // For wrapped mode, defer scroll until visual lines are recomputed
         // For non-wrapped mode, scroll immediately since line calculation is always correct
