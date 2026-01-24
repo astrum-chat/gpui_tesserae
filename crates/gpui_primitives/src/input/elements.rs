@@ -308,6 +308,7 @@ impl Element for LineElement {
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let full_value = input.value();
+        let is_select_all = input.is_select_all;
 
         let line_content: String =
             full_value[self.line_start_offset..self.line_end_offset].to_string();
@@ -345,7 +346,7 @@ impl Element for LineElement {
         };
 
         let selection_intersects = self.selected_range.start <= self.line_end_offset
-            && self.selected_range.end > self.line_start_offset;
+            && self.selected_range.end >= self.line_start_offset;
 
         let container_width = bounds.size.width;
         let scroll_offset = {
@@ -414,6 +415,7 @@ impl Element for LineElement {
                 line_content.len(),
                 local_end,
                 &full_value,
+                is_select_all,
             ) {
                 let space_run = TextRun {
                     len: 1,
@@ -654,7 +656,7 @@ impl Element for WrappedLineElement {
         };
 
         let selection_intersects =
-            self.selected_range.start <= line_end && self.selected_range.end > line_start;
+            self.selected_range.start <= line_end && self.selected_range.end >= line_start;
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             let local_start = self
@@ -679,6 +681,7 @@ impl Element for WrappedLineElement {
                 line_len,
                 local_end,
                 &value,
+                input.is_select_all,
             ) {
                 let space_run = TextRun {
                     len: 1,

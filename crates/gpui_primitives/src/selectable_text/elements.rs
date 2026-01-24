@@ -22,6 +22,7 @@ pub(crate) struct LineElement {
     pub font_size: Pixels,
     pub font: Font,
     pub selected_range: Range<usize>,
+    pub is_select_all: bool,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -94,7 +95,7 @@ impl Element for LineElement {
             .shape_line(display_text, self.font_size, &[run], None);
 
         let selection_intersects = self.selected_range.start <= self.line_end_offset
-            && self.selected_range.end > self.line_start_offset;
+            && self.selected_range.end >= self.line_start_offset;
 
         let selection = if !self.selected_range.is_empty() && selection_intersects {
             let local_start = self
@@ -118,6 +119,7 @@ impl Element for LineElement {
                 line_content.len(),
                 local_end,
                 &full_value,
+                self.is_select_all,
             ) {
                 let space_run = TextRun {
                     len: 1,
@@ -200,6 +202,7 @@ pub(crate) struct WrappedLineElement {
     pub font_size: Pixels,
     pub font: Font,
     pub selected_range: Range<usize>,
+    pub is_select_all: bool,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
@@ -303,7 +306,7 @@ impl Element for WrappedLineElement {
         let line_len = line_end - line_start;
 
         let selection_intersects =
-            self.selected_range.start <= line_end && self.selected_range.end > line_start;
+            self.selected_range.start <= line_end && self.selected_range.end >= line_start;
 
         let selection = if !self.selected_range.is_empty() && selection_intersects {
             let local_start = self
@@ -327,6 +330,7 @@ impl Element for WrappedLineElement {
                 line_len,
                 local_end,
                 &value,
+                self.is_select_all,
             ) {
                 let space_run = TextRun {
                     len: 1,

@@ -194,6 +194,7 @@ impl RenderOnce for SelectableText {
                         let state = state_entity.read(cx);
                         let value = state.text();
                         let selected_range = state.selected_range.clone();
+                        let is_select_all = state.is_select_all;
 
                         let mut line_offsets: Vec<(usize, usize)> = Vec::new();
                         let mut start = 0;
@@ -219,6 +220,7 @@ impl RenderOnce for SelectableText {
                                     font_size,
                                     font: font.clone(),
                                     selected_range: selected_range.clone(),
+                                    is_select_all,
                                 }
                             })
                             .collect()
@@ -283,6 +285,7 @@ impl RenderOnce for SelectableText {
                     move |visible_range, _window, cx| {
                         let state = state_entity.read(cx);
                         let selected_range = state.selected_range.clone();
+                        let is_select_all = state.is_select_all;
 
                         visible_range
                             .map(|visual_idx| WrappedLineElement {
@@ -294,6 +297,7 @@ impl RenderOnce for SelectableText {
                                 font_size,
                                 font: font.clone(),
                                 selected_range: selected_range.clone(),
+                                is_select_all,
                             })
                             .collect()
                     },

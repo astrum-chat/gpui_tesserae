@@ -156,6 +156,8 @@ pub struct InputState {
     pub(crate) is_manually_scrolling: bool,
     /// When true, skip auto-scroll to cursor on next render (for select_all)
     pub(crate) skip_auto_scroll_on_next_render: bool,
+    /// Whether the current selection is a "select all" (cmd+a)
+    pub is_select_all: bool,
 
     /// Undo history stack
     undo_stack: Vec<UndoEntry>,
@@ -197,6 +199,7 @@ impl InputState {
             last_text_width: Pixels::ZERO,
             is_manually_scrolling: false,
             skip_auto_scroll_on_next_render: false,
+            is_select_all: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_history: 200,
@@ -565,6 +568,7 @@ impl InputState {
 
     /// Selects all text without scrolling.
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.is_select_all = true;
         self.move_to_without_scroll(0, cx);
         self.select_to_without_scroll(self.value().len(), cx)
     }
@@ -971,6 +975,7 @@ impl InputState {
 
     /// Sets cursor position and clears selection, scrolling to keep cursor visible.
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.is_select_all = false;
         self.move_to_inner(offset, true, cx)
     }
 

@@ -60,6 +60,7 @@ impl InputState {
 
     /// Extends the selection to the given offset, scrolling to keep the cursor visible.
     pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.is_select_all = false;
         self.select_to_inner(offset, true, cx)
     }
 

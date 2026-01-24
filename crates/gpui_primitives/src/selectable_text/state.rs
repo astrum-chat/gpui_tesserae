@@ -90,6 +90,8 @@ pub struct SelectableTextState {
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
     /// Cached bounds from last render
     pub(crate) last_bounds: Option<Bounds<Pixels>>,
+    /// Whether the current selection is a "select all" (cmd+a)
+    pub is_select_all: bool,
 }
 
 impl SelectableTextState {
@@ -113,6 +115,7 @@ impl SelectableTextState {
             scroll_to_cursor_on_next_render: false,
             visible_lines_info: Vec::new(),
             last_bounds: None,
+            is_select_all: false,
         }
     }
 
@@ -300,6 +303,7 @@ impl SelectableTextState {
 
     /// Extends the selection to the given offset, scrolling to keep the cursor visible.
     pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.is_select_all = false;
         self.select_to_inner(offset, true, cx)
     }
 
@@ -331,6 +335,7 @@ impl SelectableTextState {
 
     /// Sets cursor position and clears selection, scrolling to keep cursor visible.
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.is_select_all = false;
         self.move_to_inner(offset, true, cx)
     }
 
@@ -352,6 +357,7 @@ impl SelectableTextState {
 
     /// Selects all text without scrolling.
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.is_select_all = true;
         self.move_to_without_scroll(0, cx);
         self.select_to_without_scroll(self.text().len(), cx)
     }
