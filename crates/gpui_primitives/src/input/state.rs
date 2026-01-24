@@ -518,7 +518,11 @@ impl InputState {
             self.index_for_mouse_position(event.position)
         };
 
-        if event.click_count == 2 {
+        if event.click_count >= 3 {
+            // Triple-click: select all
+            self.move_to(0, cx);
+            self.select_to(self.value().len(), cx);
+        } else if event.click_count == 2 {
             // Double-click: select word
             self.select_word_at(index, cx);
         } else if event.modifiers.shift {
