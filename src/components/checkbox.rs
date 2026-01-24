@@ -19,6 +19,7 @@ use crate::{
     utils::{ElementIdExt, RgbaExt, SquircleExt, checked_transition, disabled_transition},
 };
 
+/// A checkbox component with animated check state transitions.
 #[derive(IntoElement)]
 pub struct Checkbox {
     id: ElementId,
@@ -34,6 +35,7 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
+    /// Creates a new checkbox with the given element ID.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -49,36 +51,43 @@ impl Checkbox {
         }
     }
 
+    /// Sets the focus handle for keyboard navigation.
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.focus_handle = Some(focus_handle);
         self
     }
 
+    /// Sets a custom icon to display when checked.
     pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
         self.icon = icon.into();
         self
     }
 
+    /// Sets the background layer for theming depth.
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
         self.layer = layer;
         self
     }
 
+    /// Sets the checked state.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
         self
     }
 
+    /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Forces the hover visual state regardless of actual hover.
     pub fn force_hover(mut self, force_hover: bool) -> Self {
         self.force_hover = force_hover;
         self
     }
 
+    /// Sets a callback invoked when hover state changes.
     pub fn on_hover(
         mut self,
         on_hover: impl Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static,

@@ -43,6 +43,7 @@ impl Default for InputStyles {
     }
 }
 
+/// A styled text input component with validation and theming support.
 #[derive(IntoElement)]
 pub struct Input {
     id: ElementId,
@@ -57,6 +58,7 @@ pub struct Input {
 }
 
 impl Input {
+    /// Creates a new input with the given ID and state entity.
     pub fn new(id: impl Into<ElementId>, state: Entity<InputState>) -> Self {
         let id = id.into();
         Self {
@@ -72,36 +74,43 @@ impl Input {
         }
     }
 
+    /// Sets a fixed width.
     pub fn w(mut self, width: impl Into<Length>) -> Self {
         self.style.width = width.into();
         self
     }
 
+    /// Sets width to auto, sizing based on content.
     pub fn w_auto(mut self) -> Self {
         self.style.width = Length::Auto;
         self
     }
 
+    /// Sets width to fill the parent container.
     pub fn w_full(mut self) -> Self {
         self.style.width = relative(100.).into();
         self
     }
 
+    /// Marks the input as invalid, showing destructive styling.
     pub fn invalid(mut self, invalid: bool) -> Self {
         self.invalid = invalid;
         self
     }
 
+    /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Forces the hover visual state regardless of actual hover.
     pub fn force_hover(mut self, force_hover: bool) -> Self {
         self.force_hover = force_hover;
         self
     }
 
+    /// Sets a callback invoked when hover state changes.
     pub fn on_hover(
         mut self,
         on_hover: impl Fn(&bool, &mut gpui::Window, &mut App) + 'static,
@@ -110,6 +119,7 @@ impl Input {
         self
     }
 
+    /// Sets the background layer for theming depth.
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
         self.layer = layer;
         self
@@ -188,93 +198,111 @@ impl Input {
         self
     }
 
+    /// Returns the current text value from the input state.
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.base.read_text(cx)
     }
 
+    /// Sets uniform corner radius for all corners.
     pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
         let rounded = rounded.into();
         self.style.corner_radii = Corners::all(Some(rounded));
         self
     }
 
+    /// Sets the top-left corner radius.
     pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.top_left = Some(rounded.into());
         self
     }
 
+    /// Sets the top-right corner radius.
     pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.top_right = Some(rounded.into());
         self
     }
 
+    /// Sets the bottom-left corner radius.
     pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.bottom_left = Some(rounded.into());
         self
     }
 
+    /// Sets the bottom-right corner radius.
     pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.bottom_right = Some(rounded.into());
         self
     }
 
+    /// Sets the gap between child elements.
     pub fn gap(mut self, gap: impl Into<DefiniteLength>) -> Self {
         self.style.gap = Some(gap.into());
         self
     }
 
+    /// Sets uniform outer padding for all sides.
     pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
         let padding = padding.into();
         self.style.padding = Edges::all(Some(padding));
         self
     }
 
+    /// Sets top outer padding.
     pub fn pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.top = Some(padding.into());
         self
     }
 
+    /// Sets bottom outer padding.
     pub fn pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.bottom = Some(padding.into());
         self
     }
 
+    /// Sets left outer padding.
     pub fn pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.left = Some(padding.into());
         self
     }
 
+    /// Sets right outer padding.
     pub fn pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.right = Some(padding.into());
         self
     }
 
+    /// Sets uniform inner padding around the text area.
     pub fn inner_p(mut self, padding: impl Into<DefiniteLength>) -> Self {
         let padding = padding.into();
         self.style.inner_padding = Edges::all(Some(padding));
         self
     }
 
+    /// Sets top inner padding.
     pub fn inner_pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.inner_padding.top = Some(padding.into());
         self
     }
 
+    /// Sets bottom inner padding.
     pub fn inner_pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.inner_padding.bottom = Some(padding.into());
         self
     }
 
+    /// Sets left inner padding.
     pub fn inner_pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.inner_padding.left = Some(padding.into());
         self
     }
 
+    /// Sets right inner padding.
     pub fn inner_pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.inner_padding.right = Some(padding.into());
         self
     }
 
+    /// Sets the font size for the input text.
     pub fn text_size(mut self, padding: impl Into<AbsoluteLength>) -> Self {
         self.style.text_size = Some(padding.into());
         self

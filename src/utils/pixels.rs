@@ -1,5 +1,6 @@
 use gpui::{AbsoluteLength, DefiniteLength, Pixels, Window, px};
 
+/// Extension trait for pixel calculations.
 pub trait PixelsExt {
     /// Calculates the top and bottom padding needed in order for
     /// the height of an element to reach this px value.

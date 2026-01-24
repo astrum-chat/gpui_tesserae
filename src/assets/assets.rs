@@ -4,11 +4,15 @@ use anyhow::anyhow;
 use gpui::{AssetSource, Result, SharedString};
 use smallvec::SmallVec;
 
+/// Composite asset source that queries multiple providers in order.
+///
+/// The first provider to return an asset for a given path wins.
 pub struct Assets<const N: usize> {
     providers: SmallVec<[Box<dyn AssetProvider>; N]>,
 }
 
 impl<const N: usize> Assets<N> {
+    /// Creates a new asset source from an array of providers.
     pub fn new(providers: [Box<dyn AssetProvider>; N]) -> Assets<N> {
         Self {
             providers: SmallVec::from(providers),
@@ -16,6 +20,7 @@ impl<const N: usize> Assets<N> {
     }
 }
 
+/// Creates an `Assets` instance from a list of asset providers.
 #[macro_export]
 macro_rules! assets {
     ( $( $item:expr ),* $(,)? ) => {
@@ -52,7 +57,10 @@ impl<const N: usize> AssetSource for Assets<N> {
     }
 }
 
+/// Trait for types that can provide asset data.
 pub trait AssetProvider: Send + Sync {
+    /// Returns the asset data at the given path, if it exists.
     fn get(&self, path: &str) -> Option<Cow<'static, [u8]>>;
+    /// Lists all assets under the given path prefix.
     fn list(&self, path: &str) -> Result<Vec<SharedString>>;
 }

@@ -13,6 +13,7 @@ use crate::{
     utils::RgbaExt,
 };
 
+/// A toggle button that changes appearance based on checked state.
 #[derive(IntoElement)]
 pub struct Toggle {
     variant: ToggleVariantEither,
@@ -21,6 +22,7 @@ pub struct Toggle {
 }
 
 impl Toggle {
+    /// Creates a new toggle button with the given element ID.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             checked: false,
@@ -29,56 +31,67 @@ impl Toggle {
         }
     }
 
+    /// Sets the button's text label.
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {
         self.base = self.base.text(text);
         self
     }
 
+    /// Removes any text label from the button.
     pub fn no_text(mut self) -> Self {
         self.base = self.base.no_text();
         self
     }
 
+    /// Sets an icon to display in the button.
     pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
         self.base = self.base.icon(icon);
         self
     }
 
+    /// Sets uniform width and height for the icon.
     pub fn icon_size(mut self, icon_size: impl Into<Length>) -> Self {
         self.base = self.base.icon_size(icon_size);
         self
     }
 
+    /// Applies a rotation transformation to the icon.
     pub fn icon_rotation(mut self, rotate: impl Into<Radians>) -> Self {
         self.base = self.base.icon_rotate(rotate);
         self
     }
 
+    /// Sets the checked state, which determines the visual variant used.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
         self
     }
 
+    /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.base = self.base.disabled(disabled);
         self
     }
 
+    /// Forces the hover visual state regardless of actual hover.
     pub fn force_hover(mut self, force_hover: bool) -> Self {
         self.base = self.base.force_hover(force_hover);
         self
     }
 
+    /// Sets a callback invoked when hover state changes.
     pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.base = self.base.on_hover(on_hover);
         self
     }
 
+    /// Sets the focus handle for keyboard navigation.
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.base = self.base.focus_handle(focus_handle);
         self
     }
 
+    /// Sets the visual variant determining colors for checked and unchecked states.
     // ToggleVariantEither is an internal wrapper type for
     // allowing both `ButtonVariant` and `GranularToggleVariant`.
     // It does not need to be public.
@@ -125,66 +138,79 @@ impl Toggle {
         self
     }
 
+    /// Sets uniform corner radius for all corners.
     pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
         self.base = self.base.rounded(rounded);
         self
     }
 
+    /// Sets the top-left corner radius.
     pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.base = self.base.rounded_tl(rounded);
         self
     }
 
+    /// Sets the top-right corner radius.
     pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
         self.base = self.base.rounded_tr(rounded);
         self
     }
 
+    /// Sets the bottom-left corner radius.
     pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.base = self.base.rounded_bl(rounded);
         self
     }
 
+    /// Sets the bottom-right corner radius.
     pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
         self.base = self.base.rounded_br(rounded);
         self
     }
 
+    /// Sets uniform padding for all sides.
     pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.base = self.base.p(padding);
         self
     }
 
+    /// Sets top padding.
     pub fn pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.base = self.base.pt(padding);
         self
     }
 
+    /// Sets bottom padding.
     pub fn pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.base = self.base.pb(padding);
         self
     }
 
+    /// Sets left padding.
     pub fn pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.base = self.base.pl(padding);
         self
     }
 
+    /// Sets right padding.
     pub fn pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.base = self.base.pr(padding);
         self
     }
 
+    /// Sets a fixed width.
     pub fn w(mut self, width: impl Into<Length>) -> Self {
         self.base = self.base.w(width);
         self
     }
 
+    /// Sets width to auto, sizing based on content.
     pub fn w_auto(mut self) -> Self {
         self.base = self.base.w_auto();
         self
     }
 
+    /// Sets width to fill the parent container.
     pub fn w_full(mut self) -> Self {
         self.base = self.base.w_full();
         self
@@ -221,15 +247,22 @@ impl PositionalParentElement for Toggle {
     }
 }
 
+/// Predefined visual styles for toggle buttons.
 #[derive(Clone, Copy)]
 pub enum ToggleVariant {
+    /// Solid accent-colored when checked.
     Primary,
+    /// Semi-transparent text color styling.
     Secondary,
+    /// Subtle secondary text color styling.
     Tertiary,
+    /// Green-tinted styling.
     Constructive,
+    /// Red-tinted styling.
     Destructive,
 }
 
+/// Fine-grained color configuration for toggle button states.
 pub struct GranularToggleVariant {
     truthy: GranularButtonVariant,
     falsey: GranularButtonVariant,

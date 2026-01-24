@@ -1,3 +1,5 @@
+//! Utility traits and functions for common operations.
+
 mod transitions;
 pub use transitions::*;
 

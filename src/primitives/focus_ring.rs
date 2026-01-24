@@ -11,15 +11,23 @@ use crate::{theme::ThemeExt, utils::RgbaExt};
 
 const SIZE_SCALE_FACTOR: f32 = 8.;
 
+/// An animated ring that appears around focused elements.
+///
+/// The ring animates outward when focus is gained and inward when lost,
+/// providing clear visual feedback for keyboard navigation. It renders
+/// as an absolutely positioned overlay that should be placed within
+/// the focusable element.
 #[derive(IntoElement)]
 pub struct FocusRing {
     id: ElementId,
     focus_handle: FocusHandle,
+    /// Corner radii that should match the parent element for proper alignment.
     pub corner_radii: CornersRefinement<Pixels>,
     border_color: Option<Rgba>,
 }
 
 impl FocusRing {
+    /// Creates a new focus ring bound to the given focus handle.
     pub fn new(id: impl Into<ElementId>, focus_handle: FocusHandle) -> Self {
         Self {
             id: id.into(),
@@ -34,16 +42,19 @@ impl FocusRing {
         }
     }
 
+    /// Replaces the focus handle this ring is bound to.
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.focus_handle = focus_handle;
         self
     }
 
+    /// Sets a custom border color instead of the theme's accent color.
     pub fn border_color(mut self, border_color: impl Into<Rgba>) -> Self {
         self.border_color = Some(border_color.into());
         self
     }
 
+    /// Sets uniform corner radius for all corners.
     pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
         let rounded = rounded.into();
         self.corner_radii = CornersRefinement {
@@ -55,21 +66,25 @@ impl FocusRing {
         self
     }
 
+    /// Sets the top-left corner radius.
     pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.corner_radii.top_left = Some(rounded.into());
         self
     }
 
+    /// Sets the top-right corner radius.
     pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
         self.corner_radii.top_right = Some(rounded.into());
         self
     }
 
+    /// Sets the bottom-left corner radius.
     pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.corner_radii.bottom_left = Some(rounded.into());
         self
     }
 
+    /// Sets the bottom-right corner radius.
     pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
         self.corner_radii.bottom_right = Some(rounded.into());
         self

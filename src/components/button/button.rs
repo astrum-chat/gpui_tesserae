@@ -44,6 +44,7 @@ impl Default for ButtonStyles {
     }
 }
 
+/// A themed button component with multiple visual variants.
 #[derive(IntoElement)]
 pub struct Button {
     id: ElementId,
@@ -62,6 +63,7 @@ pub struct Button {
 }
 
 impl Button {
+    /// Creates a new button with the given element ID.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -83,26 +85,31 @@ impl Button {
         }
     }
 
+    /// Sets the focus handle for keyboard navigation.
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.focus_handle = Some(focus_handle);
         self
     }
 
+    /// Sets the button's text label.
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {
         self.text = Some(text.into());
         self
     }
 
+    /// Removes any text label from the button.
     pub fn no_text(mut self) -> Self {
         self.text = None;
         self
     }
 
+    /// Sets an icon to display in the button.
     pub fn icon(mut self, icon: impl Into<SharedString>) -> Self {
         self.icon = Some(icon.into());
         self
     }
 
+    /// Sets uniform width and height for the icon.
     pub fn icon_size(mut self, icon_size: impl Into<Length>) -> Self {
         let icon_size = icon_size.into();
         self.icon_size = SizeRefinement {
@@ -112,26 +119,31 @@ impl Button {
         self
     }
 
+    /// Applies a rotation transformation to the icon.
     pub fn icon_rotate(mut self, rotate: impl Into<Radians>) -> Self {
         self.style.icon_rotate = rotate.into();
         self
     }
 
+    /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Forces the hover visual state regardless of actual hover.
     pub fn force_hover(mut self, force_hover: bool) -> Self {
         self.force_hover = force_hover;
         self
     }
 
+    /// Sets a callback invoked when hover state changes.
     pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_hover = Some(Box::new(on_hover));
         self
     }
 
+    /// Sets the visual variant determining colors and styling.
     // ButtonVariantEither is an internal wrapper type for
     // allowing both `ButtonVariant` and `GranularButtonVariant`.
     // It does not need to be public.
@@ -178,68 +190,81 @@ impl Button {
         self
     }
 
+    /// Sets uniform corner radius for all corners.
     pub fn rounded(mut self, rounded: impl Into<Pixels>) -> Self {
         let rounded = rounded.into();
         self.style.corner_radii = Corners::all(Some(rounded));
         self
     }
 
+    /// Sets the top-left corner radius.
     pub fn rounded_tl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.top_left = Some(rounded.into());
         self
     }
 
+    /// Sets the top-right corner radius.
     pub fn rounded_tr(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.top_right = Some(rounded.into());
         self
     }
 
+    /// Sets the bottom-left corner radius.
     pub fn rounded_bl(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.bottom_left = Some(rounded.into());
         self
     }
 
+    /// Sets the bottom-right corner radius.
     pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.bottom_right = Some(rounded.into());
         self
     }
 
+    /// Sets uniform padding for all sides.
     pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
         let padding = padding.into();
         self.style.padding = Edges::all(Some(padding));
         self
     }
 
+    /// Sets top padding.
     pub fn pt(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.top = Some(padding.into());
         self
     }
 
+    /// Sets bottom padding.
     pub fn pb(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.bottom = Some(padding.into());
         self
     }
 
+    /// Sets left padding.
     pub fn pl(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.left = Some(padding.into());
         self
     }
 
+    /// Sets right padding.
     pub fn pr(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.style.padding.right = Some(padding.into());
         self
     }
 
+    /// Sets a fixed width.
     pub fn w(mut self, width: impl Into<Length>) -> Self {
         self.style.width = width.into();
         self
     }
 
+    /// Sets width to auto, sizing based on content.
     pub fn w_auto(mut self) -> Self {
         self.style.width = Length::Auto;
         self
     }
 
+    /// Sets width to fill the parent container.
     pub fn w_full(mut self) -> Self {
         self.style.width = relative(100.).into();
         self
@@ -558,29 +583,47 @@ impl PositionalParentElement for Button {
     }
 }
 
+/// Fine-grained color configuration for button styling.
 #[derive(Clone)]
 pub struct GranularButtonVariant {
+    /// Default background color.
     pub bg_color: Rgba,
+    /// Background color when hovered.
     pub bg_hover_color: Rgba,
+    /// Background color when focused.
     pub bg_focus_color: Rgba,
+    /// Text and icon color.
     pub text_color: Rgba,
+    /// Border highlight opacity in default state.
     pub highlight_alpha: f32,
+    /// Border highlight opacity when active (hovered, focused, or clicked).
     pub highlight_active_alpha: f32,
 }
 
+/// Predefined visual styles for buttons.
 pub enum ButtonVariant {
+    /// Solid accent-colored button for primary actions.
     Primary,
+    /// Semi-transparent button using text color.
     Secondary,
+    /// Transparent button that shows background on hover.
     SecondaryGhost,
+    /// Subtle button using secondary text color.
     Tertiary,
+    /// Transparent subtle button.
     TertiaryGhost,
+    /// Green-tinted button for positive actions.
     Constructive,
+    /// Transparent green button.
     ConstructiveGhost,
+    /// Red-tinted button for dangerous actions.
     Destructive,
+    /// Transparent red button.
     DestructiveGhost,
 }
 
 impl ButtonVariant {
+    /// Converts this variant to a granular variant using theme colors.
     pub fn as_granular(&self, cx: &mut App) -> GranularButtonVariant {
         const HOVER_STRENGTH: f32 = 0.15;
         const FOCUS_STRENGTH: f32 = 0.35;

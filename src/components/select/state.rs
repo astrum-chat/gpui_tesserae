@@ -1,3 +1,5 @@
+#![allow(missing_docs, reason = "actions! macro generates undocumented structs")]
+
 use std::{rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
@@ -15,13 +17,16 @@ use crate::{
 
 actions!(select_menu, [MoveUp, MoveDown, Confirm]);
 
+/// Type alias for the item click callback function.
 pub type OnItemClickFn<V, I> =
     Rc<dyn Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)>;
 
+/// Shared state for a Select component, managing items, selection, and menu visibility.
 pub struct SelectState<V: 'static, I: SelectItem<Value = V> + 'static> {
     pub(crate) items: Entity<SelectItemsMap<V, I>>,
     pub(crate) selected_item: Entity<Option<SharedString>>,
     pub(crate) highlighted_item: Entity<Option<SharedString>>,
+    /// Animated transition for menu visibility.
     pub menu_visible_transition: Transition<BoolLerp<f32>>,
     pub(crate) on_item_click: OnItemClickFn<V, I>,
     /// Weak focus handles from all Select components using this state.
@@ -31,6 +36,7 @@ pub struct SelectState<V: 'static, I: SelectItem<Value = V> + 'static> {
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
+    /// Creates state from pre-existing entities, useful for tests or manual setup.
     pub fn new(
         cx: &mut App,
         items: Entity<SelectItemsMap<V, I>>,
@@ -54,6 +60,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         state
     }
 
+    /// Creates state using window-keyed storage, persisting across renders.
     pub fn from_window(
         id: impl Into<ElementId>,
         window: &mut Window,
@@ -97,6 +104,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         state
     }
 
+    /// Creates state from an App context with the given initial items.
     pub fn from_cx(cx: &mut App, items: SelectItemsMap<V, I>) -> Self {
         let state = Self {
             items: cx.new(|_cx| items),
@@ -116,6 +124,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         state
     }
 
+    /// Sets a custom callback for when items are clicked.
     pub fn on_item_click(
         &mut self,
         on_item_click: impl Fn(bool, Arc<SelectState<V, I>>, SharedString, &mut Window, &mut App)
@@ -171,6 +180,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
             .any(|handle| handle.contains_focused(window, cx))
     }
 
+    /// Adds an item to the select's item list.
     pub fn push_item(&self, cx: &mut App, item: impl Into<I>) {
         self.items.update(cx, |this, cx| {
             this.push_item(cx, item);
@@ -178,6 +188,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         });
     }
 
+    /// Selects an item by name, returning an error if the item doesn't exist.
     pub fn select_item<'a>(
         &'a self,
         cx: &'a mut App,
@@ -203,6 +214,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         Ok(())
     }
 
+    /// Clears the current selection.
     pub fn remove_selection(&self, cx: &mut App) {
         self.selected_item.update(cx, |this, cx| {
             if this == &None {
@@ -214,6 +226,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         });
     }
 
+    /// Toggles the dropdown menu visibility.
     pub fn toggle_menu(&self, cx: &mut App) {
         self.menu_visible_transition.update(cx, |this, cx| {
             *this = this.toggle();
@@ -221,6 +234,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         });
     }
 
+    /// Hides the dropdown menu.
     pub fn hide_menu(&self, cx: &mut App) {
         self.menu_visible_transition.update(cx, |this, cx| {
             if this.value() == 0. {
@@ -232,6 +246,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         });
     }
 
+    /// Shows the dropdown menu.
     pub fn show_menu(&self, cx: &mut App) {
         self.menu_visible_transition.update(cx, |this, cx| {
             if this.value() == 1. {
@@ -243,6 +258,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         });
     }
 
+    /// Moves the highlight to the previous item, wrapping to the last item if at the beginning.
     pub fn move_highlight_up(&self, window: &mut Window, cx: &mut App) {
         let items = self.items.read(cx);
         if items.is_empty() {
@@ -278,6 +294,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         }
     }
 
+    /// Moves the highlight to the next item, wrapping to the first item if at the end.
     pub fn move_highlight_down(&self, window: &mut Window, cx: &mut App) {
         let items = self.items.read(cx);
         if items.is_empty() {
@@ -314,6 +331,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         }
     }
 
+    /// Confirms the currently highlighted item as the selection.
     pub fn confirm_highlight(self: &Arc<Self>, window: &mut Window, cx: &mut App) {
         let highlighted = self.highlighted_item.read(cx).clone();
         if let Some(item_name) = highlighted {
@@ -322,6 +340,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         }
     }
 
+    /// Sets the highlight to match the current selection.
     pub fn sync_highlight_to_selection(&self, cx: &mut App) {
         let items = self.items.read(cx);
         let selected = self.selected_item.read(cx).clone();
@@ -337,6 +356,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         });
     }
 
+    /// Sets the highlight to the item that currently has focus.
     pub fn sync_highlight_to_focused(&self, cx: &mut App, focus_handle: &FocusHandle) {
         let items = self.items.read(cx);
 
@@ -359,6 +379,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
     }
 }
 
+/// Registers key bindings for select menu navigation.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", MoveUp, Some("SelectMenu")),
@@ -367,57 +388,71 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
+/// An ordered map of select items that preserves insertion order.
 pub struct SelectItemsMap<V: 'static, I: SelectItem<Value = V> + 'static>(
     IndexMap<SharedString, SelectItemEntry<I>>,
 );
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectItemsMap<V, I> {
+    /// Creates an empty items map.
     pub fn new() -> Self {
         Self(IndexMap::new())
     }
 
+    /// Adds an item to the map.
     pub fn push_item(&mut self, cx: &mut App, item: impl Into<I>) {
         let entry = SelectItemEntry::new(item.into(), cx);
         self.0.insert(entry.item.name(), entry);
     }
 
+    /// Gets an item by name.
     pub fn get(&self, item_name: &SharedString) -> Option<&SelectItemEntry<I>> {
         self.0.get(item_name)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&SharedString, &SelectItemEntry<I>)> {
-        self.0.iter()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
+    /// Returns the index of an item by name.
     pub fn get_index_of(&self, item_name: &SharedString) -> Option<usize> {
         self.0.get_index_of(item_name)
     }
 
+    /// Gets an item by index.
     pub fn get_index(&self, index: usize) -> Option<(&SharedString, &SelectItemEntry<I>)> {
         self.0.get_index(index)
     }
 
+    /// Returns the first item.
     pub fn first(&self) -> Option<(&SharedString, &SelectItemEntry<I>)> {
         self.0.first()
     }
 
+    /// Returns the last item.
     pub fn last(&self) -> Option<(&SharedString, &SelectItemEntry<I>)> {
         self.0.last()
     }
+
+    /// Returns the number of items.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns true if the map contains no items.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Iterates over all items in insertion order.
+    pub fn iter(&self) -> impl Iterator<Item = (&SharedString, &SelectItemEntry<I>)> {
+        self.0.iter()
+    }
 }
 
+/// Errors that can occur when manipulating select state.
 #[derive(Error, Debug)]
 pub enum SelectItemError {
+    /// The specified item name does not exist in the items map.
     #[error("An item with this name doesn't exist.")]
     InvalidName,
+    /// The maximum number of selections has been reached.
     #[error("The allowed amount of selected items has been reached.")]
     LimitReached,
 }

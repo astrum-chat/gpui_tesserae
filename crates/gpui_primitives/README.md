@@ -91,13 +91,11 @@ Transforms the *actual stored value* whenever text changes. Useful for enforcing
 Input::new("code", state)
     .map_text(|text| text.to_uppercase().into())
 
-// User types "abc" -> stored and displayed as "ABC".
-
-// Strip whitespace
+// Strips whitespace.
 Input::new("username", state)
     .map_text(|text| text.replace(" ", "").into())
 ```
 
-**Key difference**: `transform_text` is purely visual (the original value is preserved), while `map_text` actually changes what gets stored.
+**Key difference**: `transform_text` is purely visual (the original value is preserved), while `map_text` changes the underlying text value.
 
 </details>

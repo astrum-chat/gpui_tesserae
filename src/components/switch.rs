@@ -19,6 +19,7 @@ use crate::{
     utils::{RgbaExt, SquircleExt, checked_transition, disabled_transition},
 };
 
+/// A toggle switch component with animated sliding indicator.
 #[derive(IntoElement)]
 pub struct Switch {
     id: ElementId,
@@ -33,6 +34,7 @@ pub struct Switch {
 }
 
 impl Switch {
+    /// Creates a new switch with the given element ID.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -47,31 +49,37 @@ impl Switch {
         }
     }
 
+    /// Sets the focus handle for keyboard navigation.
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.focus_handle = Some(focus_handle);
         self
     }
 
+    /// Sets the background layer for theming depth.
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
         self.layer = layer;
         self
     }
 
+    /// Sets the checked state.
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
         self
     }
 
+    /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
+    /// Forces the hover visual state regardless of actual hover.
     pub fn force_hover(mut self, force_hover: bool) -> Self {
         self.force_hover = force_hover;
         self
     }
 
+    /// Sets a callback invoked when hover state changes.
     pub fn on_hover(
         mut self,
         on_hover: impl Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static,
@@ -328,6 +336,7 @@ impl RenderOnce for Switch {
     }
 }
 
+/// Linearly remaps a value from one range to another.
 pub fn remap(value: f32, from_min: f32, from_max: f32, to_min: f32, to_max: f32) -> f32 {
     (value - from_min) / (from_max - from_min) * (to_max - to_min) + to_min
 }

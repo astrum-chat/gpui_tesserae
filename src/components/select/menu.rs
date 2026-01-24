@@ -33,6 +33,7 @@ impl Default for SelectMenuStyles {
     }
 }
 
+/// The dropdown menu portion of a Select component, rendered as a deferred overlay.
 #[derive(IntoElement)]
 pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
     id: ElementId,
@@ -44,6 +45,7 @@ pub struct SelectMenu<V: 'static, I: SelectItem<Value = V> + 'static> {
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
+    /// Creates a new select menu with the given ID and shared state.
     pub fn new(id: impl Into<ElementId>, state: impl Into<Arc<SelectState<V, I>>>) -> Self {
         Self {
             id: id.into(),
@@ -55,26 +57,31 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectMenu<V, I> {
         }
     }
 
+    /// Sets a fixed width.
     pub fn w(mut self, width: impl Into<Length>) -> Self {
         self.style.width = width.into();
         self
     }
 
+    /// Sets width to auto, sizing based on content.
     pub fn w_auto(mut self) -> Self {
         self.style.width = Length::Auto;
         self
     }
 
+    /// Sets width to fill the parent container.
     pub fn w_full(mut self) -> Self {
         self.style.width = relative(100.).into();
         self
     }
 
+    /// Sets the background layer for theming depth.
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
         self.layer = layer;
         self
     }
 
+    /// Sets the focus handle used by the parent Select component.
     pub fn focus_handle(mut self, focus_handle: FocusHandle) -> Self {
         self.focus_handle = Some(focus_handle);
         self

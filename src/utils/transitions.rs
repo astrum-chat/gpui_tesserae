@@ -5,6 +5,7 @@ use gpui_transitions::{Transition, WindowUseTransition};
 
 use crate::ElementIdExt;
 
+/// Creates a transition that animates between values based on conditions.
 #[macro_export]
 macro_rules! conitional_transition {
     (
@@ -33,6 +34,7 @@ macro_rules! conitional_transition {
     }};
 }
 
+/// Updates an existing conditional transition with new conditions.
 #[macro_export]
 macro_rules! conitional_transition_update {
     (
@@ -52,6 +54,7 @@ macro_rules! conitional_transition_update {
     }};
 }
 
+/// Internal macro for parsing conditional transition branches.
 #[macro_export]
 macro_rules! conditional_transition_branches {
     // Default branch wasn't last.
@@ -85,6 +88,7 @@ macro_rules! conditional_transition_branches {
     }};
 }
 
+/// Creates a transition for disabled state, animating opacity between 1.0 and 0.45.
 pub fn disabled_transition(
     base_id: impl Into<ElementId>,
     window: &mut Window,
@@ -104,6 +108,7 @@ pub fn disabled_transition(
     .with_easing(ease_out_quint())
 }
 
+/// Creates a transition for checked state, animating between 0.0 and 1.0.
 pub fn checked_transition(
     base_id: impl Into<ElementId>,
     window: &mut Window,

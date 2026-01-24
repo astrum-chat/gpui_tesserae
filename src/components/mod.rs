@@ -16,4 +16,5 @@ pub use input::*;
 mod switch;
 pub use switch::*;
 
+/// Dropdown select component with keyboard navigation and search.
 pub mod select;

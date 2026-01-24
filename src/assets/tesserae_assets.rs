@@ -1,3 +1,5 @@
+#![allow(missing_docs)] // Derive macros generate undocumented methods.
+
 cfg_if::cfg_if!(
     if #[cfg(feature = "assets")] {
         use std::borrow::Cow;
@@ -7,6 +9,7 @@ cfg_if::cfg_if!(
 
         use crate::assets::assets::AssetProvider;
 
+        /// Embedded assets bundled with the tesserae crate.
         #[derive(RustEmbed)]
         #[folder = "assets/"]
         pub struct TesseraeAssets;
@@ -27,12 +30,15 @@ cfg_if::cfg_if!(
 
 use enum_assoc::Assoc;
 
+/// Built-in icon identifiers that map to bundled SVG assets.
 #[derive(Assoc)]
 #[func(pub fn path(&self) -> SharedString)]
 pub enum TesseraeIconKind {
+    /// Checkmark icon for confirmations and selections.
     #[assoc(path = "icons/checkmark.svg".into())]
     Checkmark,
 
+    /// Downward arrow for dropdowns and expand indicators.
     #[assoc(path = "icons/arrow_down.svg".into())]
     ArrowDown,
 }

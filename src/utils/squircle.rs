@@ -3,7 +3,9 @@ use gpui_squircle::{Squircle, SquircleStyled};
 
 use crate::utils::rgb_a;
 
+/// Extension trait for squircle styling.
 pub trait SquircleExt {
+    /// Applies a gradient border highlight effect with the given alpha.
     fn border_highlight(self, alpha: f32) -> Self;
 }
 

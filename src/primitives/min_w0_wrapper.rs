@@ -3,6 +3,11 @@ use smallvec::SmallVec;
 
 use crate::theme::ThemeExt;
 
+/// A wrapper element that sets `min-width: 0` to allow flex children to shrink.
+///
+/// In flexbox layouts, children have an implicit minimum size based on their content.
+/// This wrapper overrides that behavior, allowing text to truncate properly instead
+/// of forcing the container to expand.
 #[derive(IntoElement)]
 pub struct MinW0Wrapper {
     children: SmallVec<[AnyElement; 2]>,
@@ -10,6 +15,7 @@ pub struct MinW0Wrapper {
 }
 
 impl MinW0Wrapper {
+    /// Creates a new wrapper with default theme styling applied.
     pub fn new() -> Self {
         Self {
             children: SmallVec::new(),
@@ -63,6 +69,7 @@ impl Styled for MinW0Wrapper {
     }
 }
 
+/// Creates a new [`MinW0Wrapper`] element.
 pub fn min_w0_wrapper() -> MinW0Wrapper {
     MinW0Wrapper::new()
 }

@@ -5,6 +5,7 @@ use gpui::{
 
 use crate::theme::ThemeExt;
 
+/// An SVG icon component with configurable size, color, and rotation.
 #[derive(IntoElement)]
 pub struct Icon {
     path: SharedString,
@@ -14,6 +15,7 @@ pub struct Icon {
 }
 
 impl Icon {
+    /// Creates a new icon from an SVG asset path.
     pub fn new(path: impl Into<SharedString>) -> Self {
         Self {
             path: path.into(),
@@ -23,6 +25,7 @@ impl Icon {
         }
     }
 
+    /// Sets uniform width and height for the icon.
     pub fn size(mut self, size: impl Into<Length>) -> Self {
         let size = size.into();
         self.size = SizeRefinement {
@@ -32,11 +35,13 @@ impl Icon {
         self
     }
 
+    /// Sets a custom color, overriding the theme's primary text color.
     pub fn color(mut self, color: impl Into<Hsla>) -> Self {
         self.color = Some(color.into());
         self
     }
 
+    /// Applies a rotation transformation to the icon.
     pub fn rotate(mut self, rotate: impl Into<Radians>) -> Self {
         self.rotate = rotate.into();
         self

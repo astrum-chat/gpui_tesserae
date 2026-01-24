@@ -2,6 +2,7 @@ use gpui::App;
 
 use crate::theme::Theme;
 
+/// Extension trait for accessing and modifying the global theme.
 pub trait ThemeExt {
     /// Changes the theme.
     fn set_theme<T: AsRef<Theme>>(&mut self, theme: T);

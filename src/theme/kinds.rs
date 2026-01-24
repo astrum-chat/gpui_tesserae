@@ -1,103 +1,139 @@
+#![allow(missing_docs)] // Derive macros generate undocumented methods.
+
 use enum_assoc::Assoc;
 use gpui::App;
 
 use crate::theme::ThemeExt;
 
-/// An enum containing all of the available text size options.
+/// Text size variants that resolve to theme-defined values.
+///
+/// Use `resolve()` to get the actual `AbsoluteLength` from the current theme.
 #[derive(Assoc)]
 #[func(pub fn resolve(&self, cx: &App) -> gpui::AbsoluteLength)]
 pub enum ThemeTextSizeKind {
+    /// Extra large heading text.
     #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_xl)]
     Xl,
+    /// Large heading text.
     #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_lg)]
     Lg,
+    /// Medium heading text.
     #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_md)]
     Md,
+    /// Small heading text.
     #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.heading_sm)]
     Sm,
+    /// Standard body text.
     #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.body)]
     Body,
+    /// Small caption or label text.
     #[assoc(resolve = cx.get_theme().layout.text.default_font.sizes.caption)]
     Caption,
 }
 
-/// An enum containing all of the available size options.
+/// Component size variants that resolve to theme-defined pixel values.
+///
+/// Each size has a corresponding corner radius for consistent styling.
 #[derive(Assoc)]
 #[func(pub fn resolve(&self, cx: &App) -> gpui::Pixels)]
 #[func(pub fn corner_radii(&self) -> ThemeLayoutCornerRadiiKind)]
 pub enum ThemeLayoutSizeKind {
+    /// Extra large component size.
     #[assoc(resolve = cx.get_theme().layout.size.xl)]
     #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Xl)]
     Xl,
+    /// Large component size.
     #[assoc(resolve = cx.get_theme().layout.size.lg)]
     #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Lg)]
     Lg,
+    /// Medium component size.
     #[assoc(resolve = cx.get_theme().layout.size.md)]
     #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Md)]
     Md,
+    /// Small component size.
     #[assoc(resolve = cx.get_theme().layout.size.sm)]
     #[assoc(corner_radii = ThemeLayoutCornerRadiiKind::Sm)]
     Sm,
 }
 
-/// An enum containing all of the available padding options.
+/// Padding variants that resolve to theme-defined spacing values.
 #[derive(Assoc)]
 #[func(pub fn resolve(&self, cx: &App) -> gpui::Pixels)]
 pub enum ThemeLayoutPaddingKind {
+    /// Extra large padding.
     #[assoc(resolve = cx.get_theme().layout.padding.xl)]
     Xl,
+    /// Large padding.
     #[assoc(resolve = cx.get_theme().layout.padding.lg)]
     Lg,
+    /// Medium padding.
     #[assoc(resolve = cx.get_theme().layout.padding.md)]
     Md,
+    /// Small padding.
     #[assoc(resolve = cx.get_theme().layout.padding.sm)]
     Sm,
 }
 
-/// An enum containing all of the available corner radius options.
+/// Corner radius variants that resolve to theme-defined values.
 #[derive(Assoc)]
 #[func(pub fn resolve(&self, cx: &App) -> gpui::Pixels)]
 pub enum ThemeLayoutCornerRadiiKind {
+    /// Extra large corner radius.
     #[assoc(resolve = cx.get_theme().layout.corner_radii.xl)]
     Xl,
+    /// Large corner radius.
     #[assoc(resolve = cx.get_theme().layout.corner_radii.lg)]
     Lg,
+    /// Medium corner radius.
     #[assoc(resolve = cx.get_theme().layout.corner_radii.md)]
     Md,
+    /// Small corner radius.
     #[assoc(resolve = cx.get_theme().layout.corner_radii.sm)]
     Sm,
 }
 
-/// An enum containing all of the available background color options.
+/// Background color variants from the active theme variant.
 #[derive(Assoc)]
 #[func(pub fn resolve(&self, cx: &App) -> gpui::Rgba)]
 pub enum ThemeBackgroundKind {
+    /// Base background for main surfaces.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.primary)]
     Primary,
+    /// Slightly elevated or grouped content.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.secondary)]
     Secondary,
+    /// Further elevated elements.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.tertiary)]
     Tertiary,
+    /// High emphasis backgrounds.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.quaternary)]
     Quaternary,
+    /// Highest emphasis backgrounds.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.quinary)]
     Quinary,
 }
 
-/// An enum containing all of the available background layers.
+/// Background layers for stacking surfaces with visual hierarchy.
+///
+/// Similar to `ThemeBackgroundKind` but supports `next()` to get the
+/// elevated layer color for nested elements.
 #[derive(Assoc)]
 #[func(pub fn resolve(&self, cx: &App) -> gpui::Rgba)]
 #[func(pub fn next(&self) -> ThemeBackgroundKind)]
 pub enum ThemeLayerKind {
+    /// Base layer for main surfaces.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.primary)]
     #[assoc(next = ThemeBackgroundKind::Secondary)]
     Primary,
+    /// Second layer for grouped content.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.secondary)]
     #[assoc(next = ThemeBackgroundKind::Tertiary)]
     Secondary,
+    /// Third layer for elevated elements.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.tertiary)]
     #[assoc(next = ThemeBackgroundKind::Quaternary)]
     Tertiary,
+    /// Fourth layer for high emphasis.
     #[assoc(resolve = cx.get_theme().variants.active(cx).colors.background.quaternary)]
     #[assoc(next = ThemeBackgroundKind::Quinary)]
     Quaternary,

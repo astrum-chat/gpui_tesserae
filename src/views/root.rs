@@ -58,8 +58,11 @@ impl Ord for ElementIdKey {
 
 /// Represents an overlay with bounds and the element to render.
 pub struct OverlayEntry {
+    /// Unique identifier for this overlay.
     pub id: ElementId,
+    /// Position and size of the overlay within the root.
     pub bounds: Bounds<Length>,
+    /// Factory function that creates the overlay element.
     pub element: Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement + Send + 'static>,
 }
 
@@ -170,6 +173,7 @@ impl Root {
         self.overlays.clear();
     }
 
+    /// Registers a click handler that fires for any click on the root overlay.
     pub fn on_click(
         &mut self,
         on_mouse_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -180,6 +184,7 @@ impl Root {
             .push(Box::new(on_mouse_click));
     }
 
+    /// Registers a mouse down handler that fires for any mouse down on the root overlay.
     pub fn on_any_mouse_down(
         &mut self,
         on_mouse_down: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
@@ -190,6 +195,7 @@ impl Root {
             .push(Box::new(on_mouse_down));
     }
 
+    /// Registers a mouse up handler that fires for any mouse up on the root overlay.
     pub fn on_any_mouse_up(
         &mut self,
         on_mouse_up: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
@@ -200,6 +206,7 @@ impl Root {
             .push(Box::new(on_mouse_up));
     }
 
+    /// Returns whether any mouse event handlers are registered.
     pub fn click_overlay_visible(&self) -> bool {
         !self.mouse_events.is_empty()
     }

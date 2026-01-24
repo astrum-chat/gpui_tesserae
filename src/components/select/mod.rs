@@ -39,6 +39,7 @@ pub use item::{SelectItem, SelectItemEntry};
 mod state;
 pub use state::*;
 
+/// A dropdown select component with keyboard navigation support.
 #[derive(IntoElement)]
 pub struct Select<V: 'static, I: SelectItem<Value = V> + 'static> {
     id: ElementId,
@@ -50,6 +51,7 @@ pub struct Select<V: 'static, I: SelectItem<Value = V> + 'static> {
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
+    /// Creates a new select component with the given ID and shared state.
     pub fn new(id: impl Into<ElementId>, state: impl Into<Arc<SelectState<V, I>>>) -> Self {
         let state = state.into();
 
@@ -63,21 +65,25 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
         }
     }
 
+    /// Sets a fixed width.
     pub fn w(mut self, width: impl Into<Length>) -> Self {
         self.style.width = width.into();
         self
     }
 
+    /// Sets width to auto, sizing based on content.
     pub fn w_auto(mut self) -> Self {
         self.style.width = Length::Auto;
         self
     }
 
+    /// Sets width to fill the parent container.
     pub fn w_full(mut self) -> Self {
         self.style.width = relative(100.).into();
         self
     }
 
+    /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -276,6 +282,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
     }
 }
 
+/// Default click handler that selects or deselects the clicked item and closes the menu.
 pub fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
     checked: bool,
     state: Arc<SelectState<V, I>>,

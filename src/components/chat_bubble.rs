@@ -15,17 +15,25 @@ use crate::{
     utils::PixelsExt,
 };
 
+/// Position of the bubble's anchor point, affecting which corner has reduced radius.
 #[derive(Default)]
 pub enum ChatBubbleAnchor {
+    /// Anchor at bottom-right, typical for sent messages.
     #[default]
     BottomRight,
+    /// Anchor at center-right.
     CenterRight,
+    /// Anchor at top-right.
     TopRight,
+    /// Anchor at bottom-left, typical for received messages.
     BottomLeft,
+    /// Anchor at center-left.
     CenterLeft,
+    /// Anchor at top-left.
     TopLeft,
 }
 
+/// A chat message bubble with configurable anchor position.
 #[derive(IntoElement)]
 pub struct ChatBubble {
     id: ElementId,
@@ -36,6 +44,7 @@ pub struct ChatBubble {
 }
 
 impl ChatBubble {
+    /// Creates a new chat bubble with the given element ID.
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
@@ -46,11 +55,13 @@ impl ChatBubble {
         }
     }
 
+    /// Sets the anchor position, which determines which corner has reduced radius.
     pub fn anchor(mut self, anchor: ChatBubbleAnchor) -> Self {
         self.anchor = anchor;
         self
     }
 
+    /// Sets the focus handle for keyboard navigation.
     pub fn focus_handle(mut self, focus_handle: impl Into<FocusHandle>) -> Self {
         self.focus_handle = Some(focus_handle.into());
         self
