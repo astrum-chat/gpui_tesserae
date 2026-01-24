@@ -71,7 +71,12 @@ pub(crate) fn should_show_trailing_whitespace(
     let starts_at_line_start =
         selection_starts_at_line_start && at_line_end && selected_range.end > line_end_offset;
 
-    standard_trailing || starts_at_line_start
+    // For empty lines (just a newline) that are entirely within the selection
+    let empty_line_in_selection = line_len == 0
+        && selected_range.start <= line_start_offset
+        && selected_range.end > line_end_offset;
+
+    standard_trailing || starts_at_line_start || empty_line_in_selection
 }
 
 #[derive(IntoElement)]
