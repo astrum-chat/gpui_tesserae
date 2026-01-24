@@ -40,6 +40,12 @@ pub type MapTextFn = Arc<dyn Fn(SharedString) -> SharedString + Send + Sync>;
 
 use super::CursorBlink;
 
+/// Returns true if the character is a word character (alphanumeric or underscore).
+/// This matches web browser behavior for double-click word selection.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
 actions!(
     text_input,
     [
@@ -480,7 +486,10 @@ impl InputState {
             self.index_for_mouse_position(event.position)
         };
 
-        if event.modifiers.shift {
+        if event.click_count == 2 {
+            // Double-click: select word
+            self.select_word_at(index, cx);
+        } else if event.modifiers.shift {
             self.select_to(index, cx);
         } else {
             self.move_to(index, cx)
@@ -610,6 +619,17 @@ impl InputState {
             self.selection_reversed = !self.selection_reversed;
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
+        self.reset_cursor_blink(cx);
+        cx.notify()
+    }
+
+    /// Select the word at the given byte offset.
+    /// A word consists of consecutive alphanumeric characters and underscores.
+    pub fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
+        let start = self.word_start(offset);
+        let end = self.word_end(start);
+        self.selected_range = start..end;
+        self.selection_reversed = false;
         self.reset_cursor_blink(cx);
         cx.notify()
     }
@@ -857,6 +877,71 @@ impl InputState {
             .grapheme_indices(true)
             .find_map(|(idx, _)| (idx > offset).then_some(idx))
             .unwrap_or(self.value().len())
+    }
+
+    /// Find the start of the word at the given byte offset.
+    /// A word consists of consecutive alphanumeric characters and underscores.
+    /// If the character at offset is not a word character, returns the start of that grapheme.
+    fn word_start(&self, offset: usize) -> usize {
+        let value = self.value();
+        if value.is_empty() || offset == 0 {
+            return 0;
+        }
+
+        // Collect graphemes up to offset
+        let graphemes: Vec<(usize, &str)> = value
+            .grapheme_indices(true)
+            .take_while(|(i, _)| *i < offset)
+            .collect();
+
+        let Some(&(last_idx, last_grapheme)) = graphemes.last() else {
+            return 0;
+        };
+
+        // Check if the grapheme at cursor is a word char
+        let last_char = last_grapheme.chars().next().unwrap_or(' ');
+        if !is_word_char(last_char) {
+            return last_idx;
+        }
+
+        // Scan backwards to find word start
+        for &(idx, grapheme) in graphemes.iter().rev() {
+            let c = grapheme.chars().next().unwrap_or(' ');
+            if !is_word_char(c) {
+                return idx + grapheme.len();
+            }
+        }
+        0
+    }
+
+    /// Find the end of the word at the given byte offset.
+    /// A word consists of consecutive alphanumeric characters and underscores.
+    /// If the character at offset is not a word character, returns the end of that grapheme.
+    fn word_end(&self, offset: usize) -> usize {
+        let value = self.value();
+        if value.is_empty() || offset >= value.len() {
+            return value.len();
+        }
+
+        // Get grapheme at offset
+        let mut graphemes = value[offset..].grapheme_indices(true);
+        let Some((_, first_grapheme)) = graphemes.next() else {
+            return value.len();
+        };
+
+        let first_char = first_grapheme.chars().next().unwrap_or(' ');
+        if !is_word_char(first_char) {
+            return offset + first_grapheme.len();
+        }
+
+        // Scan forwards to find word end
+        for (i, grapheme) in value[offset..].grapheme_indices(true) {
+            let c = grapheme.chars().next().unwrap_or(' ');
+            if !is_word_char(c) {
+                return offset + i;
+            }
+        }
+        value.len()
     }
 
     // Multi-line helper methods
@@ -1309,5 +1394,167 @@ mod tests {
         assert_eq!(info.end_offset, 10);
         assert_eq!(info.wrapped_line_index, 0);
         assert_eq!(info.visual_index_in_wrapped, 0);
+    }
+
+    // Word boundary tests
+
+    #[test]
+    fn test_is_word_char() {
+        assert!(is_word_char('a'));
+        assert!(is_word_char('Z'));
+        assert!(is_word_char('0'));
+        assert!(is_word_char('9'));
+        assert!(is_word_char('_'));
+        assert!(!is_word_char(' '));
+        assert!(!is_word_char('-'));
+        assert!(!is_word_char('.'));
+        assert!(!is_word_char('!'));
+        assert!(!is_word_char('\n'));
+    }
+
+    /// Test helper for word boundary functions
+    struct TestWordBoundary {
+        value: Option<SharedString>,
+    }
+
+    impl TestWordBoundary {
+        fn new(s: &str) -> Self {
+            Self {
+                value: Some(SharedString::from(s.to_string())),
+            }
+        }
+
+        fn value(&self) -> SharedString {
+            self.value
+                .clone()
+                .unwrap_or_else(|| SharedString::new_static(""))
+        }
+
+        fn word_start(&self, offset: usize) -> usize {
+            let value = self.value();
+            if value.is_empty() || offset == 0 {
+                return 0;
+            }
+
+            let graphemes: Vec<(usize, &str)> = value
+                .grapheme_indices(true)
+                .take_while(|(i, _)| *i < offset)
+                .collect();
+
+            let Some(&(last_idx, last_grapheme)) = graphemes.last() else {
+                return 0;
+            };
+
+            let last_char = last_grapheme.chars().next().unwrap_or(' ');
+            if !is_word_char(last_char) {
+                return last_idx;
+            }
+
+            for &(idx, grapheme) in graphemes.iter().rev() {
+                let c = grapheme.chars().next().unwrap_or(' ');
+                if !is_word_char(c) {
+                    return idx + grapheme.len();
+                }
+            }
+            0
+        }
+
+        fn word_end(&self, offset: usize) -> usize {
+            let value = self.value();
+            if value.is_empty() || offset >= value.len() {
+                return value.len();
+            }
+
+            let mut graphemes = value[offset..].grapheme_indices(true);
+            let Some((_, first_grapheme)) = graphemes.next() else {
+                return value.len();
+            };
+
+            let first_char = first_grapheme.chars().next().unwrap_or(' ');
+            if !is_word_char(first_char) {
+                return offset + first_grapheme.len();
+            }
+
+            for (i, grapheme) in value[offset..].grapheme_indices(true) {
+                let c = grapheme.chars().next().unwrap_or(' ');
+                if !is_word_char(c) {
+                    return offset + i;
+                }
+            }
+            value.len()
+        }
+    }
+
+    #[test]
+    fn test_word_start_simple() {
+        let state = TestWordBoundary::new("hello world");
+        // "hello world"
+        //  01234567890
+        assert_eq!(state.word_start(0), 0); // at start
+        assert_eq!(state.word_start(3), 0); // middle of "hello"
+        assert_eq!(state.word_start(5), 0); // end of "hello"
+        assert_eq!(state.word_start(6), 5); // on space
+        assert_eq!(state.word_start(7), 6); // start of "world"
+        assert_eq!(state.word_start(9), 6); // middle of "world"
+    }
+
+    #[test]
+    fn test_word_end_simple() {
+        let state = TestWordBoundary::new("hello world");
+        // "hello world"
+        //  01234567890
+        assert_eq!(state.word_end(0), 5); // start of "hello"
+        assert_eq!(state.word_end(3), 5); // middle of "hello"
+        assert_eq!(state.word_end(5), 6); // on space
+        assert_eq!(state.word_end(6), 11); // start of "world"
+        assert_eq!(state.word_end(11), 11); // at end
+    }
+
+    #[test]
+    fn test_word_boundaries_with_underscore() {
+        let state = TestWordBoundary::new("hello_world");
+        // "hello_world"
+        //  01234567890
+        // Underscore should be part of word
+        assert_eq!(state.word_start(6), 0); // after underscore, whole thing is one word
+        assert_eq!(state.word_end(0), 11); // whole thing is one word
+    }
+
+    #[test]
+    fn test_word_boundaries_with_hyphen() {
+        let state = TestWordBoundary::new("foo-bar");
+        // "foo-bar"
+        //  0123456
+        // Hyphen is NOT a word char, so "foo" and "bar" are separate words
+        assert_eq!(state.word_start(2), 0); // in "foo"
+        assert_eq!(state.word_end(0), 3); // "foo" ends at 3
+        assert_eq!(state.word_start(4), 3); // on hyphen
+        assert_eq!(state.word_end(3), 4); // hyphen ends at 4
+        assert_eq!(state.word_start(5), 4); // in "bar"
+        assert_eq!(state.word_end(4), 7); // "bar" ends at 7
+    }
+
+    #[test]
+    fn test_word_boundaries_with_numbers() {
+        let state = TestWordBoundary::new("test123");
+        // Numbers are word chars
+        assert_eq!(state.word_start(5), 0);
+        assert_eq!(state.word_end(0), 7);
+    }
+
+    #[test]
+    fn test_word_boundaries_empty() {
+        let state = TestWordBoundary::new("");
+        assert_eq!(state.word_start(0), 0);
+        assert_eq!(state.word_end(0), 0);
+    }
+
+    #[test]
+    fn test_word_boundaries_punctuation_only() {
+        let state = TestWordBoundary::new("...");
+        // Each dot should be its own "word"
+        assert_eq!(state.word_start(1), 0);
+        assert_eq!(state.word_end(0), 1);
+        assert_eq!(state.word_end(1), 2);
     }
 }
