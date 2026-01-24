@@ -181,6 +181,13 @@ impl Input {
         self
     }
 
+    /// Set the maximum number of undo/redo history entries to keep.
+    /// Defaults to 200.
+    pub fn max_history(mut self, cx: &mut App, max: usize) -> Self {
+        self.base = self.base.max_history(cx, max);
+        self
+    }
+
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.base.read_text(cx)
     }

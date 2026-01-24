@@ -17,9 +17,12 @@ pub mod text_transforms;
 
 pub use cursor_blink::CursorBlink;
 pub use state::{
-    Backspace, Copy, Cut, Delete, Down, End, Home, InputState, InsertNewline, InsertNewlineShift,
-    Left, MapTextFn, Paste, Quit, Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectUp,
-    ShowCharacterPalette, Up, VisibleLineInfo, VisualLineInfo,
+    Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,
+    DeleteToPreviousWordStart, Down, End, Home, InputState, InsertNewline, InsertNewlineShift,
+    Left, MapTextFn, MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord, MoveToStart,
+    MoveToStartOfLine, Paste, Quit, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight,
+    SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart,
+    SelectToStartOfLine, SelectUp, ShowCharacterPalette, Undo, Up, VisibleLineInfo, VisualLineInfo,
 };
 
 use crate::utils::rgb_a;
@@ -152,6 +155,15 @@ impl Input {
         self
     }
 
+    /// Set the maximum number of undo/redo history entries to keep.
+    /// Defaults to 200.
+    pub fn max_history(self, cx: &mut App, max: usize) -> Self {
+        self.state.update(cx, |state, _| {
+            state.set_max_history(max);
+        });
+        self
+    }
+
     pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
         self.placeholder_text_color = Some(color.into());
         self
@@ -240,19 +252,47 @@ impl RenderOnce for Input {
             } else {
                 CursorStyle::IBeam
             })
+            // Basic navigation (universal)
             .on_action(window.listener_for(&self.state, InputState::backspace))
             .on_action(window.listener_for(&self.state, InputState::delete))
             .on_action(window.listener_for(&self.state, InputState::left))
             .on_action(window.listener_for(&self.state, InputState::right))
-            .on_action(window.listener_for(&self.state, InputState::select_left))
-            .on_action(window.listener_for(&self.state, InputState::select_right))
-            .on_action(window.listener_for(&self.state, InputState::select_all))
             .on_action(window.listener_for(&self.state, InputState::home))
             .on_action(window.listener_for(&self.state, InputState::end))
-            .on_action(window.listener_for(&self.state, InputState::show_character_palette))
-            .on_action(window.listener_for(&self.state, InputState::paste))
-            .on_action(window.listener_for(&self.state, InputState::cut))
+            // Basic selection (universal)
+            .on_action(window.listener_for(&self.state, InputState::select_left))
+            .on_action(window.listener_for(&self.state, InputState::select_right))
+            .on_action(window.listener_for(&self.state, InputState::select_to_start_of_line))
+            .on_action(window.listener_for(&self.state, InputState::select_to_end_of_line))
+            // Clipboard & Undo
+            .on_action(window.listener_for(&self.state, InputState::select_all))
             .on_action(window.listener_for(&self.state, InputState::copy))
+            .on_action(window.listener_for(&self.state, InputState::cut))
+            .on_action(window.listener_for(&self.state, InputState::paste))
+            .on_action(window.listener_for(&self.state, InputState::undo))
+            .on_action(window.listener_for(&self.state, InputState::redo))
+            // Word navigation
+            .on_action(window.listener_for(&self.state, InputState::move_to_previous_word))
+            .on_action(window.listener_for(&self.state, InputState::move_to_next_word))
+            .on_action(window.listener_for(&self.state, InputState::select_to_previous_word_start))
+            .on_action(window.listener_for(&self.state, InputState::select_to_next_word_end))
+            // Word deletion
+            .on_action(window.listener_for(&self.state, InputState::delete_to_previous_word_start))
+            .on_action(window.listener_for(&self.state, InputState::delete_to_next_word_end))
+            // Line navigation
+            .on_action(window.listener_for(&self.state, InputState::move_to_start_of_line))
+            .on_action(window.listener_for(&self.state, InputState::move_to_end_of_line))
+            // Document navigation
+            .on_action(window.listener_for(&self.state, InputState::move_to_start))
+            .on_action(window.listener_for(&self.state, InputState::move_to_end))
+            .on_action(window.listener_for(&self.state, InputState::select_to_start))
+            .on_action(window.listener_for(&self.state, InputState::select_to_end))
+            // Line deletion
+            .on_action(window.listener_for(&self.state, InputState::delete_to_beginning_of_line))
+            .on_action(window.listener_for(&self.state, InputState::delete_to_end_of_line))
+            // Character palette (macOS only)
+            .on_action(window.listener_for(&self.state, InputState::show_character_palette))
+            // Multiline-only actions
             .when(is_multiline, |this| {
                 this.on_action(window.listener_for(&self.state, InputState::up))
                     .on_action(window.listener_for(&self.state, InputState::down))
@@ -454,25 +494,109 @@ impl RenderOnce for Input {
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
+        // Basic navigation (universal)
         KeyBinding::new("backspace", Backspace, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("left", Left, None),
         KeyBinding::new("right", Right, None),
         KeyBinding::new("up", Up, None),
         KeyBinding::new("down", Down, None),
+        KeyBinding::new("home", Home, None),
+        KeyBinding::new("end", End, None),
+        KeyBinding::new("enter", InsertNewline, None),
+        KeyBinding::new("shift-enter", InsertNewlineShift, None),
+        // Basic selection (universal)
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-up", SelectUp, None),
         KeyBinding::new("shift-down", SelectDown, None),
+        KeyBinding::new("shift-home", SelectToStartOfLine, None),
+        KeyBinding::new("shift-end", SelectToEndOfLine, None),
+        // Clipboard & Undo (macOS: cmd, other: ctrl)
+        #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-a", SelectAll, None),
-        KeyBinding::new("cmd-v", Paste, None),
+        #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-c", Copy, None),
+        #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-x", Cut, None),
-        KeyBinding::new("home", Home, None),
-        KeyBinding::new("end", End, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-v", Paste, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-z", Undo, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-shift-z", Redo, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-a", SelectAll, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-c", Copy, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-x", Cut, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-v", Paste, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-z", Undo, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-y", Redo, None),
+        // Word navigation (macOS: alt, other: ctrl)
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("alt-left", MoveToPreviousWord, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("alt-right", MoveToNextWord, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("alt-shift-left", SelectToPreviousWordStart, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("alt-shift-right", SelectToNextWordEnd, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-left", MoveToPreviousWord, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-right", MoveToNextWord, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-shift-left", SelectToPreviousWordStart, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-shift-right", SelectToNextWordEnd, None),
+        // Word deletion (macOS: alt, other: ctrl)
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("alt-backspace", DeleteToPreviousWordStart, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("alt-delete", DeleteToNextWordEnd, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-backspace", DeleteToPreviousWordStart, None),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-delete", DeleteToNextWordEnd, None),
+        // Line navigation (macOS only)
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-left", MoveToStartOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-right", MoveToEndOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-a", MoveToStartOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-e", MoveToEndOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-shift-left", SelectToStartOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-shift-right", SelectToEndOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-shift-a", SelectToStartOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("ctrl-shift-e", SelectToEndOfLine, None),
+        // Document navigation (macOS only)
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-up", MoveToStart, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-down", MoveToEnd, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-shift-up", SelectToStart, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-shift-down", SelectToEnd, None),
+        // Line deletion (macOS only)
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-backspace", DeleteToBeginningOfLine, None),
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-delete", DeleteToEndOfLine, None),
+        // Character palette (macOS only)
+        #[cfg(target_os = "macos")]
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, None),
-        KeyBinding::new("enter", InsertNewline, None),
-        KeyBinding::new("shift-enter", InsertNewlineShift, None),
     ]);
 
     cx.on_keyboard_layout_change(move |cx| {

@@ -41,6 +41,14 @@ pub type MapTextFn = Arc<dyn Fn(SharedString) -> SharedString + Send + Sync>;
 
 use super::CursorBlink;
 
+/// Entry in the undo/redo history stack.
+#[derive(Clone)]
+struct UndoEntry {
+    text: SharedString,
+    selected_range: Range<usize>,
+    selection_reversed: bool,
+}
+
 actions!(
     text_input,
     [
@@ -64,6 +72,29 @@ actions!(
         InsertNewline,
         InsertNewlineShift,
         Quit,
+        Undo,
+        Redo,
+        // Word navigation
+        MoveToPreviousWord,
+        MoveToNextWord,
+        SelectToPreviousWordStart,
+        SelectToNextWordEnd,
+        // Line navigation
+        MoveToStartOfLine,
+        MoveToEndOfLine,
+        SelectToStartOfLine,
+        SelectToEndOfLine,
+        // Document navigation
+        MoveToStart,
+        MoveToEnd,
+        SelectToStart,
+        SelectToEnd,
+        // Word deletion
+        DeleteToPreviousWordStart,
+        DeleteToNextWordEnd,
+        // Line deletion
+        DeleteToBeginningOfLine,
+        DeleteToEndOfLine,
     ]
 );
 
@@ -113,6 +144,13 @@ pub struct InputState {
     pub(crate) last_text_width: Pixels,
     /// When true, skip auto-scroll to cursor (user is manually scrolling)
     pub(crate) is_manually_scrolling: bool,
+
+    /// Undo history stack
+    undo_stack: Vec<UndoEntry>,
+    /// Redo history stack
+    redo_stack: Vec<UndoEntry>,
+    /// Maximum number of undo/redo entries to keep
+    max_history: usize,
 }
 
 impl InputState {
@@ -145,6 +183,21 @@ impl InputState {
             horizontal_scroll_offset: Pixels::ZERO,
             last_text_width: Pixels::ZERO,
             is_manually_scrolling: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_history: 200,
+        }
+    }
+
+    /// Set the maximum number of undo/redo entries to keep.
+    pub fn set_max_history(&mut self, max: usize) {
+        self.max_history = max;
+        // Trim existing stacks if they exceed the new limit
+        if self.undo_stack.len() > max {
+            self.undo_stack.drain(0..self.undo_stack.len() - max);
+        }
+        if self.redo_stack.len() > max {
+            self.redo_stack.drain(0..self.redo_stack.len() - max);
         }
     }
 
@@ -490,6 +543,190 @@ impl InputState {
         self.move_to(self.value().len(), cx);
     }
 
+    // Word navigation
+
+    pub fn move_to_previous_word(
+        &mut self,
+        _: &MoveToPreviousWord,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            let offset = self.cursor_offset();
+            // Move to previous boundary first (to get past current position)
+            let prev = self.previous_boundary(offset);
+            // Then find word start from there
+            let target = self.word_start(prev);
+            self.move_to(target, cx);
+        } else {
+            self.move_to(self.selected_range.start, cx);
+        }
+    }
+
+    pub fn move_to_next_word(
+        &mut self,
+        _: &MoveToNextWord,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            let offset = self.cursor_offset();
+            // Find word end from current position
+            let target = self.word_end(offset);
+            self.move_to(target, cx);
+        } else {
+            self.move_to(self.selected_range.end, cx);
+        }
+    }
+
+    pub fn select_to_previous_word_start(
+        &mut self,
+        _: &SelectToPreviousWordStart,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let offset = self.cursor_offset();
+        let prev = self.previous_boundary(offset);
+        let target = self.word_start(prev);
+        self.select_to(target, cx);
+    }
+
+    pub fn select_to_next_word_end(
+        &mut self,
+        _: &SelectToNextWordEnd,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let offset = self.cursor_offset();
+        let target = self.word_end(offset);
+        self.select_to(target, cx);
+    }
+
+    // Line navigation
+
+    pub fn move_to_start_of_line(
+        &mut self,
+        _: &MoveToStartOfLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (line, _) = self.offset_to_line_col(self.cursor_offset());
+        let target = self.line_start_offset(line);
+        self.move_to(target, cx);
+    }
+
+    pub fn move_to_end_of_line(
+        &mut self,
+        _: &MoveToEndOfLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (line, _) = self.offset_to_line_col(self.cursor_offset());
+        let target = self.line_end_offset(line);
+        self.move_to(target, cx);
+    }
+
+    pub fn select_to_start_of_line(
+        &mut self,
+        _: &SelectToStartOfLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (line, _) = self.offset_to_line_col(self.cursor_offset());
+        let target = self.line_start_offset(line);
+        self.select_to(target, cx);
+    }
+
+    pub fn select_to_end_of_line(
+        &mut self,
+        _: &SelectToEndOfLine,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (line, _) = self.offset_to_line_col(self.cursor_offset());
+        let target = self.line_end_offset(line);
+        self.select_to(target, cx);
+    }
+
+    // Document navigation
+
+    pub fn move_to_start(&mut self, _: &MoveToStart, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(0, cx);
+    }
+
+    pub fn move_to_end(&mut self, _: &MoveToEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.value().len(), cx);
+    }
+
+    pub fn select_to_start(&mut self, _: &SelectToStart, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(0, cx);
+    }
+
+    pub fn select_to_end(&mut self, _: &SelectToEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.select_to(self.value().len(), cx);
+    }
+
+    // Word deletion
+
+    pub fn delete_to_previous_word_start(
+        &mut self,
+        _: &DeleteToPreviousWordStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            let offset = self.cursor_offset();
+            let prev = self.previous_boundary(offset);
+            let target = self.word_start(prev);
+            self.select_to(target, cx);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
+    pub fn delete_to_next_word_end(
+        &mut self,
+        _: &DeleteToNextWordEnd,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            let offset = self.cursor_offset();
+            let target = self.word_end(offset);
+            self.select_to(target, cx);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
+    // Line deletion
+
+    pub fn delete_to_beginning_of_line(
+        &mut self,
+        _: &DeleteToBeginningOfLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            let (line, _) = self.offset_to_line_col(self.cursor_offset());
+            let target = self.line_start_offset(line);
+            self.select_to(target, cx);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
+    pub fn delete_to_end_of_line(
+        &mut self,
+        _: &DeleteToEndOfLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.selected_range.is_empty() {
+            let (line, _) = self.offset_to_line_col(self.cursor_offset());
+            let target = self.line_end_offset(line);
+            self.select_to(target, cx);
+        }
+        self.replace_text_in_range(None, "", window, cx);
+    }
+
     pub fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx)
@@ -585,6 +822,75 @@ impl InputState {
             ));
 
             self.replace_text_in_range(None, "", window, cx)
+        }
+    }
+
+    /// Push current state onto the undo stack before making a change.
+    fn push_undo(&mut self) {
+        // Remove oldest entry if at capacity
+        if self.undo_stack.len() >= self.max_history {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(UndoEntry {
+            text: self.value(),
+            selected_range: self.selected_range.clone(),
+            selection_reversed: self.selection_reversed,
+        });
+        // Clear redo stack when a new edit is made
+        self.redo_stack.clear();
+    }
+
+    pub fn undo(&mut self, _: &Undo, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(entry) = self.undo_stack.pop() {
+            // Save current state to redo stack
+            self.redo_stack.push(UndoEntry {
+                text: self.value(),
+                selected_range: self.selected_range.clone(),
+                selection_reversed: self.selection_reversed,
+            });
+
+            // Restore previous state
+            self.value = Some(entry.text);
+            self.selected_range = entry.selected_range;
+            self.selection_reversed = entry.selection_reversed;
+
+            // Clear layout caches and notify
+            self.precomputed_visual_lines.clear();
+            self.reset_manual_scroll();
+            if self.is_wrapped {
+                self.scroll_to_cursor_on_next_render = true;
+            } else {
+                self.ensure_cursor_visible();
+            }
+            self.reset_cursor_blink(cx);
+            cx.notify();
+        }
+    }
+
+    pub fn redo(&mut self, _: &Redo, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(entry) = self.redo_stack.pop() {
+            // Save current state to undo stack
+            self.undo_stack.push(UndoEntry {
+                text: self.value(),
+                selected_range: self.selected_range.clone(),
+                selection_reversed: self.selection_reversed,
+            });
+
+            // Restore redo state
+            self.value = Some(entry.text);
+            self.selected_range = entry.selected_range;
+            self.selection_reversed = entry.selection_reversed;
+
+            // Clear layout caches and notify
+            self.precomputed_visual_lines.clear();
+            self.reset_manual_scroll();
+            if self.is_wrapped {
+                self.scroll_to_cursor_on_next_render = true;
+            } else {
+                self.ensure_cursor_visible();
+            }
+            self.reset_cursor_blink(cx);
+            cx.notify();
         }
     }
 
@@ -696,6 +1002,9 @@ impl EntityInputHandler for InputState {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Save current state for undo before making changes
+        self.push_undo();
+
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
@@ -742,6 +1051,9 @@ impl EntityInputHandler for InputState {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Save current state for undo before making changes
+        self.push_undo();
+
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
