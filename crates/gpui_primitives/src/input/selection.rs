@@ -4,6 +4,7 @@ use super::state::InputState;
 use super::text_navigation::TextNavigation;
 
 impl InputState {
+    /// Converts a mouse position to a text offset for single-line inputs.
     pub fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
         if self.value().is_empty() {
             return 0;
@@ -57,14 +58,17 @@ impl InputState {
         cx.notify()
     }
 
+    /// Extends the selection to the given offset, scrolling to keep the cursor visible.
     pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.select_to_inner(offset, true, cx)
     }
 
+    /// Extends the selection to the given offset without scrolling.
     pub fn select_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.select_to_inner(offset, false, cx)
     }
 
+    /// Selects the word at the given offset (used for double-click selection).
     pub fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
         let start = self.word_start(offset);
         let end = self.word_end(start);
@@ -74,6 +78,7 @@ impl InputState {
         cx.notify()
     }
 
+    /// Extends selection to a position in multiline mode, auto-scrolling when dragging past edges.
     pub fn select_to_multiline(
         &mut self,
         position: Point<Pixels>,
@@ -118,6 +123,7 @@ impl InputState {
         }
     }
 
+    /// Converts a mouse position to a text offset for multiline inputs, handling wrapped and non-wrapped modes.
     pub fn index_for_multiline_position(
         &self,
         position: Point<Pixels>,
@@ -259,6 +265,7 @@ impl InputState {
         self.line_start_offset(clamped_line)
     }
 
+    /// Handles mouse down: starts selection, supports click/double-click/triple-click and shift-extend.
     pub fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -289,6 +296,7 @@ impl InputState {
         }
     }
 
+    /// Handles mouse up: ends the current selection drag.
     pub fn on_mouse_up(
         &mut self,
         _: &MouseUpEvent,
@@ -298,6 +306,7 @@ impl InputState {
         self.is_selecting = false;
     }
 
+    /// Handles mouse move: extends selection while dragging.
     pub fn on_mouse_move(
         &mut self,
         event: &MouseMoveEvent,

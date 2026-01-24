@@ -115,21 +115,25 @@ impl Input {
         self
     }
 
+    /// Sets the color for placeholder text.
     pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
         self.base = self.base.placeholder_text_color(color);
         self
     }
 
+    /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.base = self.base.selection_color(color);
         self
     }
 
+    /// Sets the placeholder text shown when input is empty.
     pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
         self.base = self.base.placeholder(text);
         self
     }
 
+    /// Transforms each character for display without modifying the stored value. Useful for password fields.
     pub fn transform_text(
         mut self,
         transform: impl Fn(char) -> char + Send + Sync + 'static,
@@ -150,9 +154,7 @@ impl Input {
         self
     }
 
-    /// Sets the maximum number of visible lines before scrolling.
-    /// - `line_clamp == 1` (default): single-line input
-    /// - `line_clamp > 1`: multi-line input using uniform_list for efficient rendering
+    /// Sets the maximum number of visible lines before scrolling. Use `multiline()` for unlimited.
     pub fn line_clamp(mut self, line_clamp: usize) -> Self {
         self.base = self.base.line_clamp(line_clamp);
         self
@@ -165,9 +167,7 @@ impl Input {
         self
     }
 
-    /// Enables word wrapping for multi-line input.
-    /// Text will wrap at word boundaries when it exceeds the input width.
-    /// Only effective when `line_clamp > 1`.
+    /// Enables or disables word wrapping. Sets `line_clamp` to 1 if currently 0.
     pub fn word_wrap(mut self, enabled: bool) -> Self {
         self.base = self.base.word_wrap(enabled);
         self

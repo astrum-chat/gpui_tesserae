@@ -54,6 +54,7 @@ Input::new("input", state)
 // With word wrapping enabled.
 Input::new("input", state)
     .multiline()
+    // Word wrapping only works with multiline.
     .word_wrap(true)
 
 // Shift+Enter for newlines (useful for form inputs where Enter submits).

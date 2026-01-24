@@ -2,24 +2,23 @@ use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, Font, Hsla, IntoElement, Pixels, Render, ScrollStrategy, ScrollWheelEvent,
     ShapedLine, SharedString, TextRun, UTF16Selection, UniformListScrollHandle, Window,
-    WrappedLine, actions, div, point, px,
+    WrappedLine, div, point, px,
 };
 use std::ops::Range;
 use std::sync::Arc;
 
 use super::text_navigation::TextNavigation;
 
-/// Information about a visual line in wrapped text.
-/// Maps visual lines (what the user sees) to byte offsets in the text.
+/// Maps visual line indices to byte ranges in the source text. Used by wrapped mode to translate between screen position and text offset.
 #[derive(Clone, Debug)]
 pub struct VisualLineInfo {
-    /// Byte offset where this visual line starts in the full text
+    /// Byte offset in the full text where this visual line starts.
     pub start_offset: usize,
-    /// Byte offset where this visual line ends in the full text
+    /// Byte offset in the full text where this visual line ends (exclusive).
     pub end_offset: usize,
-    /// The wrapped line this belongs to (index into WrappedLine vec)
+    /// Index into the `WrappedLine` vec this segment belongs to.
     pub wrapped_line_index: usize,
-    /// The visual line index within the wrapped line (for multi-wrap scenarios)
+    /// Which visual segment within the wrapped line (0 for first, increments at each wrap boundary).
     pub visual_index_in_wrapped: usize,
 }
 
@@ -49,64 +48,75 @@ struct UndoEntry {
     selection_reversed: bool,
 }
 
-actions!(
-    text_input,
-    [
-        Backspace,
-        Delete,
-        Left,
-        Right,
-        Up,
-        Down,
-        SelectLeft,
-        SelectRight,
-        SelectUp,
-        SelectDown,
-        SelectAll,
-        Home,
-        End,
-        ShowCharacterPalette,
-        Paste,
-        Cut,
-        Copy,
-        InsertNewline,
-        InsertNewlineShift,
-        Quit,
-        Undo,
-        Redo,
-        // Word navigation
-        MoveToPreviousWord,
-        MoveToNextWord,
-        SelectToPreviousWordStart,
-        SelectToNextWordEnd,
-        // Line navigation
-        MoveToStartOfLine,
-        MoveToEndOfLine,
-        SelectToStartOfLine,
-        SelectToEndOfLine,
-        // Document navigation
-        MoveToStart,
-        MoveToEnd,
-        SelectToStart,
-        SelectToEnd,
-        // Word deletion
-        DeleteToPreviousWordStart,
-        DeleteToNextWordEnd,
-        // Line deletion
-        DeleteToBeginningOfLine,
-        DeleteToEndOfLine,
-    ]
-);
+mod actions {
+    #![allow(missing_docs)]
+    use gpui::actions;
 
+    actions!(
+        text_input,
+        [
+            Backspace,
+            Delete,
+            Left,
+            Right,
+            Up,
+            Down,
+            SelectLeft,
+            SelectRight,
+            SelectUp,
+            SelectDown,
+            SelectAll,
+            Home,
+            End,
+            ShowCharacterPalette,
+            Paste,
+            Cut,
+            Copy,
+            InsertNewline,
+            InsertNewlineShift,
+            Quit,
+            Undo,
+            Redo,
+            MoveToPreviousWord,
+            MoveToNextWord,
+            SelectToPreviousWordStart,
+            SelectToNextWordEnd,
+            MoveToStartOfLine,
+            MoveToEndOfLine,
+            SelectToStartOfLine,
+            SelectToEndOfLine,
+            MoveToStart,
+            MoveToEnd,
+            SelectToStart,
+            SelectToEnd,
+            DeleteToPreviousWordStart,
+            DeleteToNextWordEnd,
+            DeleteToBeginningOfLine,
+            DeleteToEndOfLine,
+        ]
+    );
+}
+pub use actions::*;
+
+/// Core state for a text input, managing text content, selection, cursor, and IME composition.
 pub struct InputState {
+    /// Handle for keyboard focus management.
     pub focus_handle: FocusHandle,
+    /// The current text value, or None if empty.
     pub value: Option<SharedString>,
+    /// Byte range of the current selection. Empty range means cursor position only.
     pub selected_range: Range<usize>,
+    /// If true, the cursor is at selection start; if false, at selection end.
     pub selection_reversed: bool,
+    /// Byte range of IME composition text (marked text), if any.
     pub marked_range: Option<Range<usize>>,
+    /// Cached shaped line from last render (single-line mode).
     pub last_layout: Option<ShapedLine>,
+    /// Cached bounds from last render.
     pub last_bounds: Option<Bounds<Pixels>>,
+    /// True while the user is dragging to select text.
     pub is_selecting: bool,
+    /// Entity managing cursor blink animation.
     pub cursor_blink: Entity<CursorBlink>,
     was_focused: bool,
     /// Whether the input is in multiline mode (set during render)
@@ -154,6 +164,7 @@ pub struct InputState {
 }
 
 impl InputState {
+    /// Creates a new input state with default values and a fresh focus handle.
     pub fn new(cx: &mut App) -> Self {
         InputState {
             focus_handle: cx.focus_handle().tab_stop(true),
@@ -407,16 +418,19 @@ impl InputState {
         }
     }
 
+    /// Returns whether the cursor should be rendered this frame (toggles for blink effect).
     pub fn cursor_visible(&self, cx: &App) -> bool {
         self.cursor_blink.read(cx).visible()
     }
 
+    /// Starts cursor blinking. Called automatically when input gains focus.
     pub fn start_cursor_blink(&self, cx: &mut Context<Self>) {
         self.cursor_blink.update(cx, |blink, cx| {
             blink.start(cx);
         });
     }
 
+    /// Stops cursor blinking, leaving it visible. Called automatically when input loses focus.
     pub fn stop_cursor_blink(&self, cx: &mut Context<Self>) {
         self.cursor_blink.update(cx, |blink, cx| {
             blink.stop();
@@ -430,16 +444,19 @@ impl InputState {
         });
     }
 
+    /// Returns the current text, or empty string if unset.
     pub fn value(&self) -> SharedString {
         self.value
             .clone()
             .unwrap_or_else(|| SharedString::new_static(""))
     }
 
+    /// Takes and returns the current value, leaving the input empty.
     pub fn clear(&mut self) -> Option<SharedString> {
         self.value.take()
     }
 
+    /// Builder method: sets initial text only if value is currently unset.
     pub fn initial_value(mut self, text: impl Into<SharedString>) -> Self {
         if self.value.is_some() {
             return self;
@@ -448,6 +465,10 @@ impl InputState {
         self
     }
 
+    // Action handlers for keyboard navigation and editing.
+    // These are registered via `.on_action()` in the Input element's render method.
+
+    /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
     pub fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);
@@ -456,6 +477,7 @@ impl InputState {
         }
     }
 
+    /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
     pub fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.next_boundary(self.selected_range.end), cx);
@@ -464,14 +486,17 @@ impl InputState {
         }
     }
 
+    /// Extends selection by one grapheme.
     pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
+    /// Extends selection by one grapheme.
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
+    /// Collapses selection or moves to same column on previous line.
     pub fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let (line, col) = self.offset_to_line_col(self.cursor_offset());
@@ -484,6 +509,7 @@ impl InputState {
         }
     }
 
+    /// Collapses selection or moves to same column on next line.
     pub fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let (line, col) = self.offset_to_line_col(self.cursor_offset());
@@ -496,6 +522,7 @@ impl InputState {
         }
     }
 
+    /// Extends selection to same column on previous line.
     pub fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
         let (line, col) = self.offset_to_line_col(self.cursor_offset());
         if line > 0 {
@@ -504,6 +531,7 @@ impl InputState {
         }
     }
 
+    /// Extends selection to same column on next line.
     pub fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         let (line, col) = self.offset_to_line_col(self.cursor_offset());
         if line < self.line_count().saturating_sub(1) {
@@ -512,6 +540,7 @@ impl InputState {
         }
     }
 
+    /// Inserts a newline (Enter key in multiline mode).
     pub fn insert_newline(
         &mut self,
         _: &InsertNewline,
@@ -521,6 +550,7 @@ impl InputState {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
+    /// Inserts a newline (Shift+Enter, for inputs with `newline_on_shift_enter` enabled).
     pub fn insert_newline_shift(
         &mut self,
         _: &InsertNewlineShift,
@@ -530,21 +560,25 @@ impl InputState {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
+    /// Selects all text without scrolling.
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to_without_scroll(0, cx);
         self.select_to_without_scroll(self.value().len(), cx)
     }
 
+    /// Moves cursor to start of text.
     pub fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
+    /// Moves cursor to end of text.
     pub fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.value().len(), cx);
     }
 
-    // Word navigation
+    // Word navigation (Option+Arrow on macOS, Ctrl+Arrow elsewhere)
 
+    /// Moves past whitespace/punctuation to start of previous word.
     pub fn move_to_previous_word(
         &mut self,
         _: &MoveToPreviousWord,
@@ -553,9 +587,7 @@ impl InputState {
     ) {
         if self.selected_range.is_empty() {
             let offset = self.cursor_offset();
-            // Move to previous boundary first (to get past current position)
             let prev = self.previous_boundary(offset);
-            // Then find word start from there
             let target = self.word_start(prev);
             self.move_to(target, cx);
         } else {
@@ -563,6 +595,7 @@ impl InputState {
         }
     }
 
+    /// Moves to end of current/next word.
     pub fn move_to_next_word(
         &mut self,
         _: &MoveToNextWord,
@@ -571,7 +604,6 @@ impl InputState {
     ) {
         if self.selected_range.is_empty() {
             let offset = self.cursor_offset();
-            // Find word end from current position
             let target = self.word_end(offset);
             self.move_to(target, cx);
         } else {
@@ -579,6 +611,7 @@ impl InputState {
         }
     }
 
+    /// Extends selection to start of previous word.
     pub fn select_to_previous_word_start(
         &mut self,
         _: &SelectToPreviousWordStart,
@@ -591,6 +624,7 @@ impl InputState {
         self.select_to(target, cx);
     }
 
+    /// Extends selection to end of next word.
     pub fn select_to_next_word_end(
         &mut self,
         _: &SelectToNextWordEnd,
@@ -602,8 +636,9 @@ impl InputState {
         self.select_to(target, cx);
     }
 
-    // Line navigation
+    // Line navigation (Cmd+Arrow on macOS)
 
+    /// Moves cursor to start of current line.
     pub fn move_to_start_of_line(
         &mut self,
         _: &MoveToStartOfLine,
@@ -615,6 +650,7 @@ impl InputState {
         self.move_to(target, cx);
     }
 
+    /// Moves cursor to end of current line.
     pub fn move_to_end_of_line(
         &mut self,
         _: &MoveToEndOfLine,
@@ -626,6 +662,7 @@ impl InputState {
         self.move_to(target, cx);
     }
 
+    /// Extends selection to start of current line.
     pub fn select_to_start_of_line(
         &mut self,
         _: &SelectToStartOfLine,
@@ -637,6 +674,7 @@ impl InputState {
         self.select_to(target, cx);
     }
 
+    /// Extends selection to end of current line.
     pub fn select_to_end_of_line(
         &mut self,
         _: &SelectToEndOfLine,
@@ -648,26 +686,31 @@ impl InputState {
         self.select_to(target, cx);
     }
 
-    // Document navigation
+    // Document navigation (Cmd+Up/Down on macOS)
 
+    /// Moves cursor to start of document.
     pub fn move_to_start(&mut self, _: &MoveToStart, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
+    /// Moves cursor to end of document.
     pub fn move_to_end(&mut self, _: &MoveToEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.value().len(), cx);
     }
 
+    /// Extends selection to start of document.
     pub fn select_to_start(&mut self, _: &SelectToStart, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(0, cx);
     }
 
+    /// Extends selection to end of document.
     pub fn select_to_end(&mut self, _: &SelectToEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.value().len(), cx);
     }
 
-    // Word deletion
+    // Word deletion (Option+Backspace/Delete on macOS)
 
+    /// Deletes from cursor to start of previous word.
     pub fn delete_to_previous_word_start(
         &mut self,
         _: &DeleteToPreviousWordStart,
@@ -683,6 +726,7 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
+    /// Deletes from cursor to end of next word.
     pub fn delete_to_next_word_end(
         &mut self,
         _: &DeleteToNextWordEnd,
@@ -697,8 +741,9 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    // Line deletion
+    // Line deletion (Cmd+Backspace/Delete on macOS)
 
+    /// Deletes from cursor to start of current line.
     pub fn delete_to_beginning_of_line(
         &mut self,
         _: &DeleteToBeginningOfLine,
@@ -713,6 +758,7 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
+    /// Deletes from cursor to end of current line.
     pub fn delete_to_end_of_line(
         &mut self,
         _: &DeleteToEndOfLine,
@@ -727,6 +773,7 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
+    /// Deletes selection, or one grapheme before cursor if no selection.
     pub fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx)
@@ -735,6 +782,7 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx)
     }
 
+    /// Deletes selection, or one grapheme after cursor if no selection.
     pub fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.next_boundary(self.cursor_offset()), cx)
@@ -743,6 +791,7 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx)
     }
 
+    /// Handles trackpad/mouse horizontal scrolling in non-wrapped mode.
     pub fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -786,6 +835,7 @@ impl InputState {
         self.is_manually_scrolling = false;
     }
 
+    /// Opens the system character palette (macOS emoji/symbol picker).
     pub fn show_character_palette(
         &mut self,
         _: &ShowCharacterPalette,
@@ -795,6 +845,7 @@ impl InputState {
         window.show_character_palette();
     }
 
+    /// Pastes from clipboard. Newlines become spaces in single-line mode.
     pub fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             // Preserve newlines in multiline mode, replace with spaces in single-line mode
@@ -807,6 +858,7 @@ impl InputState {
         }
     }
 
+    /// Copies selected text to clipboard. No-op if nothing selected.
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -815,6 +867,7 @@ impl InputState {
         }
     }
 
+    /// Cuts selected text to clipboard. No-op if nothing selected.
     pub fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -840,6 +893,7 @@ impl InputState {
         self.redo_stack.clear();
     }
 
+    /// Restores previous state from undo stack. No-op if stack is empty.
     pub fn undo(&mut self, _: &Undo, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.undo_stack.pop() {
             // Save current state to redo stack
@@ -867,6 +921,7 @@ impl InputState {
         }
     }
 
+    /// Restores state from redo stack. No-op if stack is empty.
     pub fn redo(&mut self, _: &Redo, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.redo_stack.pop() {
             // Save current state to undo stack
@@ -911,14 +966,17 @@ impl InputState {
         cx.notify()
     }
 
+    /// Sets cursor position and clears selection, scrolling to keep cursor visible.
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.move_to_inner(offset, true, cx)
     }
 
+    /// Sets cursor position without auto-scrolling. Used by `select_all` to avoid scroll jump.
     pub fn move_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.move_to_inner(offset, false, cx)
     }
 
+    /// Returns the active end of the selection (where the cursor is rendered).
     pub fn cursor_offset(&self) -> usize {
         if self.selection_reversed {
             self.selected_range.start
@@ -927,6 +985,7 @@ impl InputState {
         }
     }
 
+    /// Converts from UTF-16 code units (used by IME/platform APIs) to UTF-8 byte offsets (used internally).
     pub fn offset_from_utf16(&self, offset: usize) -> usize {
         let mut utf8_offset = 0;
         let mut utf16_count = 0;
@@ -942,6 +1001,7 @@ impl InputState {
         utf8_offset
     }
 
+    /// Converts from UTF-8 byte offsets (used internally) to UTF-16 code units (used by IME/platform APIs).
     pub fn offset_to_utf16(&self, offset: usize) -> usize {
         let mut utf16_offset = 0;
         let mut utf8_count = 0;
@@ -957,10 +1017,12 @@ impl InputState {
         utf16_offset
     }
 
+    /// Range version of `offset_to_utf16` for IME interop.
     pub fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
         self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
     }
 
+    /// Range version of `offset_from_utf16` for IME interop.
     pub fn range_from_utf16(&self, range_utf16: &Range<usize>) -> Range<usize> {
         self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
     }

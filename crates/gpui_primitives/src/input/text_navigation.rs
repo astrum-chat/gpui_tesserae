@@ -1,12 +1,10 @@
 use gpui::SharedString;
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Returns true if the character is a word character (alphanumeric or underscore).
 pub(crate) fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Text navigation utilities for InputState.
 /// Implemented as a trait to keep navigation logic separate from core state.
 pub(crate) trait TextNavigation {
     fn value(&self) -> SharedString;

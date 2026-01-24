@@ -3,12 +3,14 @@ use std::time::Duration;
 
 const BLINK_INTERVAL: Duration = Duration::from_millis(530);
 
+/// Manages the blinking cursor animation using an epoch-based timer to handle concurrent timers.
 pub struct CursorBlink {
     visible: bool,
     epoch: usize,
 }
 
 impl CursorBlink {
+    /// Creates a new cursor blink state with the cursor initially visible.
     pub fn new() -> Self {
         Self {
             visible: true,
@@ -16,25 +18,26 @@ impl CursorBlink {
         }
     }
 
+    /// Returns whether the cursor should currently be visible.
     pub fn visible(&self) -> bool {
         self.visible
     }
 
-    /// Call this when the cursor moves or text is edited to reset the blink state
+    /// Resets blink to visible and restarts the timer. Call after cursor movement or text edits.
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         self.visible = true;
         self.epoch = self.epoch.wrapping_add(1);
         self.schedule_blink(self.epoch, cx);
     }
 
-    /// Start the blink timer
+    /// Starts the blink cycle. Call when input gains focus.
     pub fn start(&mut self, cx: &mut Context<Self>) {
         self.visible = true;
         self.epoch = self.epoch.wrapping_add(1);
         self.schedule_blink(self.epoch, cx);
     }
 
-    /// Stop blinking
+    /// Stops blinking and keeps cursor visible. Call when input loses focus.
     pub fn stop(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
         self.visible = true;

@@ -13,7 +13,6 @@ use super::{
     TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
 };
 
-/// Creates a cursor quad for rendering.
 pub(crate) fn make_cursor_quad(
     bounds: Bounds<Pixels>,
     cursor_x: Pixels,
@@ -35,7 +34,6 @@ pub(crate) fn make_cursor_quad(
     )
 }
 
-/// Creates a selection quad for rendering.
 pub(crate) fn make_selection_quad(
     bounds: Bounds<Pixels>,
     start_x: Pixels,
@@ -52,7 +50,7 @@ pub(crate) fn make_selection_quad(
     )
 }
 
-/// Element for rendering a single-line input.
+/// Handles text shaping, cursor positioning, selection rendering, and horizontal scrolling for single-line inputs.
 pub(crate) struct TextElement {
     pub input: Entity<InputState>,
     pub placeholder: SharedString,
@@ -276,7 +274,7 @@ impl Element for TextElement {
     }
 }
 
-/// Element for rendering a single line in a multi-line input (non-wrapped mode).
+/// Renders one logical line in non-wrapped multiline mode. Handles per-line cursor, selection, and horizontal scroll offset.
 pub(crate) struct LineElement {
     pub input: Entity<InputState>,
     pub line_index: usize,
@@ -550,7 +548,7 @@ impl Element for LineElement {
     }
 }
 
-/// Element for rendering a single visual line in wrapped multi-line input.
+/// Renders one visual line segment in wrapped mode. A single logical line may span multiple WrappedLineElements when text wraps.
 pub(crate) struct WrappedLineElement {
     pub input: Entity<InputState>,
     pub visual_line_index: usize,
@@ -814,7 +812,7 @@ impl Element for WrappedLineElement {
     }
 }
 
-/// Wrapper element that contains a uniform_list and registers the input handler.
+/// Coordinates the uniform_list with input handling: registers the ElementInputHandler, tracks mouse drag selection across lines, and manages visible line info for hit testing.
 pub(crate) struct UniformListInputElement {
     pub input: Entity<InputState>,
     pub child: AnyElement,

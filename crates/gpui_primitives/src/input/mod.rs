@@ -13,6 +13,7 @@ mod elements;
 mod selection;
 mod state;
 mod text_navigation;
+/// Text transformation functions for input display (e.g., password masking).
 pub mod text_transforms;
 
 pub use cursor_blink::CursorBlink;
@@ -79,6 +80,7 @@ pub(crate) fn should_show_trailing_whitespace(
     standard_trailing || starts_at_line_start || empty_line_in_selection
 }
 
+/// A text input element supporting single-line and multi-line editing with selection, clipboard, and undo/redo.
 #[derive(IntoElement)]
 pub struct Input {
     id: ElementId,
@@ -102,6 +104,7 @@ impl Styled for Input {
 }
 
 impl Input {
+    /// Creates a new input element with the given ID and state entity.
     pub fn new(id: impl Into<ElementId>, state: Entity<InputState>) -> Self {
         Self {
             id: id.into(),
@@ -119,26 +122,35 @@ impl Input {
         }
     }
 
+    /// Sets the maximum number of visible lines before scrolling. Use `multiline()` for unlimited.
     pub fn line_clamp(mut self, line_clamp: usize) -> Self {
         self.line_clamp = line_clamp.max(1);
         self
     }
 
+    /// Enables unlimited multiline input with vertical scrolling.
     pub fn multiline(mut self) -> Self {
         self.line_clamp = usize::MAX;
         self
     }
 
+    /// Enables or disables word wrapping. Sets `line_clamp` to 1 if currently 0.
     pub fn word_wrap(mut self, enabled: bool) -> Self {
+        if enabled && self.line_clamp == 0 {
+            self.line_clamp = 1;
+        }
+
         self.word_wrap = enabled;
         self
     }
 
+    /// When enabled, Enter does nothing and Shift+Enter inserts a newline. Useful for chat inputs.
     pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
         self.newline_on_shift_enter = enabled;
         self
     }
 
+    /// Transforms each character for display without modifying the stored value. Useful for password fields.
     pub fn transform_text(
         mut self,
         transform: impl Fn(char) -> char + Send + Sync + 'static,
@@ -147,6 +159,10 @@ impl Input {
         self
     }
 
+    /// Transform the text value whenever it changes.
+    /// Unlike `transform_text`, this actually modifies the stored value.
+    /// - `text`: The full text after the raw change was applied
+    /// - `inserted_ranges`: Character ranges where new text was inserted, or None for deletion-only
     pub fn map_text(
         mut self,
         f: impl Fn(SharedString) -> SharedString + Send + Sync + 'static,
@@ -155,6 +171,7 @@ impl Input {
         self
     }
 
+    /// Disables the input, preventing focus and interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -169,25 +186,30 @@ impl Input {
         self
     }
 
+    /// Sets the color for placeholder text.
     pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
         self.placeholder_text_color = Some(color.into());
         self
     }
 
+    /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection_color = Some(color.into());
         self
     }
 
+    /// Sets the placeholder text shown when input is empty.
     pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
         self.placeholder = text.into();
         self
     }
 
+    /// Returns the current placeholder text.
     pub fn get_placeholder(&self) -> &SharedString {
         &self.placeholder
     }
 
+    /// Returns the current text value from state.
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.state.read(cx).value()
     }
@@ -502,6 +524,7 @@ impl RenderOnce for Input {
     }
 }
 
+/// Registers default key bindings for text input. Call once at app startup.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         // Basic navigation (universal)
