@@ -1,11 +1,10 @@
-use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
-    InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels,
-    Refineable, RenderOnce, SharedString, StyleRefinement, Styled, Window, div, hsla,
-    prelude::FluentBuilder, px, rgb, uniform_list,
+    InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable,
+    RenderOnce, SharedString, StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder,
+    px, rgb, uniform_list,
 };
 
 mod cursor_blink;
@@ -26,59 +25,15 @@ pub use state::{
     SelectToStartOfLine, SelectUp, ShowCharacterPalette, Undo, Up, VisibleLineInfo, VisualLineInfo,
 };
 
-use crate::utils::rgb_a;
+use crate::utils::{multiline_height, pixel_perfect_round, rgb_a};
 use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
 use text_navigation::TextNavigation;
 
 pub(crate) type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
 
-/// Small epsilon used when comparing wrap widths to prevent janky text wrapping
-/// caused by floating point precision issues triggering unnecessary recomputes.
-pub(crate) const WRAP_WIDTH_EPSILON: Pixels = px(1.5);
-
-fn multiline_height(line_height: Pixels, line_count: usize, scale_factor: f32) -> Pixels {
-    let height = line_height * line_count as f32;
-    pixel_perfect_round(height, scale_factor)
-}
-
-pub(crate) fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {
-    let increment = if scale_factor >= 2.0 { 0.5 } else { 1.0 };
-    let val = value.to_f64() as f32;
-    px((val / increment).round() * increment)
-}
-
-pub(crate) fn should_show_trailing_whitespace(
-    selected_range: &Range<usize>,
-    line_start_offset: usize,
-    line_end_offset: usize,
-    line_len: usize,
-    local_end: usize,
-    text: &str,
-) -> bool {
-    let newline_position = line_end_offset + if line_len == 0 { 0 } else { 1 };
-
-    let selection_starts_at_newline = text
-        .get(selected_range.start..selected_range.start + 1)
-        .map(|c| c == "\n")
-        .unwrap_or(false);
-
-    let selection_continues_past_newline = selected_range.end > newline_position;
-    let at_line_end = local_end == line_len;
-
-    let selection_starts_at_line_start = selected_range.start == line_start_offset;
-
-    let standard_trailing =
-        !selection_starts_at_newline && selection_continues_past_newline && at_line_end;
-    let starts_at_line_start =
-        selection_starts_at_line_start && at_line_end && selected_range.end > line_end_offset;
-
-    // For empty lines (just a newline) that are entirely within the selection
-    let empty_line_in_selection = line_len == 0
-        && selected_range.start <= line_start_offset
-        && selected_range.end > line_end_offset;
-
-    standard_trailing || starts_at_line_start || empty_line_in_selection
-}
+// Re-export from utils for internal use by elements.rs
+pub(crate) use crate::utils::WRAP_WIDTH_EPSILON;
+pub(crate) use crate::utils::should_show_trailing_whitespace;
 
 /// A text input element supporting single-line and multi-line editing with selection, clipboard, and undo/redo.
 #[derive(IntoElement)]

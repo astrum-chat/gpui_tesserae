@@ -154,6 +154,8 @@ pub struct InputState {
     pub(crate) last_text_width: Pixels,
     /// When true, skip auto-scroll to cursor (user is manually scrolling)
     pub(crate) is_manually_scrolling: bool,
+    /// When true, skip auto-scroll to cursor on next render (for select_all)
+    pub(crate) skip_auto_scroll_on_next_render: bool,
 
     /// Undo history stack
     undo_stack: Vec<UndoEntry>,
@@ -194,6 +196,7 @@ impl InputState {
             horizontal_scroll_offset: Pixels::ZERO,
             last_text_width: Pixels::ZERO,
             is_manually_scrolling: false,
+            skip_auto_scroll_on_next_render: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_history: 200,
@@ -973,6 +976,7 @@ impl InputState {
 
     /// Sets cursor position without auto-scrolling. Used by `select_all` to avoid scroll jump.
     pub fn move_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.skip_auto_scroll_on_next_render = true;
         self.move_to_inner(offset, false, cx)
     }
 

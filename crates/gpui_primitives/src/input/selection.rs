@@ -65,6 +65,7 @@ impl InputState {
 
     /// Extends the selection to the given offset without scrolling.
     pub fn select_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.skip_auto_scroll_on_next_render = true;
         self.select_to_inner(offset, false, cx)
     }
 
@@ -285,8 +286,9 @@ impl InputState {
         };
 
         if event.click_count >= 3 {
-            self.move_to(0, cx);
-            self.select_to(self.value().len(), cx);
+            // Select all without scrolling
+            self.move_to_without_scroll(0, cx);
+            self.select_to_without_scroll(self.value().len(), cx);
         } else if event.click_count == 2 {
             self.select_word_at(index, cx);
         } else if event.modifiers.shift {

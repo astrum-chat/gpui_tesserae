@@ -3,8 +3,7 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Bounds, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, Font,
     GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad,
-    Pixels, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window, fill, point, px,
-    relative, size,
+    Pixels, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window, point, px, relative,
 };
 
 use super::state::InputState;
@@ -12,43 +11,7 @@ use super::text_navigation::TextNavigation;
 use super::{
     TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
 };
-
-pub(crate) fn make_cursor_quad(
-    bounds: Bounds<Pixels>,
-    cursor_x: Pixels,
-    scroll_offset: Pixels,
-    text_color: Hsla,
-) -> PaintQuad {
-    let height = bounds.bottom() - bounds.top();
-    let adjusted_height = height * 0.8;
-    let height_diff = height - adjusted_height;
-    fill(
-        gpui::Bounds::new(
-            point(
-                bounds.left() + cursor_x - scroll_offset,
-                bounds.top() + height_diff / 2.,
-            ),
-            size(px(1.), adjusted_height),
-        ),
-        text_color,
-    )
-}
-
-pub(crate) fn make_selection_quad(
-    bounds: Bounds<Pixels>,
-    start_x: Pixels,
-    end_x: Pixels,
-    scroll_offset: Pixels,
-    highlight_color: Hsla,
-) -> PaintQuad {
-    fill(
-        Bounds::from_corners(
-            point(bounds.left() + start_x - scroll_offset, bounds.top()),
-            point(bounds.left() + end_x - scroll_offset, bounds.bottom()),
-        ),
-        highlight_color,
-    )
-}
+use crate::utils::{make_cursor_quad, make_selection_quad};
 
 /// Handles text shaping, cursor positioning, selection rendering, and horizontal scrolling for single-line inputs.
 pub(crate) struct TextElement {
