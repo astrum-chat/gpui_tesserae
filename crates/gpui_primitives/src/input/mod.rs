@@ -29,10 +29,20 @@ type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
 /// caused by floating point precision issues triggering unnecessary recomputes.
 const WRAP_WIDTH_EPSILON: Pixels = px(1.5);
 
-/// Calculates the height for a multiline input, floored to the nearest 0.5 pixel.
+/// Calculates the height for a multiline input, rounded to the nearest device pixel.
 /// This prevents slight layout shifts caused by subpixel height variations.
-fn multiline_height(line_height: Pixels, line_count: usize) -> Pixels {
-    px((line_height.to_f64() as f32 * line_count as f32 * 2.0).floor() / 2.0)
+fn multiline_height(line_height: Pixels, line_count: usize, scale_factor: f32) -> Pixels {
+    let height = line_height * line_count as f32;
+    pixel_perfect_round(height, scale_factor)
+}
+
+/// Rounds a pixel value to the nearest device pixel.
+/// On high-DPI displays (scale_factor >= 2.0), rounds to 0.5px increments.
+/// On standard displays, rounds to 1px increments.
+fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {
+    let increment = if scale_factor >= 2.0 { 0.5 } else { 1.0 };
+    let val = value.to_f64() as f32;
+    px((val / increment).round() * increment)
 }
 
 #[derive(IntoElement)]
@@ -495,7 +505,9 @@ impl Element for LineElement {
         };
 
         // Calculate selection intersection with this line
-        let selection_intersects = self.selected_range.start < self.line_end_offset
+        // For empty lines, the selection intersects if the line's position is within the selection range
+        // The newline character at line_end_offset is part of this line's selection
+        let selection_intersects = self.selected_range.start <= self.line_end_offset
             && self.selected_range.end > self.line_start_offset;
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
@@ -511,11 +523,39 @@ impl Element for LineElement {
                 .saturating_sub(self.line_start_offset)
                 .min(line_content.len());
 
+            // Calculate selection width - use minimum width for empty lines
+            let selection_start_x = line.x_for_index(local_start);
+            let selection_end_x = line.x_for_index(local_end);
+
+            // If the line is empty (just a newline), render a half-space-width selection
+            // to visually connect selections across lines
+            let selection_end_x = if local_start == local_end {
+                // Shape a space character to get its actual width
+                let space_run = TextRun {
+                    len: 1,
+                    font: self.font.clone(),
+                    color: self.text_color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let space_line =
+                    window
+                        .text_system()
+                        .shape_line(" ".into(), self.font_size, &[space_run], None);
+                let space_width = space_line.x_for_index(1);
+                // Use half the space width, rounded to the nearest device pixel
+                let half_space = pixel_perfect_round(space_width * 0.5, window.scale_factor());
+                selection_start_x + half_space
+            } else {
+                selection_end_x
+            };
+
             (
                 Some(fill(
                     Bounds::from_corners(
-                        point(bounds.left() + line.x_for_index(local_start), bounds.top()),
-                        point(bounds.left() + line.x_for_index(local_end), bounds.bottom()),
+                        point(bounds.left() + selection_start_x, bounds.top()),
+                        point(bounds.left() + selection_end_x, bounds.bottom()),
                     ),
                     self.highlight_text_color,
                 )),
@@ -752,8 +792,9 @@ impl Element for WrappedLineElement {
         };
 
         // Calculate selection intersection with this visual line
+        // For empty lines, the selection intersects if the line's position is within the selection range
         let selection_intersects =
-            self.selected_range.start < line_end && self.selected_range.end > line_start;
+            self.selected_range.start <= line_end && self.selected_range.end > line_start;
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             let local_start = self
@@ -767,11 +808,39 @@ impl Element for WrappedLineElement {
                 .saturating_sub(line_start)
                 .min(line_len);
 
+            // Calculate selection width - use minimum width for empty lines
+            let selection_start_x = line.x_for_index(local_start);
+            let selection_end_x = line.x_for_index(local_end);
+
+            // If the line is empty (just a newline), render a half-space-width selection
+            // to visually connect selections across lines
+            let selection_end_x = if local_start == local_end {
+                // Shape a space character to get its actual width
+                let space_run = TextRun {
+                    len: 1,
+                    font: self.font.clone(),
+                    color: self.text_color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let space_line =
+                    window
+                        .text_system()
+                        .shape_line(" ".into(), self.font_size, &[space_run], None);
+                let space_width = space_line.x_for_index(1);
+                // Use half the space width, rounded to the nearest device pixel
+                let half_space = pixel_perfect_round(space_width * 0.5, window.scale_factor());
+                selection_start_x + half_space
+            } else {
+                selection_end_x
+            };
+
             (
                 Some(fill(
                     Bounds::from_corners(
-                        point(bounds.left() + line.x_for_index(local_start), bounds.top()),
-                        point(bounds.left() + line.x_for_index(local_end), bounds.bottom()),
+                        point(bounds.left() + selection_start_x, bounds.top()),
+                        point(bounds.left() + selection_end_x, bounds.bottom()),
                     ),
                     self.highlight_text_color,
                 )),
@@ -967,8 +1036,9 @@ impl RenderOnce for Input {
             .line_height
             .expect("line_height must be set")
             .to_pixels(font_size.into(), window.rem_size());
-        // Round to nearest 0.5px to prevent subpixel layout shifts
-        let line_height = px((line_height.to_f64() as f32 * 2.0).round() / 2.0);
+        // Round to nearest device pixel to prevent subpixel layout shifts
+        let scale_factor = window.scale_factor();
+        let line_height = pixel_perfect_round(line_height, scale_factor);
 
         // Build font from StyleRefinement
         let font = Font {
@@ -1132,6 +1202,7 @@ impl RenderOnce for Input {
                 .h(multiline_height(
                     line_height,
                     max_lines.min(line_count).max(1),
+                    scale_factor,
                 ));
 
                 this.child(UniformListInputElement {
@@ -1217,6 +1288,7 @@ impl RenderOnce for Input {
                 .h(multiline_height(
                     line_height,
                     max_lines.min(visual_line_count).max(1),
+                    scale_factor,
                 ));
 
                 this.child(UniformListInputElement {
