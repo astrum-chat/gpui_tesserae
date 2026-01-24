@@ -172,14 +172,17 @@ impl RenderOnce for Input {
         let is_multiline = self.line_clamp > 1;
 
         let text_style = &self.style.text;
-        let font_size = match text_style.font_size.expect("font_size must be set") {
+        let font_size = match text_style
+            .font_size
+            .unwrap_or_else(|| window.text_style().font_size)
+        {
             AbsoluteLength::Pixels(px) => px,
             AbsoluteLength::Rems(rems) => rems.to_pixels(window.rem_size()),
         };
         let line_height = text_style
             .line_height
-            .expect("line_height must be set")
-            .to_pixels(font_size.into(), window.rem_size());
+            .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
+            .unwrap_or_else(|| window.line_height());
         let scale_factor = window.scale_factor();
         let line_height = pixel_perfect_round(line_height, scale_factor);
 
@@ -187,7 +190,7 @@ impl RenderOnce for Input {
             family: text_style
                 .font_family
                 .clone()
-                .expect("font_family must be set"),
+                .unwrap_or_else(|| window.text_style().font_family),
             features: text_style.font_features.clone().unwrap_or_default(),
             fallbacks: text_style.font_fallbacks.clone(),
             weight: text_style.font_weight.unwrap_or_default(),
