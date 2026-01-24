@@ -54,7 +54,7 @@ const SAMPLE_TEXT: &str = r#"The selectable_text primitive provides a read-only 
 
 Features:
 - Word wrapping with configurable line clamp
-- Click, drag, double-click (word), and triple-click (all) selection
+- Click, drag, double-click (word), and triple-click (line) selection
 - Keyboard navigation with arrow keys
 - Copy to clipboard with Cmd+C / Ctrl+C
 - Shift-click to extend selection
