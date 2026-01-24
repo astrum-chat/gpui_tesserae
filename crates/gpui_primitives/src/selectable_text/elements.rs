@@ -114,11 +114,7 @@ impl Element for LineElement {
 
             if should_show_trailing_whitespace(
                 &self.selected_range,
-                self.line_start_offset,
                 self.line_end_offset,
-                line_content.len(),
-                local_end,
-                &full_value,
                 self.is_select_all,
             ) {
                 let space_run = TextRun {
@@ -323,15 +319,7 @@ impl Element for WrappedLineElement {
             let selection_start_x = line.x_for_index(local_start);
             let mut selection_end_x = line.x_for_index(local_end);
 
-            if should_show_trailing_whitespace(
-                &self.selected_range,
-                line_start,
-                line_end,
-                line_len,
-                local_end,
-                &value,
-                self.is_select_all,
-            ) {
+            if should_show_trailing_whitespace(&self.selected_range, line_end, self.is_select_all) {
                 let space_run = TextRun {
                     len: 1,
                     font: self.font.clone(),

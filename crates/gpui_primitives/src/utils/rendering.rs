@@ -67,76 +67,12 @@ pub fn make_selection_quad(
 /// should only be shown when there's an actual newline at the end of the line.
 pub fn should_show_trailing_whitespace(
     selected_range: &Range<usize>,
-    line_start_offset: usize,
     line_end_offset: usize,
-    line_len: usize,
-    local_end: usize,
-    text: &str,
     is_select_all: bool,
 ) -> bool {
-    // Check if this line actually ends with a newline (or is at the end of text).
-    // For wrapped visual lines that don't end at a newline, we shouldn't show
-    // trailing whitespace since there's no newline to represent.
-    let line_ends_with_newline = text
-        .get(line_end_offset..line_end_offset + 1)
-        .map(|c| c == "\n")
-        .unwrap_or(true); // End of text is treated like a newline
-
-    if !line_ends_with_newline {
-        return false;
+    if !is_select_all && selected_range.end == line_end_offset {
+        false
+    } else {
+        true
     }
-
-    let newline_position = line_end_offset;
-
-    let selection_starts_at_newline = text
-        .get(selected_range.start..selected_range.start + 1)
-        .map(|c| c == "\n")
-        .unwrap_or(false);
-
-    let selection_continues_past_newline = selected_range.end > newline_position;
-    let at_line_end = local_end == line_len;
-
-    let selection_starts_at_line_start = selected_range.start == line_start_offset;
-
-    // Only skip trailing whitespace for the starting newline if we're on the line where
-    // the selection actually starts. This prevents disabling trailing whitespace for
-    // the entire selection when it starts at a newline character.
-    let on_selection_start_line =
-        selected_range.start >= line_start_offset && selected_range.start <= line_end_offset;
-    let skip_for_starting_newline = selection_starts_at_newline && on_selection_start_line;
-
-    let selection_includes_current_line = selected_range.start <= line_end_offset;
-
-    let standard_trailing = !skip_for_starting_newline
-        && selection_continues_past_newline
-        && at_line_end
-        && selection_includes_current_line;
-    let starts_at_line_start =
-        selection_starts_at_line_start && at_line_end && selected_range.end > line_end_offset;
-
-    // For empty lines (just a newline) that are entirely within the selection
-    let empty_line_in_selection = line_len == 0
-        && selected_range.start <= line_start_offset
-        && selected_range.end > line_end_offset;
-
-    // For "select all" case: selection ends exactly at text end on the last line.
-    // This handles the case where cmd+a selects all text and we want to show
-    // trailing whitespace on the last line even though there's no newline after it.
-    let is_last_line = text.get(line_end_offset..line_end_offset + 1).is_none();
-
-    // For non-empty last lines, show trailing whitespace on select-all
-    let is_last_line_with_full_selection = is_last_line
-        && line_len > 0
-        && selected_range.end == line_end_offset
-        && at_line_end
-        && selected_range.start <= line_start_offset;
-
-    // For empty last lines, ONLY show trailing whitespace on select-all (cmd+a)
-    let is_empty_last_line_with_select_all = is_last_line && line_len == 0 && is_select_all;
-
-    standard_trailing
-        || starts_at_line_start
-        || empty_line_in_selection
-        || is_last_line_with_full_selection
-        || is_empty_last_line_with_select_all
 }
