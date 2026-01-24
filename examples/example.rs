@@ -81,7 +81,7 @@ impl Render for Main {
                     ),
                 )
                 .wrap(true)
-                .max_lines(3)
+                .max_lines(5)
                 .w(relative(0.5))
                 .disabled(self.checkbox_checked || self.switch_checked),
             )

@@ -2,7 +2,7 @@ use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, Font, Hsla, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Point, Render, ScrollStrategy, ShapedLine, SharedString, TextRun, UTF16Selection,
-    UniformListScrollHandle, Window, WrappedLine, actions, div, point,
+    UniformListScrollHandle, Window, WrappedLine, actions, div, point, px,
 };
 use std::ops::Range;
 use std::sync::Arc;
@@ -111,6 +111,9 @@ pub struct InputState {
     /// Flag to scroll cursor into view on next render (for wrapped mode)
     /// This defers scrolling until after visual lines are recomputed
     pub(crate) scroll_to_cursor_on_next_render: bool,
+
+    /// Horizontal scroll offset for single-line mode (in pixels)
+    pub(crate) horizontal_scroll_offset: Pixels,
 }
 
 impl InputState {
@@ -140,6 +143,7 @@ impl InputState {
 
             needs_wrap_recompute: false,
             scroll_to_cursor_on_next_render: false,
+            horizontal_scroll_offset: Pixels::ZERO,
         }
     }
 
@@ -289,6 +293,34 @@ impl InputState {
             self.scroll_handle
                 .scroll_to_item(target_line, ScrollStrategy::Center);
         }
+    }
+
+    /// Ensure the cursor is horizontally visible in single-line or non-wrapped multiline mode.
+    /// Called during prepaint with the cursor's x position and container width.
+    /// Returns the updated scroll offset.
+    pub(crate) fn ensure_cursor_visible_horizontal(
+        &mut self,
+        cursor_x: Pixels,
+        container_width: Pixels,
+    ) -> Pixels {
+        // Don't scroll in wrapped mode (text wraps, so horizontal scroll not needed)
+        if self.is_wrapped {
+            return Pixels::ZERO;
+        }
+
+        let scroll_margin = px(2.0); // Small margin to keep cursor slightly away from edges
+        let visible_start = self.horizontal_scroll_offset;
+        let visible_end = self.horizontal_scroll_offset + container_width;
+
+        if cursor_x < visible_start + scroll_margin {
+            // Cursor is to the left of visible area - scroll left
+            self.horizontal_scroll_offset = (cursor_x - scroll_margin).max(Pixels::ZERO);
+        } else if cursor_x > visible_end - scroll_margin {
+            // Cursor is to the right of visible area - scroll right
+            self.horizontal_scroll_offset = cursor_x - container_width + scroll_margin;
+        }
+
+        self.horizontal_scroll_offset
     }
 
     /// Apply map_text transformation if set
@@ -606,7 +638,9 @@ impl InputState {
             return self.value().len();
         }
 
-        line.closest_index_for_x(position.x - bounds.left())
+        // Account for horizontal scroll offset when calculating index
+        let x_in_text = position.x - bounds.left() + self.horizontal_scroll_offset;
+        line.closest_index_for_x(x_in_text)
     }
 
     pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
@@ -701,7 +735,12 @@ impl InputState {
             // Check if position is within any visible line
             for info in &self.visible_lines_info {
                 if info.bounds.contains(&position) {
-                    let local_x = position.x - info.bounds.left();
+                    // Account for horizontal scroll offset in non-wrapped mode
+                    let local_x = if self.is_wrapped {
+                        position.x - info.bounds.left()
+                    } else {
+                        position.x - info.bounds.left() + self.horizontal_scroll_offset
+                    };
                     let local_index = info.shaped_line.closest_index_for_x(local_x);
 
                     // For wrapped mode, line_index is visual line index - look up byte offset
@@ -722,7 +761,12 @@ impl InputState {
             // Check if above visible area
             if let Some(first) = self.visible_lines_info.first() {
                 if position.y < first.bounds.top() {
-                    let local_x = position.x - first.bounds.left();
+                    // Account for horizontal scroll offset in non-wrapped mode
+                    let local_x = if self.is_wrapped {
+                        position.x - first.bounds.left()
+                    } else {
+                        position.x - first.bounds.left() + self.horizontal_scroll_offset
+                    };
                     let local_index = first.shaped_line.closest_index_for_x(local_x);
 
                     if self.is_wrapped {
@@ -746,7 +790,12 @@ impl InputState {
             // Check if below visible area
             if let Some(last) = self.visible_lines_info.last() {
                 if position.y >= last.bounds.bottom() {
-                    let local_x = position.x - last.bounds.left();
+                    // Account for horizontal scroll offset in non-wrapped mode
+                    let local_x = if self.is_wrapped {
+                        position.x - last.bounds.left()
+                    } else {
+                        position.x - last.bounds.left() + self.horizontal_scroll_offset
+                    };
                     let local_index = last.shaped_line.closest_index_for_x(local_x);
 
                     if self.is_wrapped {

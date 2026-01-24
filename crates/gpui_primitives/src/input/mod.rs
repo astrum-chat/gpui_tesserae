@@ -214,6 +214,8 @@ struct PrepaintState {
     line: Option<ShapedLine>,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
+    /// Horizontal scroll offset for rendering (in pixels)
+    scroll_offset: Pixels,
 }
 
 impl IntoElement for TextElement {
@@ -259,10 +261,10 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let input = self.input.read(cx);
-        let content = input.value();
-        let selected_range = input.selected_range.clone();
-        let cursor = input.cursor_offset();
+        let content = self.input.read(cx).value();
+        let selected_range = self.input.read(cx).selected_range.clone();
+        let cursor = self.input.read(cx).cursor_offset();
+        let marked_range = self.input.read(cx).marked_range.clone();
 
         let (display_text, text_color) = if content.is_empty() {
             (self.placeholder.clone(), self.placeholder_text_color)
@@ -282,7 +284,7 @@ impl Element for TextElement {
             strikethrough: None,
         };
 
-        let runs = if let Some(marked_range) = input.marked_range.as_ref() {
+        let runs = if let Some(marked_range) = marked_range.as_ref() {
             vec![
                 TextRun {
                     len: marked_range.start,
@@ -313,8 +315,17 @@ impl Element for TextElement {
             .text_system()
             .shape_line(display_text, self.font_size, &runs, None);
 
-        let cursor_pos = line.x_for_index(cursor);
-        let (selection, cursor) = if selected_range.is_empty() {
+        // Get cursor position in text coordinates
+        let cursor_x = line.x_for_index(cursor);
+        let container_width = bounds.size.width;
+
+        // Update horizontal scroll to keep cursor visible
+        let scroll_offset = self.input.update(cx, |input, _cx| {
+            input.ensure_cursor_visible_horizontal(cursor_x, container_width)
+        });
+
+        // Calculate positions with scroll offset applied
+        let (selection, cursor_quad) = if selected_range.is_empty() {
             let height = bounds.bottom() - bounds.top();
             let adjusted_height = height * 0.8;
             let height_diff = height - adjusted_height;
@@ -323,22 +334,27 @@ impl Element for TextElement {
                 None,
                 Some(fill(
                     Bounds::new(
-                        point(bounds.left() + cursor_pos, bounds.top() + height_diff / 2.),
+                        point(
+                            bounds.left() + cursor_x - scroll_offset,
+                            bounds.top() + height_diff / 2.,
+                        ),
                         size(px(1.), adjusted_height),
                     ),
                     self.text_color,
                 )),
             )
         } else {
+            let selection_start_x = line.x_for_index(selected_range.start);
+            let selection_end_x = line.x_for_index(selected_range.end);
             (
                 Some(fill(
                     Bounds::from_corners(
                         point(
-                            bounds.left() + line.x_for_index(selected_range.start),
+                            bounds.left() + selection_start_x - scroll_offset,
                             bounds.top(),
                         ),
                         point(
-                            bounds.left() + line.x_for_index(selected_range.end),
+                            bounds.left() + selection_end_x - scroll_offset,
                             bounds.bottom(),
                         ),
                     ),
@@ -350,8 +366,9 @@ impl Element for TextElement {
 
         PrepaintState {
             line: Some(line),
-            cursor,
+            cursor: cursor_quad,
             selection,
+            scroll_offset,
         }
     }
 
@@ -388,31 +405,36 @@ impl Element for TextElement {
             cx,
         );
 
-        if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
-        }
+        // Clip content to bounds to prevent overflow
+        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+            if let Some(selection) = prepaint.selection.take() {
+                window.paint_quad(selection)
+            }
 
-        let line = prepaint.line.take().unwrap();
-        line.paint(
-            bounds.origin,
-            self.line_height,
-            gpui::TextAlign::Left,
-            None,
-            window,
-            cx,
-        )
-        .unwrap();
+            let line = prepaint.line.take().unwrap();
+            // Render text shifted left by scroll offset
+            let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
+            line.paint(
+                text_origin,
+                self.line_height,
+                gpui::TextAlign::Left,
+                None,
+                window,
+                cx,
+            )
+            .unwrap();
 
-        if focus_handle.is_focused(window)
-            && self.cursor_visible
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+            if focus_handle.is_focused(window)
+                && self.cursor_visible
+                && let Some(cursor) = prepaint.cursor.take()
+            {
+                window.paint_quad(cursor);
+            }
 
-        self.input.update(cx, |input, _cx| {
-            input.last_layout = Some(line);
-            input.last_bounds = Some(bounds);
+            self.input.update(cx, |input, _cx| {
+                input.last_layout = Some(line);
+                input.last_bounds = Some(bounds);
+            });
         });
     }
 }
@@ -446,6 +468,8 @@ struct LinePrepaintState {
     line: Option<ShapedLine>,
     cursor: Option<PaintQuad>,
     selection: Option<PaintQuad>,
+    /// Horizontal scroll offset for rendering (in pixels)
+    scroll_offset: Pixels,
 }
 
 impl IntoElement for LineElement {
@@ -542,6 +566,56 @@ impl Element for LineElement {
         let selection_intersects = self.selected_range.start <= self.line_end_offset
             && self.selected_range.end > self.line_start_offset;
 
+        // Get container width and calculate scroll offset
+        // We need to calculate scroll based on cursor position, even if cursor isn't on this line,
+        // so that all lines use the same scroll offset for consistent rendering
+        let container_width = bounds.size.width;
+        let scroll_offset = {
+            // Calculate cursor X position in text coordinates (may be on a different line)
+            let cursor_x = if let Some(local_cursor) = local_cursor {
+                // Cursor is on this line - use local cursor position
+                line.x_for_index(local_cursor)
+            } else {
+                // Cursor is on a different line - we need to calculate its X position
+                // Get the cursor's line content and shape it to find the X position
+                let cursor_line = self.input.read(cx).offset_to_line_col(self.cursor_offset).0;
+                if cursor_line == self.line_index {
+                    // This shouldn't happen since local_cursor would be Some, but handle it
+                    line.x_for_index(0)
+                } else {
+                    // Cursor is on a different line - get that line's cursor X
+                    let input = self.input.read(cx);
+                    let (cursor_line_idx, cursor_col) =
+                        input.offset_to_line_col(self.cursor_offset);
+                    let cursor_line_start = input.line_start_offset(cursor_line_idx);
+                    let cursor_line_end = input.line_end_offset(cursor_line_idx);
+                    let cursor_line_content: String =
+                        input.value()[cursor_line_start..cursor_line_end].to_string();
+
+                    // Shape the cursor's line to get the X position
+                    let cursor_run = TextRun {
+                        len: cursor_line_content.len(),
+                        font: self.font.clone(),
+                        color: self.text_color,
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                    };
+                    let cursor_line_shaped = window.text_system().shape_line(
+                        cursor_line_content.into(),
+                        self.font_size,
+                        &[cursor_run],
+                        None,
+                    );
+                    cursor_line_shaped.x_for_index(cursor_col)
+                }
+            };
+
+            self.input.update(cx, |input, _cx| {
+                input.ensure_cursor_visible_horizontal(cursor_x, container_width)
+            })
+        };
+
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             // Calculate local selection range
             let local_start = self
@@ -584,8 +658,14 @@ impl Element for LineElement {
             (
                 Some(fill(
                     Bounds::from_corners(
-                        point(bounds.left() + selection_start_x, bounds.top()),
-                        point(bounds.left() + selection_end_x, bounds.bottom()),
+                        point(
+                            bounds.left() + selection_start_x - scroll_offset,
+                            bounds.top(),
+                        ),
+                        point(
+                            bounds.left() + selection_end_x - scroll_offset,
+                            bounds.bottom(),
+                        ),
                     ),
                     self.highlight_text_color,
                 )),
@@ -601,7 +681,10 @@ impl Element for LineElement {
                 None,
                 Some(fill(
                     Bounds::new(
-                        point(bounds.left() + cursor_pos, bounds.top() + height_diff / 2.),
+                        point(
+                            bounds.left() + cursor_pos - scroll_offset,
+                            bounds.top() + height_diff / 2.,
+                        ),
                         size(px(1.), adjusted_height),
                     ),
                     self.text_color,
@@ -615,6 +698,7 @@ impl Element for LineElement {
             line: Some(line),
             cursor,
             selection,
+            scroll_offset,
         }
     }
 
@@ -629,11 +713,6 @@ impl Element for LineElement {
         cx: &mut App,
     ) {
         let focus_handle = self.input.read(cx).focus_handle.clone();
-
-        if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
-        }
-
         let line = prepaint.line.take().unwrap();
 
         // Store visible line info for mouse hit testing
@@ -645,22 +724,31 @@ impl Element for LineElement {
             });
         });
 
-        line.paint(
-            bounds.origin,
-            self.line_height,
-            gpui::TextAlign::Left,
-            None,
-            window,
-            cx,
-        )
-        .unwrap();
+        // Clip content to bounds to prevent overflow
+        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+            if let Some(selection) = prepaint.selection.take() {
+                window.paint_quad(selection)
+            }
 
-        if focus_handle.is_focused(window)
-            && self.cursor_visible
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
+            // Render text shifted left by scroll offset
+            let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
+            line.paint(
+                text_origin,
+                self.line_height,
+                gpui::TextAlign::Left,
+                None,
+                window,
+                cx,
+            )
+            .unwrap();
+
+            if focus_handle.is_focused(window)
+                && self.cursor_visible
+                && let Some(cursor) = prepaint.cursor.take()
+            {
+                window.paint_quad(cursor);
+            }
+        });
     }
 }
 
