@@ -31,7 +31,7 @@ impl InputState {
         line.closest_index_for_x(x_in_text)
     }
 
-    pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+    fn select_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
         if self.selection_reversed {
             self.selected_range.start = offset
         } else {
@@ -43,8 +43,26 @@ impl InputState {
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
 
+        if scroll {
+            // Ensure cursor remains visible when selecting
+            self.reset_manual_scroll();
+            if self.is_wrapped {
+                self.scroll_to_cursor_on_next_render = true;
+            } else {
+                self.ensure_cursor_visible();
+            }
+        }
+
         self.reset_cursor_blink(cx);
         cx.notify()
+    }
+
+    pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.select_to_inner(offset, true, cx)
+    }
+
+    pub fn select_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.select_to_inner(offset, false, cx)
     }
 
     pub fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {

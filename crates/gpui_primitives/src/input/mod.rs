@@ -422,6 +422,11 @@ impl RenderOnce for Input {
                         count
                     } else {
                         state.is_wrapped = true;
+                        // Handle deferred scroll even when not recomputing wrapped lines
+                        if state.scroll_to_cursor_on_next_render {
+                            state.scroll_to_cursor_on_next_render = false;
+                            state.ensure_cursor_visible();
+                        }
                         state.precomputed_visual_lines.len()
                     }
                 });

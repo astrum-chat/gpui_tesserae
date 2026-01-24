@@ -531,8 +531,8 @@ impl InputState {
     }
 
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(0, cx);
-        self.select_to(self.value().len(), cx)
+        self.move_to_without_scroll(0, cx);
+        self.select_to_without_scroll(self.value().len(), cx)
     }
 
     pub fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
@@ -894,19 +894,29 @@ impl InputState {
         }
     }
 
-    pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+    fn move_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
-        // Reset manual scroll so auto-scroll to cursor works
-        self.reset_manual_scroll();
-        // For wrapped mode, defer scroll until visual lines are recomputed
-        // For non-wrapped mode, scroll immediately since line calculation is always correct
-        if self.is_wrapped {
-            self.scroll_to_cursor_on_next_render = true;
-        } else {
-            self.ensure_cursor_visible();
+        if scroll {
+            // Reset manual scroll so auto-scroll to cursor works
+            self.reset_manual_scroll();
+            // For wrapped mode, defer scroll until visual lines are recomputed
+            // For non-wrapped mode, scroll immediately since line calculation is always correct
+            if self.is_wrapped {
+                self.scroll_to_cursor_on_next_render = true;
+            } else {
+                self.ensure_cursor_visible();
+            }
         }
         self.reset_cursor_blink(cx);
         cx.notify()
+    }
+
+    pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.move_to_inner(offset, true, cx)
+    }
+
+    pub fn move_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.move_to_inner(offset, false, cx)
     }
 
     pub fn cursor_offset(&self) -> usize {
