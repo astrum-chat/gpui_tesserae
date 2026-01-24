@@ -1,9 +1,10 @@
+use std::ops::Range;
+
 use gpui::{
     App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, IntoElement, Pixels,
     Render, ScrollStrategy, SharedString, TextRun, UniformListScrollHandle, Window, WrappedLine,
     div,
 };
-use std::ops::Range;
 
 use crate::utils::TextNavigation;
 

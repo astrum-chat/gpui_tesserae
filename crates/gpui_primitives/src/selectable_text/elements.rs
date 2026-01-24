@@ -6,10 +6,9 @@ use gpui::{
     SharedString, Style, TextRun, Window, point, relative,
 };
 
-use super::state::SelectableTextState;
+use crate::selectable_text::VisibleLineInfo;
+use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{WRAP_WIDTH_EPSILON, make_selection_quad, should_show_trailing_whitespace};
-
-use super::VisibleLineInfo;
 
 /// Renders one logical line in non-wrapped multiline mode.
 pub(crate) struct LineElement {

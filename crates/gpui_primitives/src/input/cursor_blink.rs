@@ -1,5 +1,6 @@
-use gpui::Context;
 use std::time::Duration;
+
+use gpui::Context;
 
 const BLINK_INTERVAL: Duration = Duration::from_millis(530);
 

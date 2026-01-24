@@ -6,8 +6,8 @@ use gpui::{
     Pixels, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window, point, px, relative,
 };
 
-use super::state::InputState;
-use super::{
+use crate::input::state::InputState;
+use crate::input::{
     TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
 };
 use crate::utils::{TextNavigation, make_cursor_quad, make_selection_quad};

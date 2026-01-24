@@ -1,11 +1,15 @@
+use std::ops::Range;
+use std::sync::Arc;
+
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, Font, Hsla, IntoElement, Pixels, Render, ScrollStrategy, ScrollWheelEvent,
     ShapedLine, SharedString, TextRun, UTF16Selection, UniformListScrollHandle, Window,
     WrappedLine, div, point, px,
 };
-use std::ops::Range;
-use std::sync::Arc;
+
+use crate::input::CursorBlink;
+use crate::utils::TextNavigation;
 
 /// Maps visual line indices to byte ranges in the source text. Used by wrapped mode to translate between screen position and text offset.
 #[derive(Clone, Debug)]
@@ -35,10 +39,6 @@ pub struct VisibleLineInfo {
 /// Function type for transforming text when it changes.
 /// Takes the full text after the change and returns the transformed text.
 pub type MapTextFn = Arc<dyn Fn(SharedString) -> SharedString + Send + Sync>;
-
-use crate::utils::TextNavigation;
-
-use super::CursorBlink;
 
 /// Entry in the undo/redo history stack.
 #[derive(Clone)]

@@ -1,3 +1,11 @@
+mod cursor_blink;
+mod elements;
+mod selection;
+mod state;
+
+/// Text transformation functions for input display (e.g., password masking).
+pub mod text_transforms;
+
 use std::sync::Arc;
 
 use gpui::{
@@ -7,14 +15,11 @@ use gpui::{
     px, rgb, uniform_list,
 };
 
-mod cursor_blink;
-mod elements;
-mod selection;
-mod state;
+use crate::utils::{TextNavigation, multiline_height, pixel_perfect_round, rgb_a};
+use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
 
-/// Text transformation functions for input display (e.g., password masking).
-pub mod text_transforms;
-
+pub(crate) use crate::utils::WRAP_WIDTH_EPSILON;
+pub(crate) use crate::utils::should_show_trailing_whitespace;
 pub use cursor_blink::CursorBlink;
 pub use state::{
     Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,
@@ -25,15 +30,7 @@ pub use state::{
     SelectToStartOfLine, SelectUp, ShowCharacterPalette, Undo, Up, VisibleLineInfo, VisualLineInfo,
 };
 
-use crate::utils::TextNavigation;
-use crate::utils::{multiline_height, pixel_perfect_round, rgb_a};
-use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
-
 pub(crate) type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
-
-// Re-export from utils for internal use by elements.rs
-pub(crate) use crate::utils::WRAP_WIDTH_EPSILON;
-pub(crate) use crate::utils::should_show_trailing_whitespace;
 
 /// A text input element supporting single-line and multi-line editing with selection, clipboard, and undo/redo.
 #[derive(IntoElement)]

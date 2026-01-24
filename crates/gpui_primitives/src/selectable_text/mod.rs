@@ -1,5 +1,8 @@
 //! Selectable text component for displaying read-only text with selection support.
 
+mod elements;
+mod state;
+
 use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable,
@@ -7,8 +10,8 @@ use gpui::{
     rgb, uniform_list,
 };
 
-mod elements;
-mod state;
+use crate::utils::{TextNavigation, multiline_height, pixel_perfect_round, rgb_a};
+use elements::{LineElement, UniformListElement, WrappedLineElement};
 
 pub use state::{
     Copy, Down, End, Home, Left, MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord,
@@ -16,9 +19,6 @@ pub use state::{
     SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart,
     SelectToStartOfLine, SelectUp, SelectableTextState, Up, VisibleLineInfo, VisualLineInfo,
 };
-
-use crate::utils::{TextNavigation, multiline_height, pixel_perfect_round, rgb_a};
-use elements::{LineElement, UniformListElement, WrappedLineElement};
 
 /// A selectable text element for displaying read-only text with selection and copy support.
 /// Unlike Input, this only supports multiline mode and does not allow editing.

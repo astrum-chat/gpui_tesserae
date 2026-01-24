@@ -1,8 +1,7 @@
 use gpui::{Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollStrategy};
 
+use crate::input::state::InputState;
 use crate::utils::TextNavigation;
-
-use super::state::InputState;
 
 impl InputState {
     /// Converts a mouse position to a text offset for single-line inputs.
