@@ -45,6 +45,38 @@ fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {
     px((val / increment).round() * increment)
 }
 
+/// Determines if trailing whitespace should be shown for a line's selection.
+/// Returns true if the newline character is "in the middle" of the selection
+/// (not at the start or end boundary).
+///
+/// Parameters:
+/// - `selected_range`: The global selection range
+/// - `line_end_offset`: Byte offset of the last character of line content
+/// - `line_len`: Length of the line content (0 for empty lines)
+/// - `local_end`: The local selection end position within this line
+/// - `text`: The full text content to check if selection starts at a newline
+fn should_show_trailing_whitespace(
+    selected_range: &Range<usize>,
+    line_end_offset: usize,
+    line_len: usize,
+    local_end: usize,
+    text: &str,
+) -> bool {
+    // For empty lines, the newline IS at line_end_offset. For non-empty, it's after.
+    let newline_position = line_end_offset + if line_len == 0 { 0 } else { 1 };
+
+    // Don't show trailing whitespace if selection starts at a newline character
+    let selection_starts_at_newline = text
+        .get(selected_range.start..selected_range.start + 1)
+        .map(|c| c == "\n")
+        .unwrap_or(false);
+
+    let selection_continues_past_newline = selected_range.end > newline_position;
+    let at_line_end = local_end == line_len;
+
+    !selection_starts_at_newline && selection_continues_past_newline && at_line_end
+}
+
 #[derive(IntoElement)]
 pub struct Input {
     id: ElementId,
@@ -523,14 +555,17 @@ impl Element for LineElement {
                 .saturating_sub(self.line_start_offset)
                 .min(line_content.len());
 
-            // Calculate selection width - use minimum width for empty lines
             let selection_start_x = line.x_for_index(local_start);
-            let selection_end_x = line.x_for_index(local_end);
+            let mut selection_end_x = line.x_for_index(local_end);
 
-            // If the line is empty (just a newline), render a half-space-width selection
-            // to visually connect selections across lines
-            let selection_end_x = if local_start == local_end {
-                // Shape a space character to get its actual width
+            // Add trailing whitespace (1 space wide) to visually connect multi-line selections
+            if should_show_trailing_whitespace(
+                &self.selected_range,
+                self.line_end_offset,
+                line_content.len(),
+                local_end,
+                &full_value,
+            ) {
                 let space_run = TextRun {
                     len: 1,
                     font: self.font.clone(),
@@ -543,13 +578,8 @@ impl Element for LineElement {
                     window
                         .text_system()
                         .shape_line(" ".into(), self.font_size, &[space_run], None);
-                let space_width = space_line.x_for_index(1);
-                // Use half the space width, rounded to the nearest device pixel
-                let half_space = pixel_perfect_round(space_width * 0.5, window.scale_factor());
-                selection_start_x + half_space
-            } else {
-                selection_end_x
-            };
+                selection_end_x = selection_end_x + space_line.x_for_index(1);
+            }
 
             (
                 Some(fill(
@@ -808,14 +838,18 @@ impl Element for WrappedLineElement {
                 .saturating_sub(line_start)
                 .min(line_len);
 
-            // Calculate selection width - use minimum width for empty lines
             let selection_start_x = line.x_for_index(local_start);
-            let selection_end_x = line.x_for_index(local_end);
+            let mut selection_end_x = line.x_for_index(local_end);
 
-            // If the line is empty (just a newline), render a half-space-width selection
-            // to visually connect selections across lines
-            let selection_end_x = if local_start == local_end {
-                // Shape a space character to get its actual width
+            // Add trailing whitespace (1 space wide) to visually connect multi-line selections
+            let value = input.value();
+            if should_show_trailing_whitespace(
+                &self.selected_range,
+                line_end,
+                line_len,
+                local_end,
+                &value,
+            ) {
                 let space_run = TextRun {
                     len: 1,
                     font: self.font.clone(),
@@ -828,13 +862,8 @@ impl Element for WrappedLineElement {
                     window
                         .text_system()
                         .shape_line(" ".into(), self.font_size, &[space_run], None);
-                let space_width = space_line.x_for_index(1);
-                // Use half the space width, rounded to the nearest device pixel
-                let half_space = pixel_perfect_round(space_width * 0.5, window.scale_factor());
-                selection_start_x + half_space
-            } else {
-                selection_end_x
-            };
+                selection_end_x = selection_end_x + space_line.x_for_index(1);
+            }
 
             (
                 Some(fill(
