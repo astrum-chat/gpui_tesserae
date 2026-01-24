@@ -963,6 +963,8 @@ impl RenderOnce for Input {
             .line_height
             .expect("line_height must be set")
             .to_pixels(font_size.into(), window.rem_size());
+        // Round to nearest 0.5px to prevent subpixel layout shifts
+        let line_height = px((line_height.to_f64() as f32 * 2.0).round() / 2.0);
 
         // Build font from StyleRefinement
         let font = Font {
