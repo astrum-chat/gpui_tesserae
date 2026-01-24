@@ -37,10 +37,12 @@ impl InputState {
         } else {
             self.selected_range.end = offset
         };
+
         if self.selected_range.end < self.selected_range.start {
             self.selection_reversed = !self.selection_reversed;
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
+
         self.reset_cursor_blink(cx);
         cx.notify()
     }

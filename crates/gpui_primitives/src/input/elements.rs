@@ -449,6 +449,7 @@ impl Element for LineElement {
 
             if should_show_trailing_whitespace(
                 &self.selected_range,
+                self.line_start_offset,
                 self.line_end_offset,
                 line_content.len(),
                 local_end,
@@ -713,6 +714,7 @@ impl Element for WrappedLineElement {
             let value = input.value();
             if should_show_trailing_whitespace(
                 &self.selected_range,
+                line_start,
                 line_end,
                 line_len,
                 local_end,

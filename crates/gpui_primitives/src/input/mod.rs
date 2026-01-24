@@ -45,6 +45,7 @@ pub(crate) fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {
 
 pub(crate) fn should_show_trailing_whitespace(
     selected_range: &Range<usize>,
+    line_start_offset: usize,
     line_end_offset: usize,
     line_len: usize,
     local_end: usize,
@@ -60,7 +61,14 @@ pub(crate) fn should_show_trailing_whitespace(
     let selection_continues_past_newline = selected_range.end > newline_position;
     let at_line_end = local_end == line_len;
 
-    !selection_starts_at_newline && selection_continues_past_newline && at_line_end
+    let selection_starts_at_line_start = selected_range.start == line_start_offset;
+
+    let standard_trailing =
+        !selection_starts_at_newline && selection_continues_past_newline && at_line_end;
+    let starts_at_line_start =
+        selection_starts_at_line_start && at_line_end && selected_range.end > line_end_offset;
+
+    standard_trailing || starts_at_line_start
 }
 
 #[derive(IntoElement)]
