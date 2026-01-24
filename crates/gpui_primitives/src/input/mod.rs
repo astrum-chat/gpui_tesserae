@@ -25,6 +25,10 @@ use crate::utils::rgb_a;
 
 type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
 
+/// Small epsilon used when comparing wrap widths to prevent janky text wrapping
+/// caused by floating point precision issues triggering unnecessary recomputes.
+const WRAP_WIDTH_EPSILON: Pixels = px(1.5);
+
 /// Calculates the height for a multiline input, floored to the nearest 0.5 pixel.
 /// This prevents slight layout shifts caused by subpixel height variations.
 fn multiline_height(line_height: Pixels, line_count: usize) -> Pixels {
@@ -668,7 +672,7 @@ impl Element for WrappedLineElement {
         {
             let input = self.input.read(cx);
             if let Some(precomputed_width) = input.precomputed_at_width {
-                if (precomputed_width - actual_line_width).abs() > px(1.0)
+                if (precomputed_width - actual_line_width).abs() > WRAP_WIDTH_EPSILON
                     && !input.needs_wrap_recompute
                 {
                     let _ = input;
