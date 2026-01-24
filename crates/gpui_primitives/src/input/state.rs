@@ -522,7 +522,13 @@ impl InputState {
 
     pub fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.replace_text_in_range(None, &text.replace("\n", " "), window, cx);
+            // Preserve newlines in multiline mode, replace with spaces in single-line mode
+            let text = if self.is_multiline {
+                text
+            } else {
+                text.replace("\n", " ").into()
+            };
+            self.replace_text_in_range(None, &text, window, cx);
         }
     }
 
