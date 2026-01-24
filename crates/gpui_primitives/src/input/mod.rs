@@ -2,12 +2,12 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler,
-    Entity, FocusHandle, Focusable, GlobalElementId, Hsla, InspectorElementId, InteractiveElement,
-    IntoElement, KeyBinding, LayoutId, MouseButton, MouseMoveEvent, Overflow, PaintQuad,
-    ParentElement, Pixels, Refineable, RenderOnce, ShapedLine, SharedString, Style,
-    StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div, fill, hsla, point,
-    prelude::FluentBuilder, px, relative, rgb, size, uniform_list,
+    AbsoluteLength, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element, ElementId,
+    ElementInputHandler, Entity, FocusHandle, Focusable, Font, GlobalElementId, Hsla,
+    InspectorElementId, InteractiveElement, IntoElement, KeyBinding, LayoutId, MouseButton,
+    MouseMoveEvent, Overflow, PaintQuad, ParentElement, Pixels, Refineable, RenderOnce, ShapedLine,
+    SharedString, Style, StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div, fill, hsla,
+    point, prelude::FluentBuilder, px, relative, rgb, size, uniform_list,
 };
 
 mod cursor_blink;
@@ -158,6 +158,8 @@ struct TextElement {
     placeholder_text_color: Hsla,
     highlight_text_color: Hsla,
     line_height: Pixels,
+    font_size: Pixels,
+    font: Font,
     transform_text: Option<TransformTextFn>,
     cursor_visible: bool,
 }
@@ -215,7 +217,6 @@ impl Element for TextElement {
         let content = input.value();
         let selected_range = input.selected_range.clone();
         let cursor = input.cursor_offset();
-        let style = window.text_style();
 
         let (display_text, text_color) = if content.is_empty() {
             (self.placeholder.clone(), self.placeholder_text_color)
@@ -228,7 +229,7 @@ impl Element for TextElement {
 
         let run = TextRun {
             len: display_text.len(),
-            font: style.font(),
+            font: self.font.clone(),
             color: text_color,
             background_color: None,
             underline: None,
@@ -262,10 +263,9 @@ impl Element for TextElement {
             vec![run]
         };
 
-        let font_size = style.font_size.to_pixels(window.rem_size());
         let line = window
             .text_system()
-            .shape_line(display_text, font_size, &runs, None);
+            .shape_line(display_text, self.font_size, &runs, None);
 
         let cursor_pos = line.x_for_index(cursor);
         let (selection, cursor) = if selected_range.is_empty() {
@@ -382,6 +382,8 @@ struct LineElement {
     placeholder_text_color: Hsla,
     highlight_text_color: Hsla,
     line_height: Pixels,
+    font_size: Pixels,
+    font: Font,
     transform_text: Option<TransformTextFn>,
     cursor_visible: bool,
     /// The global selection range from InputState
@@ -445,7 +447,6 @@ impl Element for LineElement {
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let full_value = input.value();
-        let style = window.text_style();
 
         // Get line content as owned String to avoid lifetime issues
         let line_content: String =
@@ -465,17 +466,16 @@ impl Element for LineElement {
 
         let run = TextRun {
             len: display_text.len(),
-            font: style.font(),
+            font: self.font.clone(),
             color: text_color,
             background_color: None,
             underline: None,
             strikethrough: None,
         };
 
-        let font_size = style.font_size.to_pixels(window.rem_size());
         let line = window
             .text_system()
-            .shape_line(display_text, font_size, &[run], None);
+            .shape_line(display_text, self.font_size, &[run], None);
 
         // Calculate selection and cursor for this line
 
@@ -600,6 +600,8 @@ struct WrappedLineElement {
     placeholder_text_color: Hsla,
     highlight_text_color: Hsla,
     line_height: Pixels,
+    font_size: Pixels,
+    font: Font,
     transform_text: Option<TransformTextFn>,
     cursor_visible: bool,
     /// The global selection range from InputState
@@ -661,9 +663,27 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        // Check if actual line bounds differ from wrap width - schedule recompute if needed
+        let actual_line_width = bounds.size.width;
+        {
+            let input = self.input.read(cx);
+            if let Some(precomputed_width) = input.precomputed_at_width {
+                if (precomputed_width - actual_line_width).abs() > px(1.0)
+                    && !input.needs_wrap_recompute
+                {
+                    let _ = input;
+                    self.input.update(cx, |input, cx| {
+                        input.cached_wrap_width = Some(actual_line_width);
+                        input.needs_wrap_recompute = true;
+                        // DON'T clear visual lines - let current frame finish rendering
+                        cx.notify();
+                    });
+                    // DON'T return early - continue rendering with existing lines
+                }
+            }
+        }
+
         let input = self.input.read(cx);
-        let style = window.text_style();
-        let font_size = style.font_size.to_pixels(window.rem_size());
 
         // Get the visual line info
         let visual_info = input
@@ -701,7 +721,7 @@ impl Element for WrappedLineElement {
 
         let run = TextRun {
             len: display_text.len(),
-            font: style.font(),
+            font: self.font.clone(),
             color: text_color,
             background_color: None,
             underline: None,
@@ -710,7 +730,7 @@ impl Element for WrappedLineElement {
 
         let line = window
             .text_system()
-            .shape_line(display_text, font_size, &[run], None);
+            .shape_line(display_text, self.font_size, &[run], None);
 
         // Calculate selection and cursor for this visual line
         let line_start = info.start_offset;
@@ -891,7 +911,6 @@ impl Element for UniformListInputElement {
     ) {
         let focus_handle = self.input.read(cx).focus_handle.clone();
 
-        // Register input handler for the entire input area
         window.handle_input(
             &focus_handle,
             ElementInputHandler::new(bounds, self.input.clone()),
@@ -920,13 +939,12 @@ impl Element for UniformListInputElement {
             input.visible_lines_info.clear();
         });
 
-        // Paint the child (uniform_list)
         self.child.paint(window, cx);
 
-        // Store bounds and cache width for mouse position calculations and wrapped line computation
-        self.input.update(cx, |input, _cx| {
+        // Store bounds for mouse position calculations
+        self.input.update(cx, |input, cx| {
             input.last_bounds = Some(bounds);
-            input.cached_wrap_width = Some(bounds.size.width);
+            cx.notify();
         });
     }
 }
@@ -935,19 +953,28 @@ impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_multiline = self.max_lines > 1;
 
-        // Calculate line_height early so we can pass it to state
+        // Calculate line_height, font_size, and font from self.style.text
         let text_style = &self.style.text;
+        let font_size = match text_style.font_size.expect("font_size must be set") {
+            AbsoluteLength::Pixels(px) => px,
+            AbsoluteLength::Rems(rems) => rems.to_pixels(window.rem_size()),
+        };
         let line_height = text_style
             .line_height
-            .map(|this| {
-                this.to_pixels(
-                    text_style
-                        .font_size
-                        .unwrap_or_else(|| window.text_style().font_size),
-                    window.rem_size(),
-                )
-            })
-            .unwrap_or_else(|| window.line_height());
+            .expect("line_height must be set")
+            .to_pixels(font_size.into(), window.rem_size());
+
+        // Build font from StyleRefinement
+        let font = Font {
+            family: text_style
+                .font_family
+                .clone()
+                .expect("font_family must be set"),
+            features: text_style.font_features.clone().unwrap_or_default(),
+            fallbacks: text_style.font_fallbacks.clone(),
+            weight: text_style.font_weight.unwrap_or_default(),
+            style: text_style.font_style.unwrap_or_default(),
+        };
 
         // Update focus state, multiline params, and map_text
         let map_text = self.map_text.clone();
@@ -1031,6 +1058,7 @@ impl RenderOnce for Input {
             .on_mouse_move(window.listener_for(&self.state, InputState::on_mouse_move))
             .when(is_multiline && !self.wrap, |this| {
                 // Multi-line non-wrapped mode: use uniform_list for efficient scrolling
+                let font = font.clone();
                 let line_count = state.line_count().max(1);
                 let scroll_handle = state.scroll_handle.clone();
                 let input_state = self.state.clone();
@@ -1074,6 +1102,8 @@ impl RenderOnce for Input {
                                     placeholder_text_color,
                                     highlight_text_color,
                                     line_height,
+                                    font_size,
+                                    font: font.clone(),
                                     transform_text: transform_text.clone(),
                                     cursor_visible,
                                     selected_range: selected_range.clone(),
@@ -1106,6 +1136,7 @@ impl RenderOnce for Input {
             .when(is_multiline && self.wrap, |this| {
                 // Multi-line wrapped mode: use uniform_list with visual lines
                 // Note: We capture what we need before entering the closure to avoid borrow issues
+                let font = font.clone();
                 let scroll_handle = self.state.read(cx).scroll_handle.clone();
                 let cached_wrap_width = self.state.read(cx).cached_wrap_width;
                 let input_state = self.state.clone();
@@ -1116,9 +1147,25 @@ impl RenderOnce for Input {
                 // Pre-compute visual lines using cached width (or default)
                 let wrap_width = cached_wrap_width.unwrap_or(px(300.));
                 let visual_line_count = self.state.update(cx, |state, _cx| {
-                    let count = state.precompute_wrapped_lines(wrap_width, text_color, window);
-                    state.is_wrapped = true;
-                    count
+                    // Only recompute if needed (flag set, or no lines yet)
+                    let should_recompute =
+                        state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty();
+
+                    if should_recompute {
+                        state.needs_wrap_recompute = false;
+                        let count = state.precompute_wrapped_lines(
+                            wrap_width,
+                            font_size,
+                            font.clone(),
+                            text_color,
+                            window,
+                        );
+                        state.is_wrapped = true;
+                        count
+                    } else {
+                        state.is_wrapped = true;
+                        state.precomputed_visual_lines.len()
+                    }
                 });
 
                 // Only enable scroll tracking when content exceeds max_lines
@@ -1141,6 +1188,8 @@ impl RenderOnce for Input {
                                 placeholder_text_color,
                                 highlight_text_color,
                                 line_height,
+                                font_size,
+                                font: font.clone(),
                                 transform_text: transform_text.clone(),
                                 cursor_visible,
                                 selected_range: selected_range.clone(),
@@ -1178,6 +1227,8 @@ impl RenderOnce for Input {
                     placeholder_text_color,
                     highlight_text_color,
                     line_height,
+                    font_size,
+                    font,
                     transform_text: self.transform_text,
                     cursor_visible,
                 })

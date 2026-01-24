@@ -396,7 +396,6 @@ impl RenderOnce for Input {
             .gap(self.style.gap.unwrap_or(horizontal_padding.into()))
             .flex()
             .flex_col()
-            .justify_between()
             .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())

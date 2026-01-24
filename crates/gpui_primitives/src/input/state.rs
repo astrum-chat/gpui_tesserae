@@ -1,7 +1,7 @@
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
-    Focusable, Hsla, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    Render, ScrollStrategy, ShapedLine, SharedString, TextRun, UTF16Selection,
+    Focusable, Font, Hsla, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Point, Render, ScrollStrategy, ShapedLine, SharedString, TextRun, UTF16Selection,
     UniformListScrollHandle, Window, WrappedLine, actions, div, point,
 };
 use std::ops::Range;
@@ -91,14 +91,17 @@ pub struct InputState {
     pub(crate) max_lines: usize,
     /// Visible line info for uniform_list mode - populated during paint
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
-    /// Cached container width for wrapped text calculations
+    /// Cached container width for wrapped text calculations (set during prepaint)
     pub(crate) cached_wrap_width: Option<Pixels>,
     /// Pre-computed visual lines for wrapped uniform_list mode
     pub(crate) precomputed_visual_lines: Vec<VisualLineInfo>,
     /// Pre-computed wrapped lines (the actual WrappedLine objects)
     pub(crate) precomputed_wrapped_lines: Vec<WrappedLine>,
-    /// Cached text length to detect when text changes
-    pub(crate) cached_text_len: usize,
+    /// Width that was used to compute current precomputed_visual_lines
+    pub(crate) precomputed_at_width: Option<Pixels>,
+
+    /// Flag indicating visual lines need recompute due to width mismatch
+    pub(crate) needs_wrap_recompute: bool,
     /// Flag to scroll cursor into view on next render (for wrapped mode)
     /// This defers scrolling until after visual lines are recomputed
     pub(crate) scroll_to_cursor_on_next_render: bool,
@@ -127,7 +130,9 @@ impl InputState {
             cached_wrap_width: None,
             precomputed_visual_lines: Vec::new(),
             precomputed_wrapped_lines: Vec::new(),
-            cached_text_len: 0,
+            precomputed_at_width: None,
+
+            needs_wrap_recompute: false,
             scroll_to_cursor_on_next_render: false,
         }
     }
@@ -150,23 +155,16 @@ impl InputState {
     pub(crate) fn precompute_wrapped_lines(
         &mut self,
         width: Pixels,
+        font_size: Pixels,
+        font: Font,
         text_color: Hsla,
         window: &Window,
     ) -> usize {
         let text = self.value();
-        let text_len = text.len();
 
-        // Check if we need to recompute
-        let width_changed = self.cached_wrap_width != Some(width);
-        let text_changed = self.cached_text_len != text_len;
-
-        if !width_changed && !text_changed && !self.precomputed_visual_lines.is_empty() {
-            return self.precomputed_visual_lines.len();
-        }
-
-        // Update cache
+        // Update cache and track width used for this computation
         self.cached_wrap_width = Some(width);
-        self.cached_text_len = text_len;
+        self.precomputed_at_width = Some(width);
 
         // Clear previous data
         self.precomputed_visual_lines.clear();
@@ -183,13 +181,10 @@ impl InputState {
             return 1;
         }
 
-        // Shape text with wrapping
-        let style = window.text_style();
-        let font_size = style.font_size.to_pixels(window.rem_size());
-
+        // Shape text with wrapping using the passed font_size and font
         let run = TextRun {
             len: text.len(),
-            font: style.font(),
+            font,
             color: text_color,
             background_color: None,
             underline: None,
@@ -265,7 +260,7 @@ impl InputState {
     pub fn ensure_cursor_visible(&mut self) {
         let cursor_offset = self.cursor_offset();
 
-        if self.is_wrapped {
+        let (target_line, total_lines) = if self.is_wrapped {
             // For wrapped mode, find which visual line the cursor is on
             let visual_line = self
                 .precomputed_visual_lines
@@ -274,14 +269,19 @@ impl InputState {
                     cursor_offset >= info.start_offset && cursor_offset <= info.end_offset
                 })
                 .unwrap_or(0);
-
-            self.scroll_handle
-                .scroll_to_item(visual_line, ScrollStrategy::Center);
+            (visual_line, self.precomputed_visual_lines.len())
         } else {
             // For non-wrapped mode, use logical line
             let cursor_line = self.offset_to_line_col(cursor_offset).0;
+            (cursor_line, self.line_count())
+        };
+
+        // Only scroll if there's actually content that could need scrolling
+        // (more lines than max_lines). Otherwise, scrolling can cause
+        // unnecessary visual shifts.
+        if total_lines > self.max_lines {
             self.scroll_handle
-                .scroll_to_item(cursor_line, ScrollStrategy::Center);
+                .scroll_to_item(target_line, ScrollStrategy::Center);
         }
     }
 
@@ -782,8 +782,8 @@ impl InputState {
             (relative_y / line_height).floor() as usize
         };
 
-        let scroll_offset = self.scroll_handle.logical_scroll_top_index();
-        let line_index = visible_line_index + scroll_offset;
+        // Fallback: assume no scroll offset since we can't query it from the handle
+        let line_index = visible_line_index;
 
         if self.is_wrapped {
             // For wrapped mode fallback, use precomputed_visual_lines
@@ -1009,6 +1009,9 @@ impl EntityInputHandler for InputState {
         self.selected_range = new_cursor..new_cursor;
         self.marked_range.take();
 
+        // Clear precomputed visual lines so they get recomputed with new text
+        self.precomputed_visual_lines.clear();
+
         // For wrapped mode, defer scroll until visual lines are recomputed
         // For non-wrapped mode, scroll immediately since line calculation is always correct
         if self.is_wrapped {
@@ -1055,6 +1058,9 @@ impl EntityInputHandler for InputState {
             .map(|range_utf16| self.range_from_utf16(range_utf16))
             .map(|new_range| new_range.start + range.start..new_range.end + range.end)
             .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
+
+        // Clear precomputed visual lines so they get recomputed with new text
+        self.precomputed_visual_lines.clear();
 
         self.reset_cursor_blink(cx);
         cx.notify();
