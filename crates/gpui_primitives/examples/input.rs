@@ -1,17 +1,19 @@
 use gpui::{
-    App, AppContext as _, Application, Bounds, Context, ElementId, Entity, IntoElement, Overflow,
-    ParentElement, Render, SharedString, Styled, Window, WindowBounds, WindowOptions, div,
-    prelude::FluentBuilder, px, rgb, size,
+    App, AppContext as _, Application, Bounds, Context, ElementId, Entity, InteractiveElement,
+    IntoElement, Overflow, ParentElement, Render, SharedString, Styled, Window, WindowBounds,
+    WindowOptions, div, prelude::FluentBuilder, px, rgb, size,
 };
 use gpui_primitives::input::{self, Input, InputState, text_transforms};
 
 fn styled_input(id: impl Into<ElementId>, state: Entity<InputState>) -> Input {
     Input::new(id, state)
         .text_color(rgb(0xcdd6f4))
-        .pl(px(11.))
-        .pr(px(11.))
-        .pt(px(7.))
-        .pb(px(7.))
+        .placeholder_text_color(rgb(0x6c7086))
+        .text_size(px(14.))
+        .pl(px(6.))
+        .pr(px(6.))
+        .pt(px(0.))
+        .pb(px(0.))
 }
 
 struct ExampleApp {
@@ -43,8 +45,7 @@ impl ExampleApp {
             "Custom Placeholder",
             "With custom placeholder color",
             styled_input("placeholder", self.placeholder_input.clone())
-                .placeholder("Enter your email...")
-                .placeholder_text_color(rgb(0x6c7086)),
+                .placeholder("Enter your email..."),
         )
     }
 
@@ -54,8 +55,7 @@ impl ExampleApp {
             "Cannot be focused or edited",
             styled_input("disabled", self.disabled_input.clone())
                 .placeholder("This input is disabled")
-                .disabled(true)
-                .text_color(rgb(0x6c7086)),
+                .disabled(true),
         )
     }
 
@@ -86,7 +86,7 @@ impl ExampleApp {
             styled_input("multiline", self.multiline_input.clone())
                 .multiline()
                 .placeholder("Enter multiple lines of text...")
-                .h(px(100.)),
+                .min_h(px(100.)),
         )
     }
 
@@ -108,7 +108,7 @@ impl ExampleApp {
                 .multiline()
                 .word_wrap(true)
                 .placeholder("Long text will wrap to the next line...")
-                .h(px(100.)),
+                .min_h(px(100.)),
         )
     }
 
@@ -121,7 +121,7 @@ impl ExampleApp {
                 .word_wrap(true)
                 .newline_on_shift_enter(true)
                 .placeholder("Type a message... (Shift+Enter for newline)")
-                .h(px(80.)),
+                .min_h(px(80.)),
         )
     }
 }
@@ -132,9 +132,10 @@ impl Render for ExampleApp {
             .size_full()
             .bg(rgb(0x1e1e2e))
             .p_4()
-            .map(|mut el| {
-                el.style().overflow.y = Some(Overflow::Scroll);
-                el
+            .id("example")
+            .map(|mut this| {
+                this.style().overflow.y = Some(Overflow::Scroll);
+                this
             })
             .child(
                 div()
