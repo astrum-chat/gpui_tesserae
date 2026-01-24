@@ -732,9 +732,10 @@ impl SelectableTextState {
         };
 
         if event.click_count >= 3 {
-            // Select all without scrolling
-            self.move_to_without_scroll(0, cx);
-            self.select_to_without_scroll(self.text().len(), cx);
+            // Select line at click position
+            let (line_start, line_end) = self.line_range_at(index);
+            self.move_to_without_scroll(line_start, cx);
+            self.select_to_without_scroll(line_end, cx);
         } else if event.click_count == 2 {
             self.select_word_at(index, cx);
         } else if event.modifiers.shift {

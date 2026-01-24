@@ -64,6 +64,13 @@ pub trait TextNavigation {
         (line, offset.saturating_sub(line_start))
     }
 
+    /// Returns the (start, end) byte offsets of the line containing the given offset.
+    /// End is positioned before the newline character (or at text end for last line).
+    fn line_range_at(&self, offset: usize) -> (usize, usize) {
+        let (line, _) = self.offset_to_line_col(offset);
+        (self.line_start_offset(line), self.line_end_offset(line))
+    }
+
     /// Converts (line, column) coordinates to a byte offset.
     /// Clamps the column to the line length if it exceeds it.
     fn line_col_to_offset(&self, line: usize, col: usize) -> usize {
