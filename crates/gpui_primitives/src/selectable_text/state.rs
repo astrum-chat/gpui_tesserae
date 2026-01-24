@@ -1,7 +1,7 @@
 use gpui::{
     App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, IntoElement, Pixels,
     Render, ScrollStrategy, SharedString, TextRun, UniformListScrollHandle, Window, WrappedLine,
-    actions, div,
+    div,
 };
 use std::ops::Range;
 
@@ -10,35 +10,41 @@ use crate::utils::TextNavigation;
 // Re-export VisualLineInfo and VisibleLineInfo from input module since they're the same structure
 pub use crate::input::{VisibleLineInfo, VisualLineInfo};
 
-actions!(
-    selectable_text,
-    [
-        Copy,
-        SelectAll,
-        Left,
-        Right,
-        Up,
-        Down,
-        SelectLeft,
-        SelectRight,
-        SelectUp,
-        SelectDown,
-        Home,
-        End,
-        MoveToStartOfLine,
-        MoveToEndOfLine,
-        SelectToStartOfLine,
-        SelectToEndOfLine,
-        MoveToStart,
-        MoveToEnd,
-        SelectToStart,
-        SelectToEnd,
-        MoveToPreviousWord,
-        MoveToNextWord,
-        SelectToPreviousWordStart,
-        SelectToNextWordEnd,
-    ]
-);
+mod actions {
+    #![allow(missing_docs)]
+    use gpui::actions;
+
+    actions!(
+        selectable_text,
+        [
+            Copy,
+            SelectAll,
+            Left,
+            Right,
+            Up,
+            Down,
+            SelectLeft,
+            SelectRight,
+            SelectUp,
+            SelectDown,
+            Home,
+            End,
+            MoveToStartOfLine,
+            MoveToEndOfLine,
+            SelectToStartOfLine,
+            SelectToEndOfLine,
+            MoveToStart,
+            MoveToEnd,
+            SelectToStart,
+            SelectToEnd,
+            MoveToPreviousWord,
+            MoveToNextWord,
+            SelectToPreviousWordStart,
+            SelectToNextWordEnd,
+        ]
+    );
+}
+pub use actions::*;
 
 /// Core state for selectable text, managing text content, selection, and scroll position.
 /// Unlike InputState, this is read-only and does not support editing, undo/redo, or IME.

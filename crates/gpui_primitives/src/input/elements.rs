@@ -7,11 +7,10 @@ use gpui::{
 };
 
 use super::state::InputState;
-use super::text_navigation::TextNavigation;
 use super::{
     TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
 };
-use crate::utils::{make_cursor_quad, make_selection_quad};
+use crate::utils::{TextNavigation, make_cursor_quad, make_selection_quad};
 
 /// Handles text shaping, cursor positioning, selection rendering, and horizontal scrolling for single-line inputs.
 pub(crate) struct TextElement {

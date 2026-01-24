@@ -11,7 +11,7 @@ mod cursor_blink;
 mod elements;
 mod selection;
 mod state;
-mod text_navigation;
+
 /// Text transformation functions for input display (e.g., password masking).
 pub mod text_transforms;
 
@@ -25,9 +25,9 @@ pub use state::{
     SelectToStartOfLine, SelectUp, ShowCharacterPalette, Undo, Up, VisibleLineInfo, VisualLineInfo,
 };
 
+use crate::utils::TextNavigation;
 use crate::utils::{multiline_height, pixel_perfect_round, rgb_a};
 use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
-use text_navigation::TextNavigation;
 
 pub(crate) type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
 
