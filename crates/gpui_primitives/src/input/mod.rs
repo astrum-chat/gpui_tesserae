@@ -2,16 +2,17 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    AbsoluteLength, AnyElement, App, Bounds, CursorStyle, DispatchPhase, Element, ElementId,
-    ElementInputHandler, Entity, FocusHandle, Focusable, Font, GlobalElementId, Hsla,
-    InspectorElementId, InteractiveElement, IntoElement, KeyBinding, LayoutId, MouseButton,
-    MouseMoveEvent, Overflow, PaintQuad, ParentElement, Pixels, Refineable, RenderOnce, ShapedLine,
-    SharedString, Style, StyleRefinement, Styled, TextRun, UnderlineStyle, Window, div, fill, hsla,
-    point, prelude::FluentBuilder, px, relative, rgb, size, uniform_list,
+    AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
+    InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels,
+    Refineable, RenderOnce, SharedString, StyleRefinement, Styled, Window, div, hsla,
+    prelude::FluentBuilder, px, rgb, uniform_list,
 };
 
 mod cursor_blink;
+mod elements;
+mod selection;
 mod state;
+mod text_navigation;
 pub mod text_transforms;
 
 pub use cursor_blink::CursorBlink;
@@ -22,50 +23,35 @@ pub use state::{
 };
 
 use crate::utils::rgb_a;
+use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
+use text_navigation::TextNavigation;
 
-type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
+pub(crate) type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
 
 /// Small epsilon used when comparing wrap widths to prevent janky text wrapping
 /// caused by floating point precision issues triggering unnecessary recomputes.
-const WRAP_WIDTH_EPSILON: Pixels = px(1.5);
+pub(crate) const WRAP_WIDTH_EPSILON: Pixels = px(1.5);
 
-/// Calculates the height for a multiline input, rounded to the nearest device pixel.
-/// This prevents slight layout shifts caused by subpixel height variations.
 fn multiline_height(line_height: Pixels, line_count: usize, scale_factor: f32) -> Pixels {
     let height = line_height * line_count as f32;
     pixel_perfect_round(height, scale_factor)
 }
 
-/// Rounds a pixel value to the nearest device pixel.
-/// On high-DPI displays (scale_factor >= 2.0), rounds to 0.5px increments.
-/// On standard displays, rounds to 1px increments.
-fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {
+pub(crate) fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {
     let increment = if scale_factor >= 2.0 { 0.5 } else { 1.0 };
     let val = value.to_f64() as f32;
     px((val / increment).round() * increment)
 }
 
-/// Determines if trailing whitespace should be shown for a line's selection.
-/// Returns true if the newline character is "in the middle" of the selection
-/// (not at the start or end boundary).
-///
-/// Parameters:
-/// - `selected_range`: The global selection range
-/// - `line_end_offset`: Byte offset of the last character of line content
-/// - `line_len`: Length of the line content (0 for empty lines)
-/// - `local_end`: The local selection end position within this line
-/// - `text`: The full text content to check if selection starts at a newline
-fn should_show_trailing_whitespace(
+pub(crate) fn should_show_trailing_whitespace(
     selected_range: &Range<usize>,
     line_end_offset: usize,
     line_len: usize,
     local_end: usize,
     text: &str,
 ) -> bool {
-    // For empty lines, the newline IS at line_end_offset. For non-empty, it's after.
     let newline_position = line_end_offset + if line_len == 0 { 0 } else { 1 };
 
-    // Don't show trailing whitespace if selection starts at a newline character
     let selection_starts_at_newline = text
         .get(selected_range.start..selected_range.start + 1)
         .map(|c| c == "\n")
@@ -82,9 +68,8 @@ pub struct Input {
     id: ElementId,
     state: Entity<InputState>,
     disabled: bool,
-    max_lines: usize,
-    wrap: bool,
-    /// When true, use shift+enter for newlines instead of enter
+    line_clamp: usize,
+    word_wrap: bool,
     newline_on_shift_enter: bool,
     placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
@@ -106,8 +91,8 @@ impl Input {
             id: id.into(),
             state,
             disabled: false,
-            max_lines: 1,
-            wrap: false,
+            line_clamp: 1,
+            word_wrap: false,
             newline_on_shift_enter: false,
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
@@ -118,33 +103,21 @@ impl Input {
         }
     }
 
-    /// Sets the maximum number of visible lines before scrolling.
-    /// - `max_lines == 1` (default): single-line input
-    /// - `max_lines > 1`: multi-line input using uniform_list for efficient rendering
-    /// - Use `usize::MAX` for practically unlimited lines
-    pub fn max_lines(mut self, max_lines: usize) -> Self {
-        self.max_lines = max_lines.max(1);
+    pub fn line_clamp(mut self, line_clamp: usize) -> Self {
+        self.line_clamp = line_clamp.max(1);
         self
     }
 
-    /// Enables multi-line mode with unconstrained height (no scrolling).
-    /// Equivalent to `.max_lines(usize::MAX)`.
     pub fn multiline(mut self) -> Self {
-        self.max_lines = usize::MAX;
+        self.line_clamp = usize::MAX;
         self
     }
 
-    /// Enables word wrapping for multi-line input.
-    /// Text will wrap at word boundaries when it exceeds the input width.
-    /// Only effective when `max_lines > 1`.
-    pub fn wrap(mut self, wrap: bool) -> Self {
-        self.wrap = wrap;
+    pub fn word_wrap(mut self, word_wrap: bool) -> Self {
+        self.word_wrap = word_wrap;
         self
     }
 
-    /// When enabled, use shift+enter to insert newlines instead of enter.
-    /// This is useful for form inputs where enter should submit the form.
-    /// Only effective when `max_lines > 1`.
     pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
         self.newline_on_shift_enter = enabled;
         self
@@ -158,8 +131,6 @@ impl Input {
         self
     }
 
-    /// Transform the text value whenever it changes.
-    /// Unlike `transform_text`, this actually modifies the stored value.
     pub fn map_text(
         mut self,
         f: impl Fn(SharedString) -> SharedString + Send + Sync + 'static,
@@ -197,962 +168,10 @@ impl Input {
     }
 }
 
-struct TextElement {
-    input: Entity<InputState>,
-    placeholder: SharedString,
-    text_color: Hsla,
-    placeholder_text_color: Hsla,
-    highlight_text_color: Hsla,
-    line_height: Pixels,
-    font_size: Pixels,
-    font: Font,
-    transform_text: Option<TransformTextFn>,
-    cursor_visible: bool,
-}
-
-struct PrepaintState {
-    line: Option<ShapedLine>,
-    cursor: Option<PaintQuad>,
-    selection: Option<PaintQuad>,
-    /// Horizontal scroll offset for rendering (in pixels)
-    scroll_offset: Pixels,
-}
-
-impl IntoElement for TextElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for TextElement {
-    type RequestLayoutState = ();
-    type PrepaintState = PrepaintState;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        let content = self.input.read(cx).value();
-        let selected_range = self.input.read(cx).selected_range.clone();
-        let cursor = self.input.read(cx).cursor_offset();
-        let marked_range = self.input.read(cx).marked_range.clone();
-
-        let (display_text, text_color) = if content.is_empty() {
-            (self.placeholder.clone(), self.placeholder_text_color)
-        } else if let Some(transform) = &self.transform_text {
-            let transformed: String = content.chars().map(|c| transform(c)).collect();
-            (transformed.into(), self.text_color)
-        } else {
-            (content, self.text_color)
-        };
-
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-
-        let runs = if let Some(marked_range) = marked_range.as_ref() {
-            vec![
-                TextRun {
-                    len: marked_range.start,
-                    ..run.clone()
-                },
-                TextRun {
-                    len: marked_range.end - marked_range.start,
-                    underline: Some(UnderlineStyle {
-                        color: Some(run.color),
-                        thickness: px(1.0),
-                        wavy: false,
-                    }),
-                    ..run.clone()
-                },
-                TextRun {
-                    len: display_text.len() - marked_range.end,
-                    ..run
-                },
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect()
-        } else {
-            vec![run]
-        };
-
-        let line = window
-            .text_system()
-            .shape_line(display_text, self.font_size, &runs, None);
-
-        // Get cursor position in text coordinates
-        let cursor_x = line.x_for_index(cursor);
-        let container_width = bounds.size.width;
-        let text_width = line.width;
-
-        // Update horizontal scroll to keep cursor visible, and store metrics for scroll wheel
-        let scroll_offset = self.input.update(cx, |input, _cx| {
-            input.last_text_width = text_width;
-            input.last_bounds = Some(bounds);
-            input.ensure_cursor_visible_horizontal(cursor_x, container_width)
-        });
-
-        // Calculate positions with scroll offset applied
-        let (selection, cursor_quad) = if selected_range.is_empty() {
-            let height = bounds.bottom() - bounds.top();
-            let adjusted_height = height * 0.8;
-            let height_diff = height - adjusted_height;
-
-            (
-                None,
-                Some(fill(
-                    Bounds::new(
-                        point(
-                            bounds.left() + cursor_x - scroll_offset,
-                            bounds.top() + height_diff / 2.,
-                        ),
-                        size(px(1.), adjusted_height),
-                    ),
-                    self.text_color,
-                )),
-            )
-        } else {
-            let selection_start_x = line.x_for_index(selected_range.start);
-            let selection_end_x = line.x_for_index(selected_range.end);
-            (
-                Some(fill(
-                    Bounds::from_corners(
-                        point(
-                            bounds.left() + selection_start_x - scroll_offset,
-                            bounds.top(),
-                        ),
-                        point(
-                            bounds.left() + selection_end_x - scroll_offset,
-                            bounds.bottom(),
-                        ),
-                    ),
-                    self.highlight_text_color,
-                )),
-                None,
-            )
-        };
-
-        PrepaintState {
-            line: Some(line),
-            cursor: cursor_quad,
-            selection,
-            scroll_offset,
-        }
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let focus_handle = self.input.read(cx).focus_handle.clone();
-
-        // Register window-level mouse move listener to handle selection
-        // even when cursor leaves the input bounds during drag
-        let input = self.input.clone();
-        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
-            if phase == DispatchPhase::Capture {
-                return;
-            }
-
-            input.update(cx, |input, cx| {
-                if input.is_selecting {
-                    input.select_to(input.index_for_mouse_position(event.position), cx);
-                }
-            });
-        });
-
-        window.handle_input(
-            &focus_handle,
-            ElementInputHandler::new(bounds, self.input.clone()),
-            cx,
-        );
-
-        // Clip content to bounds to prevent overflow
-        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            if let Some(selection) = prepaint.selection.take() {
-                window.paint_quad(selection)
-            }
-
-            let line = prepaint.line.take().unwrap();
-            // Render text shifted left by scroll offset
-            let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
-            line.paint(
-                text_origin,
-                self.line_height,
-                gpui::TextAlign::Left,
-                None,
-                window,
-                cx,
-            )
-            .unwrap();
-
-            if focus_handle.is_focused(window)
-                && self.cursor_visible
-                && let Some(cursor) = prepaint.cursor.take()
-            {
-                window.paint_quad(cursor);
-            }
-
-            self.input.update(cx, |input, _cx| {
-                input.last_layout = Some(line);
-                input.last_bounds = Some(bounds);
-            });
-        });
-    }
-}
-
-/// Element for rendering a single line in a multi-line input.
-/// Used by uniform_list to render only the visible lines.
-struct LineElement {
-    input: Entity<InputState>,
-    line_index: usize,
-    line_start_offset: usize,
-    line_end_offset: usize,
-    text_color: Hsla,
-    placeholder_text_color: Hsla,
-    highlight_text_color: Hsla,
-    line_height: Pixels,
-    font_size: Pixels,
-    font: Font,
-    transform_text: Option<TransformTextFn>,
-    cursor_visible: bool,
-    /// The global selection range from InputState
-    selected_range: Range<usize>,
-    /// The cursor position (byte offset in full text)
-    cursor_offset: usize,
-    /// Placeholder text (only shown on first line when empty)
-    placeholder: SharedString,
-    /// Whether the input is empty
-    is_empty: bool,
-}
-
-struct LinePrepaintState {
-    line: Option<ShapedLine>,
-    cursor: Option<PaintQuad>,
-    selection: Option<PaintQuad>,
-    /// Horizontal scroll offset for rendering (in pixels)
-    scroll_offset: Pixels,
-}
-
-impl IntoElement for LineElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for LineElement {
-    type RequestLayoutState = ();
-    type PrepaintState = LinePrepaintState;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        let input = self.input.read(cx);
-        let full_value = input.value();
-
-        // Get line content as owned String to avoid lifetime issues
-        let line_content: String =
-            full_value[self.line_start_offset..self.line_end_offset].to_string();
-
-        // Determine display text and color
-        let (display_text, text_color): (SharedString, Hsla) =
-            if self.is_empty && self.line_index == 0 {
-                // Show placeholder on first line when empty
-                (self.placeholder.clone(), self.placeholder_text_color)
-            } else if let Some(transform) = &self.transform_text {
-                let transformed: String = line_content.chars().map(|c| transform(c)).collect();
-                (transformed.into(), self.text_color)
-            } else {
-                (line_content.clone().into(), self.text_color)
-            };
-
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-
-        let line = window
-            .text_system()
-            .shape_line(display_text, self.font_size, &[run], None);
-
-        // Calculate selection and cursor for this line
-
-        // Check if cursor is on this line
-        let cursor_on_this_line = self.cursor_offset >= self.line_start_offset
-            && self.cursor_offset <= self.line_end_offset;
-
-        // Calculate local cursor position within this line
-        let local_cursor = if cursor_on_this_line {
-            Some(self.cursor_offset - self.line_start_offset)
-        } else {
-            None
-        };
-
-        // Calculate selection intersection with this line
-        // For empty lines, the selection intersects if the line's position is within the selection range
-        // The newline character at line_end_offset is part of this line's selection
-        let selection_intersects = self.selected_range.start <= self.line_end_offset
-            && self.selected_range.end > self.line_start_offset;
-
-        // Get container width and calculate scroll offset
-        // We need to calculate scroll based on cursor position, even if cursor isn't on this line,
-        // so that all lines use the same scroll offset for consistent rendering
-        let container_width = bounds.size.width;
-        let scroll_offset = {
-            // Calculate cursor X position in text coordinates (may be on a different line)
-            let cursor_x = if let Some(local_cursor) = local_cursor {
-                // Cursor is on this line - use local cursor position
-                line.x_for_index(local_cursor)
-            } else {
-                // Cursor is on a different line - we need to calculate its X position
-                // Get the cursor's line content and shape it to find the X position
-                let cursor_line = self.input.read(cx).offset_to_line_col(self.cursor_offset).0;
-                if cursor_line == self.line_index {
-                    // This shouldn't happen since local_cursor would be Some, but handle it
-                    line.x_for_index(0)
-                } else {
-                    // Cursor is on a different line - get that line's cursor X
-                    let input = self.input.read(cx);
-                    let (cursor_line_idx, cursor_col) =
-                        input.offset_to_line_col(self.cursor_offset);
-                    let cursor_line_start = input.line_start_offset(cursor_line_idx);
-                    let cursor_line_end = input.line_end_offset(cursor_line_idx);
-                    let cursor_line_content: String =
-                        input.value()[cursor_line_start..cursor_line_end].to_string();
-
-                    // Shape the cursor's line to get the X position
-                    let cursor_run = TextRun {
-                        len: cursor_line_content.len(),
-                        font: self.font.clone(),
-                        color: self.text_color,
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    };
-                    let cursor_line_shaped = window.text_system().shape_line(
-                        cursor_line_content.into(),
-                        self.font_size,
-                        &[cursor_run],
-                        None,
-                    );
-                    cursor_line_shaped.x_for_index(cursor_col)
-                }
-            };
-
-            let text_width = line.width;
-            self.input.update(cx, |input, _cx| {
-                // Update max text width across all lines for scroll wheel
-                if text_width > input.last_text_width {
-                    input.last_text_width = text_width;
-                }
-                input.last_bounds = Some(bounds);
-                input.ensure_cursor_visible_horizontal(cursor_x, container_width)
-            })
-        };
-
-        let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            // Calculate local selection range
-            let local_start = self
-                .selected_range
-                .start
-                .saturating_sub(self.line_start_offset)
-                .min(line_content.len());
-            let local_end = self
-                .selected_range
-                .end
-                .saturating_sub(self.line_start_offset)
-                .min(line_content.len());
-
-            let selection_start_x = line.x_for_index(local_start);
-            let mut selection_end_x = line.x_for_index(local_end);
-
-            // Add trailing whitespace (1 space wide) to visually connect multi-line selections
-            if should_show_trailing_whitespace(
-                &self.selected_range,
-                self.line_end_offset,
-                line_content.len(),
-                local_end,
-                &full_value,
-            ) {
-                let space_run = TextRun {
-                    len: 1,
-                    font: self.font.clone(),
-                    color: self.text_color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let space_line =
-                    window
-                        .text_system()
-                        .shape_line(" ".into(), self.font_size, &[space_run], None);
-                selection_end_x = selection_end_x + space_line.x_for_index(1);
-            }
-
-            (
-                Some(fill(
-                    Bounds::from_corners(
-                        point(
-                            bounds.left() + selection_start_x - scroll_offset,
-                            bounds.top(),
-                        ),
-                        point(
-                            bounds.left() + selection_end_x - scroll_offset,
-                            bounds.bottom(),
-                        ),
-                    ),
-                    self.highlight_text_color,
-                )),
-                None,
-            )
-        } else if let Some(local_cursor) = local_cursor {
-            let cursor_pos = line.x_for_index(local_cursor);
-            let height = bounds.bottom() - bounds.top();
-            let adjusted_height = height * 0.8;
-            let height_diff = height - adjusted_height;
-
-            (
-                None,
-                Some(fill(
-                    Bounds::new(
-                        point(
-                            bounds.left() + cursor_pos - scroll_offset,
-                            bounds.top() + height_diff / 2.,
-                        ),
-                        size(px(1.), adjusted_height),
-                    ),
-                    self.text_color,
-                )),
-            )
-        } else {
-            (None, None)
-        };
-
-        LinePrepaintState {
-            line: Some(line),
-            cursor,
-            selection,
-            scroll_offset,
-        }
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let focus_handle = self.input.read(cx).focus_handle.clone();
-        let line = prepaint.line.take().unwrap();
-
-        // Store visible line info for mouse hit testing
-        self.input.update(cx, |input, _cx| {
-            input.visible_lines_info.push(VisibleLineInfo {
-                line_index: self.line_index,
-                bounds,
-                shaped_line: line.clone(),
-            });
-        });
-
-        // Clip content to bounds to prevent overflow
-        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            if let Some(selection) = prepaint.selection.take() {
-                window.paint_quad(selection)
-            }
-
-            // Render text shifted left by scroll offset
-            let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
-            line.paint(
-                text_origin,
-                self.line_height,
-                gpui::TextAlign::Left,
-                None,
-                window,
-                cx,
-            )
-            .unwrap();
-
-            if focus_handle.is_focused(window)
-                && self.cursor_visible
-                && let Some(cursor) = prepaint.cursor.take()
-            {
-                window.paint_quad(cursor);
-            }
-        });
-    }
-}
-
-/// Element for rendering a single visual line in wrapped multi-line input.
-/// Used by uniform_list to render only visible wrapped lines.
-struct WrappedLineElement {
-    input: Entity<InputState>,
-    /// Index into precomputed_visual_lines
-    visual_line_index: usize,
-    text_color: Hsla,
-    placeholder_text_color: Hsla,
-    highlight_text_color: Hsla,
-    line_height: Pixels,
-    font_size: Pixels,
-    font: Font,
-    transform_text: Option<TransformTextFn>,
-    cursor_visible: bool,
-    /// The global selection range from InputState
-    selected_range: Range<usize>,
-    /// The cursor position (byte offset in full text)
-    cursor_offset: usize,
-    /// Placeholder text (only shown on first visual line when empty)
-    placeholder: SharedString,
-    /// Whether the input is empty
-    is_empty: bool,
-}
-
-struct WrappedLinePrepaintState {
-    line: Option<ShapedLine>,
-    cursor: Option<PaintQuad>,
-    selection: Option<PaintQuad>,
-}
-
-impl IntoElement for WrappedLineElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for WrappedLineElement {
-    type RequestLayoutState = ();
-    type PrepaintState = WrappedLinePrepaintState;
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-
-        (window.request_layout(style, [], cx), ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        // Check if actual line bounds differ from wrap width - schedule recompute if needed
-        let actual_line_width = bounds.size.width;
-        {
-            let input = self.input.read(cx);
-            if let Some(precomputed_width) = input.precomputed_at_width {
-                if (precomputed_width - actual_line_width).abs() > WRAP_WIDTH_EPSILON
-                    && !input.needs_wrap_recompute
-                {
-                    let _ = input;
-                    self.input.update(cx, |input, cx| {
-                        input.cached_wrap_width = Some(actual_line_width);
-                        input.needs_wrap_recompute = true;
-                        // DON'T clear visual lines - let current frame finish rendering
-                        cx.notify();
-                    });
-                    // DON'T return early - continue rendering with existing lines
-                }
-            }
-        }
-
-        let input = self.input.read(cx);
-
-        // Get the visual line info
-        let visual_info = input
-            .precomputed_visual_lines
-            .get(self.visual_line_index)
-            .cloned();
-
-        let Some(info) = visual_info else {
-            return WrappedLinePrepaintState {
-                line: None,
-                cursor: None,
-                selection: None,
-            };
-        };
-
-        // Get display text for this visual line
-        let (display_text, text_color): (SharedString, Hsla) =
-            if self.is_empty && self.visual_line_index == 0 {
-                // Show placeholder on first line when empty
-                (self.placeholder.clone(), self.placeholder_text_color)
-            } else {
-                let value = input.value();
-                let segment = &value[info.start_offset..info.end_offset];
-                let text: SharedString = if let Some(transform) = &self.transform_text {
-                    segment
-                        .chars()
-                        .map(|c| transform(c))
-                        .collect::<String>()
-                        .into()
-                } else {
-                    segment.to_string().into()
-                };
-                (text, self.text_color)
-            };
-
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-
-        let line = window
-            .text_system()
-            .shape_line(display_text, self.font_size, &[run], None);
-
-        // Calculate selection and cursor for this visual line
-        let line_start = info.start_offset;
-        let line_end = info.end_offset;
-        let line_len = line_end - line_start;
-
-        // Check if cursor is on this visual line
-        let cursor_on_this_line =
-            self.cursor_offset >= line_start && self.cursor_offset <= line_end;
-
-        let local_cursor = if cursor_on_this_line {
-            Some(self.cursor_offset - line_start)
-        } else {
-            None
-        };
-
-        // Calculate selection intersection with this visual line
-        // For empty lines, the selection intersects if the line's position is within the selection range
-        let selection_intersects =
-            self.selected_range.start <= line_end && self.selected_range.end > line_start;
-
-        let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            let local_start = self
-                .selected_range
-                .start
-                .saturating_sub(line_start)
-                .min(line_len);
-            let local_end = self
-                .selected_range
-                .end
-                .saturating_sub(line_start)
-                .min(line_len);
-
-            let selection_start_x = line.x_for_index(local_start);
-            let mut selection_end_x = line.x_for_index(local_end);
-
-            // Add trailing whitespace (1 space wide) to visually connect multi-line selections
-            let value = input.value();
-            if should_show_trailing_whitespace(
-                &self.selected_range,
-                line_end,
-                line_len,
-                local_end,
-                &value,
-            ) {
-                let space_run = TextRun {
-                    len: 1,
-                    font: self.font.clone(),
-                    color: self.text_color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let space_line =
-                    window
-                        .text_system()
-                        .shape_line(" ".into(), self.font_size, &[space_run], None);
-                selection_end_x = selection_end_x + space_line.x_for_index(1);
-            }
-
-            (
-                Some(fill(
-                    Bounds::from_corners(
-                        point(bounds.left() + selection_start_x, bounds.top()),
-                        point(bounds.left() + selection_end_x, bounds.bottom()),
-                    ),
-                    self.highlight_text_color,
-                )),
-                None,
-            )
-        } else if let Some(local_cursor) = local_cursor {
-            let cursor_pos = line.x_for_index(local_cursor);
-            let height = bounds.bottom() - bounds.top();
-            let adjusted_height = height * 0.8;
-            let height_diff = height - adjusted_height;
-
-            (
-                None,
-                Some(fill(
-                    Bounds::new(
-                        point(bounds.left() + cursor_pos, bounds.top() + height_diff / 2.),
-                        size(px(1.), adjusted_height),
-                    ),
-                    self.text_color,
-                )),
-            )
-        } else {
-            (None, None)
-        };
-
-        WrappedLinePrepaintState {
-            line: Some(line),
-            cursor,
-            selection,
-        }
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let focus_handle = self.input.read(cx).focus_handle.clone();
-
-        if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
-        }
-
-        let Some(line) = prepaint.line.take() else {
-            return;
-        };
-
-        // Store visible line info for mouse hit testing
-        self.input.update(cx, |input, _cx| {
-            input.visible_lines_info.push(VisibleLineInfo {
-                line_index: self.visual_line_index,
-                bounds,
-                shaped_line: line.clone(),
-            });
-        });
-
-        line.paint(
-            bounds.origin,
-            self.line_height,
-            gpui::TextAlign::Left,
-            None,
-            window,
-            cx,
-        )
-        .unwrap();
-
-        if focus_handle.is_focused(window)
-            && self.cursor_visible
-            && let Some(cursor) = prepaint.cursor.take()
-        {
-            window.paint_quad(cursor);
-        }
-    }
-}
-
-/// Wrapper element that contains a uniform_list and registers the input handler.
-/// This is needed because uniform_list doesn't provide a paint hook where we can
-/// call window.handle_input().
-struct UniformListInputElement {
-    input: Entity<InputState>,
-    child: AnyElement,
-}
-
-impl IntoElement for UniformListInputElement {
-    type Element = Self;
-
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
-
-impl Element for UniformListInputElement {
-    type RequestLayoutState = ();
-    type PrepaintState = ();
-
-    fn id(&self) -> Option<ElementId> {
-        None
-    }
-
-    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
-        None
-    }
-
-    fn request_layout(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let layout_id = self.child.request_layout(window, cx);
-        (layout_id, ())
-    }
-
-    fn prepaint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        self.child.prepaint(window, cx);
-    }
-
-    fn paint(
-        &mut self,
-        _id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        _request_layout: &mut Self::RequestLayoutState,
-        _prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let focus_handle = self.input.read(cx).focus_handle.clone();
-
-        window.handle_input(
-            &focus_handle,
-            ElementInputHandler::new(bounds, self.input.clone()),
-            cx,
-        );
-
-        // Register window-level mouse move listener to handle selection
-        // even when cursor leaves the input bounds during drag
-        let input = self.input.clone();
-        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
-            if phase == DispatchPhase::Capture {
-                return;
-            }
-
-            input.update(cx, |input, cx| {
-                if input.is_selecting {
-                    if let Some(line_height) = input.line_height {
-                        input.select_to_multiline(event.position, line_height, cx);
-                    }
-                }
-            });
-        });
-
-        // Clear visible_lines_info before painting - LineElement will repopulate it
-        self.input.update(cx, |input, _cx| {
-            input.visible_lines_info.clear();
-        });
-
-        self.child.paint(window, cx);
-
-        // Store bounds for mouse position calculations
-        self.input.update(cx, |input, cx| {
-            input.last_bounds = Some(bounds);
-            cx.notify();
-        });
-    }
-}
-
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let is_multiline = self.max_lines > 1;
+        let is_multiline = self.line_clamp > 1;
 
-        // Calculate line_height, font_size, and font from self.style.text
         let text_style = &self.style.text;
         let font_size = match text_style.font_size.expect("font_size must be set") {
             AbsoluteLength::Pixels(px) => px,
@@ -1162,11 +181,9 @@ impl RenderOnce for Input {
             .line_height
             .expect("line_height must be set")
             .to_pixels(font_size.into(), window.rem_size());
-        // Round to nearest device pixel to prevent subpixel layout shifts
         let scale_factor = window.scale_factor();
         let line_height = pixel_perfect_round(line_height, scale_factor);
 
-        // Build font from StyleRefinement
         let font = Font {
             family: text_style
                 .font_family
@@ -1178,11 +195,10 @@ impl RenderOnce for Input {
             style: text_style.font_style.unwrap_or_default(),
         };
 
-        // Update focus state, multiline params, and map_text
         let map_text = self.map_text.clone();
         self.state.update(cx, |state, cx| {
             state.update_focus_state(window, cx);
-            state.set_multiline_params(is_multiline, line_height, self.max_lines);
+            state.set_multiline_params(is_multiline, line_height, self.line_clamp);
             state.map_text = map_text;
         });
 
@@ -1229,13 +245,11 @@ impl RenderOnce for Input {
             .on_action(window.listener_for(&self.state, InputState::paste))
             .on_action(window.listener_for(&self.state, InputState::cut))
             .on_action(window.listener_for(&self.state, InputState::copy))
-            // Multi-line navigation actions
             .when(is_multiline, |this| {
                 this.on_action(window.listener_for(&self.state, InputState::up))
                     .on_action(window.listener_for(&self.state, InputState::down))
                     .on_action(window.listener_for(&self.state, InputState::select_up))
                     .on_action(window.listener_for(&self.state, InputState::select_down))
-                    // Bind newline action based on configuration
                     .when(!self.newline_on_shift_enter, |this| {
                         this.on_action(window.listener_for(&self.state, InputState::insert_newline))
                     })
@@ -1259,18 +273,16 @@ impl RenderOnce for Input {
             )
             .on_mouse_move(window.listener_for(&self.state, InputState::on_mouse_move))
             .on_scroll_wheel(window.listener_for(&self.state, InputState::on_scroll_wheel))
-            .when(is_multiline && !self.wrap, |this| {
-                // Multi-line non-wrapped mode: use uniform_list for efficient scrolling
+            .when(is_multiline && !self.word_wrap, |this| {
                 let font = font.clone();
                 let line_count = state.line_count().max(1);
                 let scroll_handle = state.scroll_handle.clone();
                 let input_state = self.state.clone();
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
-                let max_lines = self.max_lines;
+                let line_clamp = self.line_clamp;
 
-                // Only enable scroll tracking when content exceeds max_lines
-                let needs_scroll = line_count > max_lines;
+                let needs_scroll = line_count > line_clamp;
 
                 let list = uniform_list(
                     self.id.clone(),
@@ -1282,7 +294,6 @@ impl RenderOnce for Input {
                         let cursor_offset = state.cursor_offset();
                         let is_empty = value.is_empty();
 
-                        // Pre-compute line offsets
                         let mut line_offsets: Vec<(usize, usize)> = Vec::new();
                         let mut start = 0;
                         for line in value.split('\n') {
@@ -1321,14 +332,13 @@ impl RenderOnce for Input {
                 .track_scroll(&scroll_handle)
                 .map(|mut list| {
                     if !needs_scroll {
-                        // Override the default overflow.y = Scroll to prevent scrolling
                         list.style().overflow.y = Some(Overflow::Hidden);
                     }
                     list
                 })
                 .h(multiline_height(
                     line_height,
-                    max_lines.min(line_count).max(1),
+                    line_clamp.min(line_count).max(1),
                     scale_factor,
                 ));
 
@@ -1337,21 +347,17 @@ impl RenderOnce for Input {
                     child: list.into_any_element(),
                 })
             })
-            .when(is_multiline && self.wrap, |this| {
-                // Multi-line wrapped mode: use uniform_list with visual lines
-                // Note: We capture what we need before entering the closure to avoid borrow issues
+            .when(is_multiline && self.word_wrap, |this| {
                 let font = font.clone();
                 let scroll_handle = self.state.read(cx).scroll_handle.clone();
                 let cached_wrap_width = self.state.read(cx).cached_wrap_width;
                 let input_state = self.state.clone();
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
-                let max_lines = self.max_lines;
+                let line_clamp = self.line_clamp;
 
-                // Pre-compute visual lines using cached width (or default)
                 let wrap_width = cached_wrap_width.unwrap_or(px(300.));
                 let visual_line_count = self.state.update(cx, |state, _cx| {
-                    // Only recompute if needed (flag set, or no lines yet)
                     let should_recompute =
                         state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty();
 
@@ -1372,8 +378,7 @@ impl RenderOnce for Input {
                     }
                 });
 
-                // Only enable scroll tracking when content exceeds max_lines
-                let needs_scroll = visual_line_count > max_lines;
+                let needs_scroll = visual_line_count > line_clamp;
 
                 let list = uniform_list(
                     self.id.clone(),
@@ -1407,14 +412,13 @@ impl RenderOnce for Input {
                 .track_scroll(&scroll_handle)
                 .map(|mut list| {
                     if !needs_scroll {
-                        // Override the default overflow.y = Scroll to prevent scrolling
                         list.style().overflow.y = Some(Overflow::Hidden);
                     }
                     list
                 })
                 .h(multiline_height(
                     line_height,
-                    max_lines.min(visual_line_count).max(1),
+                    line_clamp.min(visual_line_count).max(1),
                     scale_factor,
                 ));
 
@@ -1424,7 +428,6 @@ impl RenderOnce for Input {
                 })
             })
             .when(!is_multiline, |this| {
-                // Single-line mode: use TextElement directly
                 this.child(TextElement {
                     input: self.state.clone(),
                     placeholder: self.placeholder,

@@ -45,7 +45,7 @@ Input::new("input", state)
 
 // Fixed number of visible lines (scrolls after 5 lines).
 Input::new("input", state)
-    .max_lines(5)
+    .line_clamp(5)
 
 // Unlimited lines (grows indefinitely).
 Input::new("input", state)
@@ -54,7 +54,7 @@ Input::new("input", state)
 // With word wrapping enabled.
 Input::new("input", state)
     .multiline()
-    .wrap(true)
+    .word_wrap(true)
 
 // Shift+Enter for newlines (useful for form inputs where Enter submits).
 Input::new("input", state)

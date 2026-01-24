@@ -151,15 +151,15 @@ impl Input {
     }
 
     /// Sets the maximum number of visible lines before scrolling.
-    /// - `max_lines == 1` (default): single-line input
-    /// - `max_lines > 1`: multi-line input using uniform_list for efficient rendering
-    pub fn max_lines(mut self, max_lines: usize) -> Self {
-        self.base = self.base.max_lines(max_lines);
+    /// - `line_clamp == 1` (default): single-line input
+    /// - `line_clamp > 1`: multi-line input using uniform_list for efficient rendering
+    pub fn line_clamp(mut self, line_clamp: usize) -> Self {
+        self.base = self.base.line_clamp(line_clamp);
         self
     }
 
     /// Enables multi-line mode with unconstrained height (no scrolling).
-    /// Equivalent to `.max_lines(usize::MAX)`.
+    /// Equivalent to `.line_clamp(usize::MAX)`.
     pub fn multiline(mut self) -> Self {
         self.base = self.base.multiline();
         self
@@ -167,15 +167,15 @@ impl Input {
 
     /// Enables word wrapping for multi-line input.
     /// Text will wrap at word boundaries when it exceeds the input width.
-    /// Only effective when `max_lines > 1`.
-    pub fn wrap(mut self, wrap: bool) -> Self {
-        self.base = self.base.wrap(wrap);
+    /// Only effective when `line_clamp > 1`.
+    pub fn word_wrap(mut self, word_wrap: bool) -> Self {
+        self.base = self.base.word_wrap(word_wrap);
         self
     }
 
     /// When enabled, use shift+enter to insert newlines instead of enter.
     /// This is useful for form inputs where enter should submit the form.
-    /// Only effective when `max_lines > 1`.
+    /// Only effective when `line_clamp > 1`.
     pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
         self.base = self.base.newline_on_shift_enter(enabled);
         self

@@ -1,12 +1,13 @@
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
-    Focusable, Font, Hsla, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
-    Point, Render, ScrollStrategy, ScrollWheelEvent, ShapedLine, SharedString, TextRun,
-    UTF16Selection, UniformListScrollHandle, Window, WrappedLine, actions, div, point, px,
+    Focusable, Font, Hsla, IntoElement, Pixels, Render, ScrollStrategy, ScrollWheelEvent,
+    ShapedLine, SharedString, TextRun, UTF16Selection, UniformListScrollHandle, Window,
+    WrappedLine, actions, div, point, px,
 };
 use std::ops::Range;
 use std::sync::Arc;
-use unicode_segmentation::UnicodeSegmentation;
+
+use super::text_navigation::TextNavigation;
 
 /// Information about a visual line in wrapped text.
 /// Maps visual lines (what the user sees) to byte offsets in the text.
@@ -39,12 +40,6 @@ pub struct VisibleLineInfo {
 pub type MapTextFn = Arc<dyn Fn(SharedString) -> SharedString + Send + Sync>;
 
 use super::CursorBlink;
-
-/// Returns true if the character is a word character (alphanumeric or underscore).
-/// This matches web browser behavior for double-click word selection.
-fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
 
 actions!(
     text_input,
@@ -94,7 +89,7 @@ pub struct InputState {
     /// Scroll handle for uniform_list (both wrapped and non-wrapped modes)
     pub scroll_handle: UniformListScrollHandle,
     /// Maximum visible lines (for scroll calculations)
-    pub(crate) max_lines: usize,
+    pub(crate) line_clamp: usize,
     /// Visible line info for uniform_list mode - populated during paint
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
     /// Cached container width for wrapped text calculations (set during prepaint)
@@ -138,7 +133,7 @@ impl InputState {
             map_text: None,
             is_wrapped: false,
             scroll_handle: UniformListScrollHandle::new(),
-            max_lines: 1,
+            line_clamp: 1,
             visible_lines_info: Vec::new(),
             cached_wrap_width: None,
             precomputed_visual_lines: Vec::new(),
@@ -158,11 +153,11 @@ impl InputState {
         &mut self,
         is_multiline: bool,
         line_height: Pixels,
-        max_lines: usize,
+        line_clamp: usize,
     ) {
         self.is_multiline = is_multiline;
         self.line_height = Some(line_height);
-        self.max_lines = max_lines;
+        self.line_clamp = line_clamp;
     }
 
     /// Pre-compute visual line info for wrapped text.
@@ -293,9 +288,9 @@ impl InputState {
         };
 
         // Only scroll if there's actually content that could need scrolling
-        // (more lines than max_lines). Otherwise, scrolling can cause
+        // (more lines than line_clamp). Otherwise, scrolling can cause
         // unnecessary visual shifts.
-        if total_lines > self.max_lines {
+        if total_lines > self.line_clamp {
             self.scroll_handle
                 .scroll_to_item(target_line, ScrollStrategy::Center);
         }
@@ -376,7 +371,7 @@ impl InputState {
         });
     }
 
-    fn reset_cursor_blink(&self, cx: &mut Context<Self>) {
+    pub(crate) fn reset_cursor_blink(&self, cx: &mut Context<Self>) {
         self.cursor_blink.update(cx, |blink, cx| {
             blink.reset(cx);
         });
@@ -511,62 +506,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    pub fn on_mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.is_selecting = true;
-
-        let index = if self.is_multiline {
-            if let Some(line_height) = self.line_height {
-                self.index_for_multiline_position(event.position, line_height)
-            } else {
-                self.index_for_mouse_position(event.position)
-            }
-        } else {
-            self.index_for_mouse_position(event.position)
-        };
-
-        if event.click_count >= 3 {
-            // Triple-click: select all
-            self.move_to(0, cx);
-            self.select_to(self.value().len(), cx);
-        } else if event.click_count == 2 {
-            // Double-click: select word
-            self.select_word_at(index, cx);
-        } else if event.modifiers.shift {
-            self.select_to(index, cx);
-        } else {
-            self.move_to(index, cx)
-        }
-    }
-
-    pub fn on_mouse_up(&mut self, _: &MouseUpEvent, _window: &mut Window, _: &mut Context<Self>) {
-        self.is_selecting = false;
-    }
-
-    pub fn on_mouse_move(
-        &mut self,
-        event: &MouseMoveEvent,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self.is_selecting {
-            let index = if self.is_multiline {
-                if let Some(line_height) = self.line_height {
-                    self.index_for_multiline_position(event.position, line_height)
-                } else {
-                    self.index_for_mouse_position(event.position)
-                }
-            } else {
-                self.index_for_mouse_position(event.position)
-            };
-            self.select_to(index, cx);
-        }
-    }
-
     pub fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -672,269 +611,6 @@ impl InputState {
         }
     }
 
-    pub fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
-        if self.value().is_empty() {
-            return 0;
-        }
-
-        let (Some(bounds), Some(line)) = (self.last_bounds.as_ref(), self.last_layout.as_ref())
-        else {
-            return 0;
-        };
-
-        // Handle positions outside bounds for selection during drag
-        if position.y < bounds.top() {
-            return 0;
-        }
-        if position.y > bounds.bottom() {
-            return self.value().len();
-        }
-
-        // For horizontal positions outside bounds, select to start/end
-        if position.x < bounds.left() {
-            return 0;
-        }
-        if position.x > bounds.right() {
-            return self.value().len();
-        }
-
-        // Account for horizontal scroll offset when calculating index
-        let x_in_text = position.x - bounds.left() + self.horizontal_scroll_offset;
-        line.closest_index_for_x(x_in_text)
-    }
-
-    pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
-        if self.selection_reversed {
-            self.selected_range.start = offset
-        } else {
-            self.selected_range.end = offset
-        };
-        if self.selected_range.end < self.selected_range.start {
-            self.selection_reversed = !self.selection_reversed;
-            self.selected_range = self.selected_range.end..self.selected_range.start;
-        }
-        self.reset_cursor_blink(cx);
-        cx.notify()
-    }
-
-    /// Select the word at the given byte offset.
-    /// A word consists of consecutive alphanumeric characters and underscores.
-    pub fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
-        let start = self.word_start(offset);
-        let end = self.word_end(start);
-        self.selected_range = start..end;
-        self.selection_reversed = false;
-        self.reset_cursor_blink(cx);
-        cx.notify()
-    }
-
-    /// Select to a position in multi-line mode, accounting for line height.
-    /// Also auto-scrolls when dragging outside the input bounds.
-    pub fn select_to_multiline(
-        &mut self,
-        position: Point<Pixels>,
-        line_height: Pixels,
-        cx: &mut Context<Self>,
-    ) {
-        let offset = self.index_for_multiline_position(position, line_height);
-        self.select_to(offset, cx);
-
-        // Auto-scroll when dragging outside bounds
-        if self.is_selecting {
-            if let Some(bounds) = &self.last_bounds {
-                if position.y < bounds.top() {
-                    // Dragging above - scroll up
-                    self.scroll_up_one_line();
-                } else if position.y > bounds.bottom() {
-                    // Dragging below - scroll down
-                    self.scroll_down_one_line();
-                }
-            }
-        }
-    }
-
-    /// Scroll up by one line (used for drag-to-select auto-scrolling)
-    fn scroll_up_one_line(&self) {
-        if let Some(first) = self.visible_lines_info.first() {
-            if first.line_index > 0 {
-                self.scroll_handle
-                    .scroll_to_item(first.line_index - 1, ScrollStrategy::Top);
-            }
-        }
-    }
-
-    /// Scroll down by one line (used for drag-to-select auto-scrolling)
-    fn scroll_down_one_line(&self) {
-        let line_count = if self.is_wrapped {
-            self.precomputed_visual_lines.len()
-        } else {
-            self.line_count()
-        };
-
-        if let Some(last) = self.visible_lines_info.last() {
-            if last.line_index + 1 < line_count {
-                self.scroll_handle
-                    .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
-            }
-        }
-    }
-
-    /// Calculate the byte offset for a mouse position in multi-line mode
-    pub fn index_for_multiline_position(
-        &self,
-        position: Point<Pixels>,
-        line_height: Pixels,
-    ) -> usize {
-        let value = self.value();
-        if value.is_empty() {
-            return 0;
-        }
-
-        // Use visible_lines_info for accurate hit testing (works for both wrapped and non-wrapped)
-        if !self.visible_lines_info.is_empty() {
-            // Check if position is within any visible line
-            for info in &self.visible_lines_info {
-                if info.bounds.contains(&position) {
-                    // Account for horizontal scroll offset in non-wrapped mode
-                    let local_x = if self.is_wrapped {
-                        position.x - info.bounds.left()
-                    } else {
-                        position.x - info.bounds.left() + self.horizontal_scroll_offset
-                    };
-                    let local_index = info.shaped_line.closest_index_for_x(local_x);
-
-                    // For wrapped mode, line_index is visual line index - look up byte offset
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(info.line_index)
-                        {
-                            return visual_info.start_offset + local_index;
-                        }
-                    }
-                    // For non-wrapped mode, line_index is actual line index
-                    let line_start = self.line_start_offset(info.line_index);
-                    return line_start + local_index;
-                }
-            }
-
-            // Position is outside visible lines - find closest line
-            // Check if above visible area
-            if let Some(first) = self.visible_lines_info.first() {
-                if position.y < first.bounds.top() {
-                    // Account for horizontal scroll offset in non-wrapped mode
-                    let local_x = if self.is_wrapped {
-                        position.x - first.bounds.left()
-                    } else {
-                        position.x - first.bounds.left() + self.horizontal_scroll_offset
-                    };
-                    let local_index = first.shaped_line.closest_index_for_x(local_x);
-
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(first.line_index)
-                        {
-                            if position.x < first.bounds.left() {
-                                return visual_info.start_offset;
-                            }
-                            return visual_info.start_offset + local_index;
-                        }
-                    }
-                    let line_start = self.line_start_offset(first.line_index);
-                    if position.x < first.bounds.left() {
-                        return line_start;
-                    }
-                    return line_start + local_index;
-                }
-            }
-
-            // Check if below visible area
-            if let Some(last) = self.visible_lines_info.last() {
-                if position.y >= last.bounds.bottom() {
-                    // Account for horizontal scroll offset in non-wrapped mode
-                    let local_x = if self.is_wrapped {
-                        position.x - last.bounds.left()
-                    } else {
-                        position.x - last.bounds.left() + self.horizontal_scroll_offset
-                    };
-                    let local_index = last.shaped_line.closest_index_for_x(local_x);
-
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(last.line_index)
-                        {
-                            if position.x > last.bounds.right() {
-                                return visual_info.end_offset;
-                            }
-                            return visual_info.start_offset + local_index;
-                        }
-                    }
-                    let line_start = self.line_start_offset(last.line_index);
-                    let line_end = self.line_end_offset(last.line_index);
-                    if position.x > last.bounds.right() {
-                        return line_end;
-                    }
-                    return line_start + local_index;
-                }
-            }
-
-            // Position is horizontally outside but vertically within - find the line by Y
-            for info in &self.visible_lines_info {
-                if position.y >= info.bounds.top() && position.y < info.bounds.bottom() {
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(info.line_index)
-                        {
-                            if position.x < info.bounds.left() {
-                                return visual_info.start_offset;
-                            }
-                            if position.x > info.bounds.right() {
-                                return visual_info.end_offset;
-                            }
-                        }
-                    } else {
-                        let line_start = self.line_start_offset(info.line_index);
-                        let line_end = self.line_end_offset(info.line_index);
-                        if position.x < info.bounds.left() {
-                            return line_start;
-                        }
-                        if position.x > info.bounds.right() {
-                            return line_end;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fallback to old calculation if visible_lines_info is empty
-        let Some(bounds) = self.last_bounds.as_ref() else {
-            return 0;
-        };
-
-        let relative_y = position.y - bounds.top();
-        let visible_line_index = if relative_y < gpui::px(0.) {
-            0
-        } else {
-            (relative_y / line_height).floor() as usize
-        };
-
-        // Fallback: assume no scroll offset since we can't query it from the handle
-        let line_index = visible_line_index;
-
-        if self.is_wrapped {
-            // For wrapped mode fallback, use precomputed_visual_lines
-            let visual_line_count = self.precomputed_visual_lines.len();
-            let clamped_visual_line = line_index.min(visual_line_count.saturating_sub(1));
-            if let Some(visual_info) = self.precomputed_visual_lines.get(clamped_visual_line) {
-                return visual_info.start_offset;
-            }
-        }
-
-        let line_count = self.line_count();
-        let clamped_line = line_index.min(line_count.saturating_sub(1));
-
-        self.line_start_offset(clamped_line)
-    }
-
     pub fn offset_from_utf16(&self, offset: usize) -> usize {
         let mut utf8_offset = 0;
         let mut utf16_count = 0;
@@ -972,174 +648,6 @@ impl InputState {
     pub fn range_from_utf16(&self, range_utf16: &Range<usize>) -> Range<usize> {
         self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
     }
-
-    fn previous_boundary(&self, offset: usize) -> usize {
-        self.value()
-            .grapheme_indices(true)
-            .rev()
-            .find_map(|(idx, _)| (idx < offset).then_some(idx))
-            .unwrap_or(0)
-    }
-
-    fn next_boundary(&self, offset: usize) -> usize {
-        self.value()
-            .grapheme_indices(true)
-            .find_map(|(idx, _)| (idx > offset).then_some(idx))
-            .unwrap_or(self.value().len())
-    }
-
-    /// Find the start of the word at the given byte offset.
-    /// A word consists of consecutive alphanumeric characters and underscores.
-    /// If the character at offset is not a word character, returns the start of that grapheme.
-    fn word_start(&self, offset: usize) -> usize {
-        let value = self.value();
-        if value.is_empty() || offset == 0 {
-            return 0;
-        }
-
-        // Collect graphemes up to offset
-        let graphemes: Vec<(usize, &str)> = value
-            .grapheme_indices(true)
-            .take_while(|(i, _)| *i < offset)
-            .collect();
-
-        let Some(&(last_idx, last_grapheme)) = graphemes.last() else {
-            return 0;
-        };
-
-        // Check if the grapheme at cursor is a word char
-        let last_char = last_grapheme.chars().next().unwrap_or(' ');
-        if !is_word_char(last_char) {
-            return last_idx;
-        }
-
-        // Scan backwards to find word start
-        for &(idx, grapheme) in graphemes.iter().rev() {
-            let c = grapheme.chars().next().unwrap_or(' ');
-            if !is_word_char(c) {
-                return idx + grapheme.len();
-            }
-        }
-        0
-    }
-
-    /// Find the end of the word at the given byte offset.
-    /// A word consists of consecutive alphanumeric characters and underscores.
-    /// If the character at offset is not a word character, returns the end of that grapheme.
-    fn word_end(&self, offset: usize) -> usize {
-        let value = self.value();
-        if value.is_empty() || offset >= value.len() {
-            return value.len();
-        }
-
-        // Get grapheme at offset
-        let mut graphemes = value[offset..].grapheme_indices(true);
-        let Some((_, first_grapheme)) = graphemes.next() else {
-            return value.len();
-        };
-
-        let first_char = first_grapheme.chars().next().unwrap_or(' ');
-        if !is_word_char(first_char) {
-            return offset + first_grapheme.len();
-        }
-
-        // Scan forwards to find word end
-        for (i, grapheme) in value[offset..].grapheme_indices(true) {
-            let c = grapheme.chars().next().unwrap_or(' ');
-            if !is_word_char(c) {
-                return offset + i;
-            }
-        }
-        value.len()
-    }
-
-    // Multi-line helper methods
-
-    /// Returns the number of lines in the text
-    pub fn line_count(&self) -> usize {
-        let value = self.value();
-        if value.is_empty() {
-            1
-        } else {
-            value.chars().filter(|&c| c == '\n').count() + 1
-        }
-    }
-
-    /// Returns an iterator over the lines in the text
-    pub fn lines(&self) -> impl Iterator<Item = &str> {
-        self.value
-            .as_ref()
-            .map(|v| v.as_ref())
-            .unwrap_or("")
-            .split('\n')
-    }
-
-    /// Returns the byte offset where a line starts
-    pub fn line_start_offset(&self, line: usize) -> usize {
-        let value = self.value();
-        let mut offset = 0;
-        for (i, _) in value.split('\n').enumerate() {
-            if i == line {
-                return offset;
-            }
-            offset += value[offset..].find('\n').map(|p| p + 1).unwrap_or(0);
-        }
-        value.len()
-    }
-
-    /// Returns the byte offset where a line ends (before the newline, or at text end)
-    pub fn line_end_offset(&self, line: usize) -> usize {
-        let start = self.line_start_offset(line);
-        let value = self.value();
-        value[start..]
-            .find('\n')
-            .map(|p| start + p)
-            .unwrap_or(value.len())
-    }
-
-    /// Converts a byte offset to (line, column) where column is byte offset within the line
-    pub fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
-        let value = self.value();
-        let mut line = 0;
-        let mut line_start = 0;
-
-        for (i, c) in value.char_indices() {
-            if i >= offset {
-                break;
-            }
-            if c == '\n' {
-                line += 1;
-                line_start = i + 1;
-            }
-        }
-
-        (line, offset.saturating_sub(line_start))
-    }
-
-    /// Converts (line, column) to byte offset, clamping column to line length
-    pub fn line_col_to_offset(&self, line: usize, col: usize) -> usize {
-        let line_start = self.line_start_offset(line);
-        let line_end = self.line_end_offset(line);
-        let line_len = line_end - line_start;
-        line_start + col.min(line_len)
-    }
-
-    /// Returns the content of a specific line (without the trailing newline)
-    pub fn line_content(&self, line: usize) -> &str {
-        let start = self.line_start_offset(line);
-        let end = self.line_end_offset(line);
-        &self.value.as_ref().map(|v| v.as_ref()).unwrap_or("")[start..end]
-    }
-
-    /*pub fn reset(&mut self) {
-        self.content = "".into();
-        self.selected_range = 0..0;
-        self.selection_reversed = false;
-        self.marked_range = None;
-        self.last_layout = None;
-        self.last_bounds = None;
-        self.is_selecting = false;
-    }*/
 }
 
 impl EntityInputHandler for InputState {
@@ -1328,118 +836,66 @@ impl Focusable for InputState {
     }
 }
 
+impl TextNavigation for InputState {
+    fn value(&self) -> SharedString {
+        self.value
+            .clone()
+            .unwrap_or_else(|| SharedString::new_static(""))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::text_navigation::{TextNavigation, is_word_char};
 
-    /// Test helper that only tests methods that use `value` field.
-    /// We avoid creating full InputState since FocusHandle/Entity require App context.
-    struct TestValue {
-        value: Option<SharedString>,
+    /// Test helper that implements TextNavigation for testing navigation methods
+    /// without requiring a full InputState (which needs FocusHandle/Entity/App context).
+    struct TestHelper {
+        value: SharedString,
     }
 
-    impl TestValue {
+    impl TestHelper {
         fn new(s: &str) -> Self {
             Self {
-                value: Some(SharedString::from(s.to_string())),
+                value: SharedString::from(s.to_string()),
             }
         }
+    }
 
+    impl TextNavigation for TestHelper {
         fn value(&self) -> SharedString {
-            self.value
-                .clone()
-                .unwrap_or_else(|| SharedString::new_static(""))
-        }
-
-        fn line_count(&self) -> usize {
-            let value = self.value();
-            if value.is_empty() {
-                1
-            } else {
-                value.chars().filter(|&c| c == '\n').count() + 1
-            }
-        }
-
-        fn line_start_offset(&self, line: usize) -> usize {
-            let value = self.value();
-            let mut offset = 0;
-            for (i, _) in value.split('\n').enumerate() {
-                if i == line {
-                    return offset;
-                }
-                offset += value[offset..].find('\n').map(|p| p + 1).unwrap_or(0);
-            }
-            value.len()
-        }
-
-        fn line_end_offset(&self, line: usize) -> usize {
-            let start = self.line_start_offset(line);
-            let value = self.value();
-            value[start..]
-                .find('\n')
-                .map(|p| start + p)
-                .unwrap_or(value.len())
-        }
-
-        fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
-            let value = self.value();
-            let mut line = 0;
-            let mut line_start = 0;
-
-            for (i, c) in value.char_indices() {
-                if i >= offset {
-                    break;
-                }
-                if c == '\n' {
-                    line += 1;
-                    line_start = i + 1;
-                }
-            }
-
-            (line, offset.saturating_sub(line_start))
-        }
-
-        fn line_col_to_offset(&self, line: usize, col: usize) -> usize {
-            let line_start = self.line_start_offset(line);
-            let line_end = self.line_end_offset(line);
-            let line_len = line_end - line_start;
-            line_start + col.min(line_len)
-        }
-
-        fn line_content(&self, line: usize) -> &str {
-            let start = self.line_start_offset(line);
-            let end = self.line_end_offset(line);
-            &self.value.as_ref().map(|v| v.as_ref()).unwrap_or("")[start..end]
+            self.value.clone()
         }
     }
 
     #[test]
     fn test_line_count_empty() {
-        let state = TestValue::new("");
+        let state = TestHelper::new("");
         assert_eq!(state.line_count(), 1);
     }
 
     #[test]
     fn test_line_count_single_line() {
-        let state = TestValue::new("hello world");
+        let state = TestHelper::new("hello world");
         assert_eq!(state.line_count(), 1);
     }
 
     #[test]
     fn test_line_count_multiple_lines() {
-        let state = TestValue::new("line1\nline2\nline3");
+        let state = TestHelper::new("line1\nline2\nline3");
         assert_eq!(state.line_count(), 3);
     }
 
     #[test]
     fn test_line_count_trailing_newline() {
-        let state = TestValue::new("line1\n");
+        let state = TestHelper::new("line1\n");
         assert_eq!(state.line_count(), 2);
     }
 
     #[test]
     fn test_line_start_offset() {
-        let state = TestValue::new("abc\ndefgh\nij");
+        let state = TestHelper::new("abc\ndefgh\nij");
         // "abc\ndefgh\nij"
         //  0123 45678 9 10 11
         assert_eq!(state.line_start_offset(0), 0);
@@ -1449,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_line_end_offset() {
-        let state = TestValue::new("abc\ndefgh\nij");
+        let state = TestHelper::new("abc\ndefgh\nij");
         assert_eq!(state.line_end_offset(0), 3); // "abc"
         assert_eq!(state.line_end_offset(1), 9); // "defgh"
         assert_eq!(state.line_end_offset(2), 12); // "ij"
@@ -1457,7 +913,7 @@ mod tests {
 
     #[test]
     fn test_offset_to_line_col() {
-        let state = TestValue::new("abc\ndefgh\nij");
+        let state = TestHelper::new("abc\ndefgh\nij");
         assert_eq!(state.offset_to_line_col(0), (0, 0)); // start of line 0
         assert_eq!(state.offset_to_line_col(2), (0, 2)); // 'c' in line 0
         assert_eq!(state.offset_to_line_col(4), (1, 0)); // start of line 1
@@ -1468,7 +924,7 @@ mod tests {
 
     #[test]
     fn test_line_col_to_offset() {
-        let state = TestValue::new("abc\ndefgh\nij");
+        let state = TestHelper::new("abc\ndefgh\nij");
         assert_eq!(state.line_col_to_offset(0, 0), 0);
         assert_eq!(state.line_col_to_offset(0, 2), 2);
         assert_eq!(state.line_col_to_offset(1, 0), 4);
@@ -1479,19 +935,11 @@ mod tests {
 
     #[test]
     fn test_line_col_to_offset_clamps_column() {
-        let state = TestValue::new("abc\nde");
+        let state = TestHelper::new("abc\nde");
         // Column 100 on line 0 (len 3) should clamp to 3
         assert_eq!(state.line_col_to_offset(0, 100), 3);
         // Column 100 on line 1 (len 2) should clamp to 6
         assert_eq!(state.line_col_to_offset(1, 100), 6);
-    }
-
-    #[test]
-    fn test_line_content() {
-        let state = TestValue::new("abc\ndefgh\nij");
-        assert_eq!(state.line_content(0), "abc");
-        assert_eq!(state.line_content(1), "defgh");
-        assert_eq!(state.line_content(2), "ij");
     }
 
     #[test]
@@ -1524,82 +972,9 @@ mod tests {
         assert!(!is_word_char('\n'));
     }
 
-    /// Test helper for word boundary functions
-    struct TestWordBoundary {
-        value: Option<SharedString>,
-    }
-
-    impl TestWordBoundary {
-        fn new(s: &str) -> Self {
-            Self {
-                value: Some(SharedString::from(s.to_string())),
-            }
-        }
-
-        fn value(&self) -> SharedString {
-            self.value
-                .clone()
-                .unwrap_or_else(|| SharedString::new_static(""))
-        }
-
-        fn word_start(&self, offset: usize) -> usize {
-            let value = self.value();
-            if value.is_empty() || offset == 0 {
-                return 0;
-            }
-
-            let graphemes: Vec<(usize, &str)> = value
-                .grapheme_indices(true)
-                .take_while(|(i, _)| *i < offset)
-                .collect();
-
-            let Some(&(last_idx, last_grapheme)) = graphemes.last() else {
-                return 0;
-            };
-
-            let last_char = last_grapheme.chars().next().unwrap_or(' ');
-            if !is_word_char(last_char) {
-                return last_idx;
-            }
-
-            for &(idx, grapheme) in graphemes.iter().rev() {
-                let c = grapheme.chars().next().unwrap_or(' ');
-                if !is_word_char(c) {
-                    return idx + grapheme.len();
-                }
-            }
-            0
-        }
-
-        fn word_end(&self, offset: usize) -> usize {
-            let value = self.value();
-            if value.is_empty() || offset >= value.len() {
-                return value.len();
-            }
-
-            let mut graphemes = value[offset..].grapheme_indices(true);
-            let Some((_, first_grapheme)) = graphemes.next() else {
-                return value.len();
-            };
-
-            let first_char = first_grapheme.chars().next().unwrap_or(' ');
-            if !is_word_char(first_char) {
-                return offset + first_grapheme.len();
-            }
-
-            for (i, grapheme) in value[offset..].grapheme_indices(true) {
-                let c = grapheme.chars().next().unwrap_or(' ');
-                if !is_word_char(c) {
-                    return offset + i;
-                }
-            }
-            value.len()
-        }
-    }
-
     #[test]
     fn test_word_start_simple() {
-        let state = TestWordBoundary::new("hello world");
+        let state = TestHelper::new("hello world");
         // "hello world"
         //  01234567890
         assert_eq!(state.word_start(0), 0); // at start
@@ -1612,7 +987,7 @@ mod tests {
 
     #[test]
     fn test_word_end_simple() {
-        let state = TestWordBoundary::new("hello world");
+        let state = TestHelper::new("hello world");
         // "hello world"
         //  01234567890
         assert_eq!(state.word_end(0), 5); // start of "hello"
@@ -1624,7 +999,7 @@ mod tests {
 
     #[test]
     fn test_word_boundaries_with_underscore() {
-        let state = TestWordBoundary::new("hello_world");
+        let state = TestHelper::new("hello_world");
         // "hello_world"
         //  01234567890
         // Underscore should be part of word
@@ -1634,7 +1009,7 @@ mod tests {
 
     #[test]
     fn test_word_boundaries_with_hyphen() {
-        let state = TestWordBoundary::new("foo-bar");
+        let state = TestHelper::new("foo-bar");
         // "foo-bar"
         //  0123456
         // Hyphen is NOT a word char, so "foo" and "bar" are separate words
@@ -1648,7 +1023,7 @@ mod tests {
 
     #[test]
     fn test_word_boundaries_with_numbers() {
-        let state = TestWordBoundary::new("test123");
+        let state = TestHelper::new("test123");
         // Numbers are word chars
         assert_eq!(state.word_start(5), 0);
         assert_eq!(state.word_end(0), 7);
@@ -1656,14 +1031,14 @@ mod tests {
 
     #[test]
     fn test_word_boundaries_empty() {
-        let state = TestWordBoundary::new("");
+        let state = TestHelper::new("");
         assert_eq!(state.word_start(0), 0);
         assert_eq!(state.word_end(0), 0);
     }
 
     #[test]
     fn test_word_boundaries_punctuation_only() {
-        let state = TestWordBoundary::new("...");
+        let state = TestHelper::new("...");
         // Each dot should be its own "word"
         assert_eq!(state.word_start(1), 0);
         assert_eq!(state.word_end(0), 1);

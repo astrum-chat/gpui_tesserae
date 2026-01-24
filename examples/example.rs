@@ -57,7 +57,7 @@ impl Render for Main {
                         cx.notify();
                     })),
             )*/
-            .child(
+            /*.child(
                 Switch::new("switch")
                     .checked(self.switch_checked)
                     .disabled(self.checkbox_checked)
@@ -65,7 +65,7 @@ impl Render for Main {
                         view.switch_checked = !view.switch_checked;
                         cx.notify();
                     })),
-            )
+            )*/
             /*.child(
                 Select::new("select", self.select_state.clone())
                     .w(px(200.))
@@ -80,8 +80,8 @@ impl Render for Main {
                         |_window, cx| InputState::new(cx),
                     ),
                 )
-                .wrap(true)
-                .max_lines(5)
+                .word_wrap(true)
+                .line_clamp(5)
                 .w(relative(0.5))
                 .disabled(self.checkbox_checked || self.switch_checked),
             )
