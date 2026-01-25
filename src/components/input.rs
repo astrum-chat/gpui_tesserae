@@ -271,6 +271,12 @@ impl Input {
         self
     }
 
+    /// Sets a callback to invoke when Enter is pressed (only when newline_on_shift_enter is enabled).
+    pub fn on_enter(mut self, callback: impl Fn(&mut gpui::Window, &mut App) + 'static) -> Self {
+        self.base = self.base.on_enter(callback);
+        self
+    }
+
     /// Set the maximum number of undo/redo history entries to keep.
     /// Defaults to 200.
     pub fn max_history(mut self, cx: &mut App, max: usize) -> Self {

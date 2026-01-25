@@ -31,6 +31,8 @@ pub use state::{
 };
 
 pub(crate) type TransformTextFn = Arc<dyn Fn(char) -> char + Send + Sync>;
+/// Callback function type for handling Enter key presses in the input.
+pub type OnEnterFn = Arc<dyn Fn(&mut Window, &mut App) + 'static>;
 
 /// A text input element supporting single-line and multi-line editing with selection, clipboard, and undo/redo.
 #[derive(IntoElement)]
@@ -41,6 +43,7 @@ pub struct Input {
     line_clamp: usize,
     word_wrap: bool,
     newline_on_shift_enter: bool,
+    on_enter: Option<OnEnterFn>,
     placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
@@ -65,6 +68,7 @@ impl Input {
             line_clamp: 1,
             word_wrap: false,
             newline_on_shift_enter: false,
+            on_enter: None,
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
             selection_color: None,
@@ -99,6 +103,12 @@ impl Input {
     /// When enabled, Enter does nothing and Shift+Enter inserts a newline. Useful for chat inputs.
     pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
         self.newline_on_shift_enter = enabled;
+        self
+    }
+
+    /// Sets a callback to invoke when Enter is pressed (only when newline_on_shift_enter is enabled).
+    pub fn on_enter(mut self, callback: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_enter = Some(Arc::new(callback));
         self
     }
 
@@ -287,6 +297,11 @@ impl RenderOnce for Input {
                         this.on_action(
                             window.listener_for(&self.state, InputState::insert_newline_shift),
                         )
+                        .when_some(self.on_enter.clone(), |this, on_enter| {
+                            this.on_action(move |_: &InsertNewline, window, cx| {
+                                on_enter(window, cx);
+                            })
+                        })
                     })
             })
             .on_mouse_down(
