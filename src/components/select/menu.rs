@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use gpui::{
-    ElementId, Entity, FocusHandle, InteractiveElement, Length, ParentElement, SharedString,
-    Styled, Subscription, WeakFocusHandle, Window, div, prelude::*, px, relative,
+    ElementId, Entity, FocusHandle, InteractiveElement, Length, Overflow, ParentElement,
+    PointRefinement, SharedString, Styled, Subscription, WeakFocusHandle, Window, div, prelude::*,
+    px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 
@@ -318,71 +319,89 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                             .border(px(1.))
                             .border_inside(),
                     )
-                    .children(state.items.read(cx).iter().map(|(item_name, entry)| {
-                        let highlighted_item = self.state.highlighted_item.read(cx).as_ref();
-                        let hovered_item_exists = hovered_item.read(cx).is_some();
-
-                        let selected =
-                            self.state.selected_item.read(cx).as_ref() == Some(item_name);
-
-                        let show_highlight =
-                            !hovered_item_exists && highlighted_item == Some(item_name);
-
-                        let hovered_item_for_hover = hovered_item.clone();
-                        let item_name_for_hover = item_name.clone();
-
+                    .child(
                         div()
-                            .id(self.id.with_suffix("item_row").with_suffix(item_name))
+                            .id(self.id.with_suffix("menu_children"))
                             .w_full()
-                            .flex()
-                            .track_focus(&entry.focus_handle)
-                            .child(
-                                Toggle::new(self.id.with_suffix("item").with_suffix(item_name))
-                                    .w_full()
-                                    .max_w(relative(1.))
-                                    .checked(selected)
-                                    .variant(if selected {
-                                        ToggleVariant::Secondary
-                                    } else {
-                                        ToggleVariant::Tertiary
-                                    })
-                                    .force_hover(show_highlight)
-                                    .justify_start()
-                                    .rounded(corner_radius - padding)
-                                    .child_right(entry.item.display(window, cx))
-                                    .pl(horizontal_padding)
-                                    .pr(horizontal_padding)
-                                    .pt(vertical_padding)
-                                    .pb(vertical_padding)
-                                    .on_any_mouse_down(|_event, window, _cx| {
-                                        window.prevent_default();
-                                    })
-                                    .on_hover(move |is_hovered, _window, cx| {
-                                        hovered_item_for_hover.update(cx, |this, cx| {
-                                            if *is_hovered {
-                                                *this = Some(item_name_for_hover.clone());
-                                            } else if this.as_ref() == Some(&item_name_for_hover) {
-                                                *this = None;
-                                            }
-                                            cx.notify();
-                                        });
-                                    })
-                                    .map(|this| {
-                                        let state = self.state.clone();
-                                        let item_name = item_name.clone();
+                            .h_full()
+                            .map(|mut this| {
+                                this.style().overflow = PointRefinement {
+                                    x: None,
+                                    y: Some(Overflow::Scroll),
+                                };
+                                this
+                            })
+                            .children(state.items.read(cx).iter().map(|(item_name, entry)| {
+                                let highlighted_item =
+                                    self.state.highlighted_item.read(cx).as_ref();
+                                let hovered_item_exists = hovered_item.read(cx).is_some();
 
-                                        this.on_click(move |_event, window, cx| {
-                                            (state.on_item_click)(
-                                                !selected,
-                                                state.clone(),
-                                                item_name.clone(),
-                                                window,
-                                                cx,
-                                            )
+                                let selected =
+                                    self.state.selected_item.read(cx).as_ref() == Some(item_name);
+
+                                let show_highlight =
+                                    !hovered_item_exists && highlighted_item == Some(item_name);
+
+                                let hovered_item_for_hover = hovered_item.clone();
+                                let item_name_for_hover = item_name.clone();
+
+                                div()
+                                    .id(self.id.with_suffix("item_row").with_suffix(item_name))
+                                    .w_full()
+                                    .flex()
+                                    .track_focus(&entry.focus_handle)
+                                    .child(
+                                        Toggle::new(
+                                            self.id.with_suffix("item").with_suffix(item_name),
+                                        )
+                                        .w_full()
+                                        .max_w(relative(1.))
+                                        .checked(selected)
+                                        .variant(if selected {
+                                            ToggleVariant::Secondary
+                                        } else {
+                                            ToggleVariant::Tertiary
                                         })
-                                    }),
-                            )
-                    }))
+                                        .force_hover(show_highlight)
+                                        .justify_start()
+                                        .rounded(corner_radius - padding)
+                                        .child_left(entry.item.display(window, cx))
+                                        .pl(horizontal_padding)
+                                        .pr(horizontal_padding)
+                                        .pt(vertical_padding)
+                                        .pb(vertical_padding)
+                                        .on_any_mouse_down(|_event, window, _cx| {
+                                            window.prevent_default();
+                                        })
+                                        .on_hover(move |is_hovered, _window, cx| {
+                                            hovered_item_for_hover.update(cx, |this, cx| {
+                                                if *is_hovered {
+                                                    *this = Some(item_name_for_hover.clone());
+                                                } else if this.as_ref()
+                                                    == Some(&item_name_for_hover)
+                                                {
+                                                    *this = None;
+                                                }
+                                                cx.notify();
+                                            });
+                                        })
+                                        .map(|this| {
+                                            let state = self.state.clone();
+                                            let item_name = item_name.clone();
+
+                                            this.on_click(move |_event, window, cx| {
+                                                (state.on_item_click)(
+                                                    !selected,
+                                                    state.clone(),
+                                                    item_name.clone(),
+                                                    window,
+                                                    cx,
+                                                )
+                                            })
+                                        }),
+                                    )
+                            })),
+                    )
             })
             .map(|this| self.apply_deferred(this))
     }
