@@ -11,8 +11,8 @@ use gpui_transitions::Lerp;
 use crate::{
     TesseraeIconKind, conitional_transition,
     extensions::{
-        click_behavior::{ClickBehavior, ClickBehaviorExt},
-        clickable::{ClickHandlers, Clickable},
+        mouse_behavior::{MouseBehavior, MouseBehaviorExt},
+        mouse_handleable::{MouseHandleable, MouseHandlers},
     },
     primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
@@ -30,8 +30,8 @@ pub struct Checkbox {
     force_hover: bool,
     focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
-    click_handlers: ClickHandlers<bool>,
-    click_behavior: ClickBehavior,
+    mouse_handlers: MouseHandlers<bool>,
+    mouse_behavior: MouseBehavior,
 }
 
 impl Checkbox {
@@ -46,8 +46,8 @@ impl Checkbox {
             force_hover: false,
             focus_handle: None,
             on_hover: None,
-            click_handlers: ClickHandlers::new(),
-            click_behavior: ClickBehavior::default(),
+            mouse_handlers: MouseHandlers::new(),
+            mouse_behavior: MouseBehavior::default(),
         }
     }
 
@@ -97,15 +97,15 @@ impl Checkbox {
     }
 }
 
-impl Clickable<bool> for Checkbox {
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers<bool> {
-        &mut self.click_handlers
+impl MouseHandleable<bool> for Checkbox {
+    fn mouse_handlers_mut(&mut self) -> &mut MouseHandlers<bool> {
+        &mut self.mouse_handlers
     }
 }
 
-impl ClickBehaviorExt for Checkbox {
-    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
-        &mut self.click_behavior
+impl MouseBehaviorExt for Checkbox {
+    fn mouse_behavior_mut(&mut self) -> &mut MouseBehavior {
+        &mut self.mouse_behavior
     }
 }
 
@@ -230,7 +230,7 @@ impl RenderOnce for Checkbox {
                 let is_hover_state_on_hover = is_hover_state.clone();
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();
                 let is_click_down_state_on_click = is_click_down_state.clone();
-                let behavior = self.click_behavior;
+                let behavior = self.mouse_behavior;
                 let checked = self.checked;
 
                 this.on_hover(move |hover, window, cx| {
@@ -252,9 +252,9 @@ impl RenderOnce for Checkbox {
                     });
                 })
                 .map(|mut this| {
-                    let behavior = self.click_behavior;
+                    let behavior = self.mouse_behavior;
 
-                    if let Some((button, handler)) = self.click_handlers.on_mouse_down {
+                    if let Some((button, handler)) = self.mouse_handlers.on_mouse_down {
                         if button != gpui::MouseButton::Left {
                             this = this.on_mouse_down(button, move |event, window, cx| {
                                 behavior.apply(window, cx);
@@ -263,21 +263,21 @@ impl RenderOnce for Checkbox {
                         }
                     }
 
-                    if let Some((button, handler)) = self.click_handlers.on_mouse_up {
+                    if let Some((button, handler)) = self.mouse_handlers.on_mouse_up {
                         this = this.on_mouse_up(button, move |event, window, cx| {
                             behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
-                    if let Some(handler) = self.click_handlers.on_any_mouse_down {
+                    if let Some(handler) = self.mouse_handlers.on_any_mouse_down {
                         this = this.on_any_mouse_down(move |event, window, cx| {
                             behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
-                    if let Some(handler) = self.click_handlers.on_any_mouse_up {
+                    if let Some(handler) = self.mouse_handlers.on_any_mouse_up {
                         this.interactivity()
                             .on_any_mouse_up(move |event, window, cx| {
                                 behavior.apply(window, cx);
@@ -285,7 +285,7 @@ impl RenderOnce for Checkbox {
                             });
                     }
 
-                    let on_click = self.click_handlers.on_click;
+                    let on_click = self.mouse_handlers.on_click;
                     this.on_click(move |_event, window, cx| {
                         behavior.apply(window, cx);
 
@@ -407,13 +407,13 @@ mod tests {
 
     #[gpui::test]
     fn test_checkbox_on_click_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let checkbox = Checkbox::new("test-checkbox").on_click(move |_event, _window, _cx| {});
 
             assert!(
-                checkbox.click_handlers.on_click.is_some(),
+                checkbox.mouse_handlers.on_click.is_some(),
                 "Checkbox should have on_click callback"
             );
         });
@@ -421,14 +421,14 @@ mod tests {
 
     #[gpui::test]
     fn test_checkbox_on_any_mouse_down_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let checkbox =
                 Checkbox::new("test-checkbox").on_any_mouse_down(move |_event, _window, _cx| {});
 
             assert!(
-                checkbox.click_handlers.on_any_mouse_down.is_some(),
+                checkbox.mouse_handlers.on_any_mouse_down.is_some(),
                 "Checkbox should have on_any_mouse_down callback"
             );
         });
@@ -436,14 +436,14 @@ mod tests {
 
     #[gpui::test]
     fn test_checkbox_on_any_mouse_up_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let checkbox =
                 Checkbox::new("test-checkbox").on_any_mouse_up(move |_event, _window, _cx| {});
 
             assert!(
-                checkbox.click_handlers.on_any_mouse_up.is_some(),
+                checkbox.mouse_handlers.on_any_mouse_up.is_some(),
                 "Checkbox should have on_any_mouse_up callback"
             );
         });
@@ -490,12 +490,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_checkbox_click_behavior_default(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_checkbox_mouse_behavior_default(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
             let mut checkbox = Checkbox::new("test-checkbox");
-            let behavior = checkbox.click_behavior_mut();
+            let behavior = checkbox.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -509,16 +509,16 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_checkbox_allow_click_propagation(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_checkbox_allow_mouse_propagation(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
-            let mut checkbox = Checkbox::new("test-checkbox").allow_click_propagation();
-            let behavior = checkbox.click_behavior_mut();
+            let mut checkbox = Checkbox::new("test-checkbox").allow_mouse_propagation();
+            let behavior = checkbox.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,
-                "Checkbox should allow propagation after calling allow_click_propagation"
+                "Checkbox should allow propagation after calling allow_mouse_propagation"
             );
             assert!(
                 !behavior.allow_default,
@@ -528,12 +528,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_checkbox_allow_default_click_behaviour(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_checkbox_allow_default_mouse_behaviour(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
-            let mut checkbox = Checkbox::new("test-checkbox").allow_default_click_behaviour();
-            let behavior = checkbox.click_behavior_mut();
+            let mut checkbox = Checkbox::new("test-checkbox").allow_default_mouse_behaviour();
+            let behavior = checkbox.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -541,20 +541,20 @@ mod tests {
             );
             assert!(
                 behavior.allow_default,
-                "Checkbox should allow default after calling allow_default_click_behaviour"
+                "Checkbox should allow default after calling allow_default_mouse_behaviour"
             );
         });
     }
 
     #[gpui::test]
-    fn test_checkbox_click_behavior_chain(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_checkbox_mouse_behavior_chain(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
             let mut checkbox = Checkbox::new("test-checkbox")
-                .allow_click_propagation()
-                .allow_default_click_behaviour();
-            let behavior = checkbox.click_behavior_mut();
+                .allow_mouse_propagation()
+                .allow_default_mouse_behaviour();
+            let behavior = checkbox.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,

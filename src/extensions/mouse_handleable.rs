@@ -9,12 +9,12 @@ pub type OnMouseDownHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App)
 /// Type alias for the on_mouse_up callback that receives a MouseUpEvent.
 pub type OnMouseUpHandler = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut App) + 'static>;
 
-/// A struct that holds click-related event handlers.
+/// A struct that holds mouse-related event handlers.
 ///
-/// This struct encapsulates the various mouse click event handlers that can be
+/// This struct encapsulates the various mouse event handlers that can be
 /// attached to interactive components.
 #[derive(Default)]
-pub struct ClickHandlers<CE: Default = ClickEvent> {
+pub struct MouseHandlers<CE: Default = ClickEvent> {
     /// Handler called when the element is clicked (mouse down + up within bounds).
     pub on_click: Option<OnClickHandler<CE>>,
     /// Handler called when a specific mouse button is pressed down on the element.
@@ -27,26 +27,26 @@ pub struct ClickHandlers<CE: Default = ClickEvent> {
     pub on_any_mouse_up: Option<OnMouseUpHandler>,
 }
 
-impl<CE: Default> ClickHandlers<CE> {
-    /// Creates a new empty ClickHandlers instance.
+impl<CE: Default> MouseHandlers<CE> {
+    /// Creates a new empty MouseHandlers instance.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// A trait for components that support click-related event handlers.
+/// A trait for components that support mouse-related event handlers.
 ///
 /// Implement this trait to add support for `on_click`, `on_mouse_down`, `on_mouse_up`,
 /// `on_any_mouse_down`, and `on_any_mouse_up` handlers to your component.
-pub trait Clickable<CE: Default = ClickEvent>: Sized {
-    /// Returns a mutable reference to the click handlers.
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers<CE>;
+pub trait MouseHandleable<CE: Default = ClickEvent>: Sized {
+    /// Returns a mutable reference to the mouse handlers.
+    fn mouse_handlers_mut(&mut self) -> &mut MouseHandlers<CE>;
 
     /// Sets the on_click handler.
     ///
     /// The handler is called when the element is clicked (mouse down + up within bounds).
     fn on_click(mut self, handler: impl Fn(&CE, &mut Window, &mut App) + 'static) -> Self {
-        self.click_handlers_mut().on_click = Some(Box::new(handler));
+        self.mouse_handlers_mut().on_click = Some(Box::new(handler));
         self
     }
 
@@ -58,7 +58,7 @@ pub trait Clickable<CE: Default = ClickEvent>: Sized {
         button: MouseButton,
         handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.click_handlers_mut().on_mouse_down = Some((button, Box::new(handler)));
+        self.mouse_handlers_mut().on_mouse_down = Some((button, Box::new(handler)));
         self
     }
 
@@ -70,7 +70,7 @@ pub trait Clickable<CE: Default = ClickEvent>: Sized {
         button: MouseButton,
         handler: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.click_handlers_mut().on_mouse_up = Some((button, Box::new(handler)));
+        self.mouse_handlers_mut().on_mouse_up = Some((button, Box::new(handler)));
         self
     }
 
@@ -81,7 +81,7 @@ pub trait Clickable<CE: Default = ClickEvent>: Sized {
         mut self,
         handler: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.click_handlers_mut().on_any_mouse_down = Some(Box::new(handler));
+        self.mouse_handlers_mut().on_any_mouse_down = Some(Box::new(handler));
         self
     }
 
@@ -92,7 +92,7 @@ pub trait Clickable<CE: Default = ClickEvent>: Sized {
         mut self,
         handler: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.click_handlers_mut().on_any_mouse_up = Some(Box::new(handler));
+        self.mouse_handlers_mut().on_any_mouse_up = Some(Box::new(handler));
         self
     }
 }

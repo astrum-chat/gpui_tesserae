@@ -12,7 +12,7 @@ use crate::{
     ElementIdExt, TesseraeIconKind,
     components::Icon,
     conitional_transition, conitional_transition_update,
-    extensions::click_behavior::{ClickBehavior, ClickBehaviorExt},
+    extensions::mouse_behavior::{MouseBehavior, MouseBehaviorExt},
     primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
     utils::{PixelsExt, disabled_transition},
@@ -54,7 +54,7 @@ pub struct Select<V: 'static, I: SelectItem<Value = V> + 'static> {
     disabled: bool,
     layer: ThemeLayerKind,
     state: Arc<SelectState<V, I>>,
-    click_behavior: ClickBehavior,
+    mouse_behavior: MouseBehavior,
     style: SelectStyles,
 }
 
@@ -68,7 +68,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
             disabled: false,
             layer: ThemeLayerKind::Tertiary,
             state: state.into(),
-            click_behavior: ClickBehavior::default(),
+            mouse_behavior: MouseBehavior::default(),
             style: SelectStyles::default(),
         }
     }
@@ -170,9 +170,9 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
     }
 }
 
-impl<V: 'static, I: SelectItem<Value = V> + 'static> ClickBehaviorExt for Select<V, I> {
-    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
-        &mut self.click_behavior
+impl<V: 'static, I: SelectItem<Value = V> + 'static> MouseBehaviorExt for Select<V, I> {
+    fn mouse_behavior_mut(&mut self) -> &mut MouseBehavior {
+        &mut self.mouse_behavior
     }
 }
 
@@ -347,7 +347,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                 )
             })
             .when(!is_disabled, |this| {
-                let behavior = self.click_behavior;
+                let behavior = self.mouse_behavior;
 
                 let focus_handle_on_mouse_down = focus_handle.clone();
 
@@ -1412,15 +1412,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_select_click_behavior_default(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_select_mouse_behavior_default(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
 
         cx.update(|cx| {
             let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
             let mut select = Select::new("test-select", state);
-            let behavior = select.click_behavior_mut();
+            let behavior = select.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -1434,19 +1434,19 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_select_allow_click_propagation(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_select_allow_mouse_propagation(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
 
         cx.update(|cx| {
             let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
-            let mut select = Select::new("test-select", state).allow_click_propagation();
-            let behavior = select.click_behavior_mut();
+            let mut select = Select::new("test-select", state).allow_mouse_propagation();
+            let behavior = select.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,
-                "Select should allow propagation after calling allow_click_propagation"
+                "Select should allow propagation after calling allow_mouse_propagation"
             );
             assert!(
                 !behavior.allow_default,
@@ -1456,15 +1456,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_select_allow_default_click_behaviour(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_select_allow_default_mouse_behaviour(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
 
         cx.update(|cx| {
             let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
-            let mut select = Select::new("test-select", state).allow_default_click_behaviour();
-            let behavior = select.click_behavior_mut();
+            let mut select = Select::new("test-select", state).allow_default_mouse_behaviour();
+            let behavior = select.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -1472,23 +1472,23 @@ mod tests {
             );
             assert!(
                 behavior.allow_default,
-                "Select should allow default after calling allow_default_click_behaviour"
+                "Select should allow default after calling allow_default_mouse_behaviour"
             );
         });
     }
 
     #[gpui::test]
-    fn test_select_click_behavior_chain(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_select_mouse_behavior_chain(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         let (items, selected, highlighted, visible, focus_handles) = create_test_state_entities(cx);
 
         cx.update(|cx| {
             let state = SelectState::new(cx, items, selected, highlighted, visible, focus_handles);
             let mut select = Select::new("test-select", state)
-                .allow_click_propagation()
-                .allow_default_click_behaviour();
-            let behavior = select.click_behavior_mut();
+                .allow_mouse_propagation()
+                .allow_default_mouse_behaviour();
+            let behavior = select.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,

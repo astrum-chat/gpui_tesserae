@@ -11,8 +11,8 @@ use gpui_transitions::Lerp;
 use crate::{
     ElementIdExt, conitional_transition,
     extensions::{
-        click_behavior::{ClickBehavior, ClickBehaviorExt},
-        clickable::{ClickHandlers, Clickable},
+        mouse_behavior::{MouseBehavior, MouseBehaviorExt},
+        mouse_handleable::{MouseHandleable, MouseHandlers},
     },
     primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
@@ -29,8 +29,8 @@ pub struct Switch {
     force_hover: bool,
     focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
-    click_handlers: ClickHandlers<bool>,
-    click_behavior: ClickBehavior,
+    mouse_handlers: MouseHandlers<bool>,
+    mouse_behavior: MouseBehavior,
 }
 
 impl Switch {
@@ -44,8 +44,8 @@ impl Switch {
             force_hover: false,
             focus_handle: None,
             on_hover: None,
-            click_handlers: ClickHandlers::new(),
-            click_behavior: ClickBehavior::default(),
+            mouse_handlers: MouseHandlers::new(),
+            mouse_behavior: MouseBehavior::default(),
         }
     }
 
@@ -89,15 +89,15 @@ impl Switch {
     }
 }
 
-impl Clickable<bool> for Switch {
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers<bool> {
-        &mut self.click_handlers
+impl MouseHandleable<bool> for Switch {
+    fn mouse_handlers_mut(&mut self) -> &mut MouseHandlers<bool> {
+        &mut self.mouse_handlers
     }
 }
 
-impl ClickBehaviorExt for Switch {
-    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
-        &mut self.click_behavior
+impl MouseBehaviorExt for Switch {
+    fn mouse_behavior_mut(&mut self) -> &mut MouseBehavior {
+        &mut self.mouse_behavior
     }
 }
 
@@ -277,11 +277,11 @@ impl RenderOnce for Switch {
                 let drag_start_x_state_on_mouse_down = drag_start_x_state.clone();
                 let drag_start_x_state_on_mouse_up_out = drag_start_x_state.clone();
                 let dragged_checked_state_on_mouse_up_out = dragged_checked_state.clone();
-                let behavior = self.click_behavior;
+                let behavior = self.mouse_behavior;
                 let checked = self.checked;
 
                 // Wrap the on_click callback in Rc so it can be shared between on_click and on_mouse_up_out
-                let on_click_callback = std::rc::Rc::new(self.click_handlers.on_click.take());
+                let on_click_callback = std::rc::Rc::new(self.mouse_handlers.on_click.take());
 
                 this.on_hover(move |hover, window, cx| {
                     is_hover_state_on_hover.update(cx, |this, cx| {
@@ -308,12 +308,12 @@ impl RenderOnce for Switch {
                     });
                 })
                 .map(|mut this| {
-                    let behavior = self.click_behavior;
+                    let behavior = self.mouse_behavior;
                     let drag_start_x_state_on_click = drag_start_x_state.clone();
                     let dragged_checked_state_on_click = dragged_checked_state.clone();
                     let on_click_callback_clone = on_click_callback.clone();
 
-                    if let Some((button, handler)) = self.click_handlers.on_mouse_down {
+                    if let Some((button, handler)) = self.mouse_handlers.on_mouse_down {
                         if button != gpui::MouseButton::Left {
                             this = this.on_mouse_down(button, move |event, window, cx| {
                                 behavior.apply(window, cx);
@@ -322,21 +322,21 @@ impl RenderOnce for Switch {
                         }
                     }
 
-                    if let Some((button, handler)) = self.click_handlers.on_mouse_up {
+                    if let Some((button, handler)) = self.mouse_handlers.on_mouse_up {
                         this = this.on_mouse_up(button, move |event, window, cx| {
                             behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
-                    if let Some(handler) = self.click_handlers.on_any_mouse_down {
+                    if let Some(handler) = self.mouse_handlers.on_any_mouse_down {
                         this = this.on_any_mouse_down(move |event, window, cx| {
                             behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
-                    if let Some(handler) = self.click_handlers.on_any_mouse_up {
+                    if let Some(handler) = self.mouse_handlers.on_any_mouse_up {
                         this.interactivity()
                             .on_any_mouse_up(move |event, window, cx| {
                                 behavior.apply(window, cx);
@@ -558,13 +558,13 @@ mod tests {
 
     #[gpui::test]
     fn test_switch_on_click_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let switch = Switch::new("test-switch").on_click(move |_event, _window, _cx| {});
 
             assert!(
-                switch.click_handlers.on_click.is_some(),
+                switch.mouse_handlers.on_click.is_some(),
                 "Switch should have on_click callback"
             );
         });
@@ -572,14 +572,14 @@ mod tests {
 
     #[gpui::test]
     fn test_switch_on_any_mouse_down_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let switch =
                 Switch::new("test-switch").on_any_mouse_down(move |_event, _window, _cx| {});
 
             assert!(
-                switch.click_handlers.on_any_mouse_down.is_some(),
+                switch.mouse_handlers.on_any_mouse_down.is_some(),
                 "Switch should have on_any_mouse_down callback"
             );
         });
@@ -587,13 +587,13 @@ mod tests {
 
     #[gpui::test]
     fn test_switch_on_any_mouse_up_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let switch = Switch::new("test-switch").on_any_mouse_up(move |_event, _window, _cx| {});
 
             assert!(
-                switch.click_handlers.on_any_mouse_up.is_some(),
+                switch.mouse_handlers.on_any_mouse_up.is_some(),
                 "Switch should have on_any_mouse_up callback"
             );
         });
@@ -657,12 +657,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_switch_click_behavior_default(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_switch_mouse_behavior_default(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
             let mut switch = Switch::new("test-switch");
-            let behavior = switch.click_behavior_mut();
+            let behavior = switch.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -676,16 +676,16 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_switch_allow_click_propagation(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_switch_allow_mouse_propagation(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
-            let mut switch = Switch::new("test-switch").allow_click_propagation();
-            let behavior = switch.click_behavior_mut();
+            let mut switch = Switch::new("test-switch").allow_mouse_propagation();
+            let behavior = switch.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,
-                "Switch should allow propagation after calling allow_click_propagation"
+                "Switch should allow propagation after calling allow_mouse_propagation"
             );
             assert!(
                 !behavior.allow_default,
@@ -695,12 +695,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_switch_allow_default_click_behaviour(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_switch_allow_default_mouse_behaviour(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
-            let mut switch = Switch::new("test-switch").allow_default_click_behaviour();
-            let behavior = switch.click_behavior_mut();
+            let mut switch = Switch::new("test-switch").allow_default_mouse_behaviour();
+            let behavior = switch.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -708,20 +708,20 @@ mod tests {
             );
             assert!(
                 behavior.allow_default,
-                "Switch should allow default after calling allow_default_click_behaviour"
+                "Switch should allow default after calling allow_default_mouse_behaviour"
             );
         });
     }
 
     #[gpui::test]
-    fn test_switch_click_behavior_chain(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+    fn test_switch_mouse_behavior_chain(cx: &mut TestAppContext) {
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
             let mut switch = Switch::new("test-switch")
-                .allow_click_propagation()
-                .allow_default_click_behaviour();
-            let behavior = switch.click_behavior_mut();
+                .allow_mouse_propagation()
+                .allow_default_mouse_behaviour();
+            let behavior = switch.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,

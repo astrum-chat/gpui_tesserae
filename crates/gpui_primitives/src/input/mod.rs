@@ -90,12 +90,8 @@ impl Input {
         self
     }
 
-    /// Enables or disables word wrapping. Sets `line_clamp` to 1 if currently 0.
+    /// Enables or disables word wrapping.
     pub fn word_wrap(mut self, enabled: bool) -> Self {
-        if enabled && self.line_clamp == 0 {
-            self.line_clamp = 1;
-        }
-
         self.word_wrap = enabled;
         self
     }
@@ -297,11 +293,14 @@ impl RenderOnce for Input {
                         this.on_action(
                             window.listener_for(&self.state, InputState::insert_newline_shift),
                         )
-                        .when_some(self.on_enter.clone(), |this, on_enter| {
-                            this.on_action(move |_: &InsertNewline, window, cx| {
-                                on_enter(window, cx);
-                            })
-                        })
+                        .when_some(
+                            self.on_enter.clone(),
+                            |this, on_enter| {
+                                this.on_action(move |_: &InsertNewline, window, cx| {
+                                    on_enter(window, cx);
+                                })
+                            },
+                        )
                     })
             })
             .on_mouse_down(

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gpui::{
     App, AppContext, Application, Bounds, Context, ElementId, FocusHandle, KeyBinding, Menu,
     SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, point,
-    prelude::*, px, relative, size,
+    prelude::*, px, size,
 };
 use gpui_transitions::{BoolLerp, TransitionState};
 
@@ -13,7 +13,7 @@ use gpui_tesserae::{
         Button, Checkbox, Input, Switch,
         select::{Select, SelectItemsMap, SelectState},
     },
-    extensions::clickable::Clickable,
+    extensions::mouse_handleable::MouseHandleable,
     primitives::input::InputState,
     theme::{Theme, ThemeExt},
     views::Root,
@@ -81,7 +81,7 @@ impl Render for Main {
                     ),
                 )
                 .word_wrap(true)
-                .w(relative(0.5))
+                .w(px(200.))
                 .disabled(self.checkbox_checked || self.switch_checked),
             )
             .child(

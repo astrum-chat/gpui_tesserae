@@ -14,8 +14,8 @@ use crate::{
         select::{Confirm, MoveDown, MoveUp, SelectItem, SelectState},
     },
     extensions::{
-        clickable::Clickable,
         deferrable::{Deferrable, DeferredConfig},
+        mouse_handleable::MouseHandleable,
     },
     theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,

@@ -13,8 +13,8 @@ use crate::{
     components::Icon,
     conitional_transition,
     extensions::{
-        click_behavior::{ClickBehavior, ClickBehaviorExt},
-        clickable::{ClickHandlers, Clickable},
+        mouse_behavior::{MouseBehavior, MouseBehaviorExt},
+        mouse_handleable::{MouseHandleable, MouseHandlers},
     },
     primitives::{FocusRing, min_w0_wrapper},
     theme::ThemeExt,
@@ -64,8 +64,8 @@ pub struct Button {
     force_hover: bool,
     focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
-    click_handlers: ClickHandlers,
-    click_behavior: ClickBehavior,
+    mouse_handlers: MouseHandlers,
+    mouse_behavior: MouseBehavior,
     children: PositionalChildren,
     style: ButtonStyles,
 }
@@ -86,8 +86,8 @@ impl Button {
             force_hover: false,
             focus_handle: None,
             on_hover: None,
-            click_handlers: ClickHandlers::new(),
-            click_behavior: ClickBehavior::default(),
+            mouse_handlers: MouseHandlers::new(),
+            mouse_behavior: MouseBehavior::default(),
             children: PositionalChildren::default(),
             style: ButtonStyles::default(),
         }
@@ -351,15 +351,15 @@ impl Button {
     }
 }
 
-impl Clickable for Button {
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
-        &mut self.click_handlers
+impl MouseHandleable for Button {
+    fn mouse_handlers_mut(&mut self) -> &mut MouseHandlers {
+        &mut self.mouse_handlers
     }
 }
 
-impl ClickBehaviorExt for Button {
-    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
-        &mut self.click_behavior
+impl MouseBehaviorExt for Button {
+    fn mouse_behavior_mut(&mut self) -> &mut MouseBehavior {
+        &mut self.mouse_behavior
     }
 }
 
@@ -570,7 +570,7 @@ impl RenderOnce for Button {
                 let is_hover_state_on_hover = is_hover_state.clone();
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();
                 let is_click_down_state_on_click = is_click_down_state.clone();
-                let behavior = self.click_behavior;
+                let behavior = self.mouse_behavior;
 
                 this.on_hover(move |hover, window, cx| {
                     is_hover_state_on_hover.update(cx, |this, cx| {
@@ -591,9 +591,9 @@ impl RenderOnce for Button {
                     });
                 })
                 .map(|mut this| {
-                    let behavior = self.click_behavior;
+                    let behavior = self.mouse_behavior;
 
-                    if let Some((button, handler)) = self.click_handlers.on_mouse_down {
+                    if let Some((button, handler)) = self.mouse_handlers.on_mouse_down {
                         if button != gpui::MouseButton::Left {
                             this = this.on_mouse_down(button, move |event, window, cx| {
                                 behavior.apply(window, cx);
@@ -602,21 +602,21 @@ impl RenderOnce for Button {
                         }
                     }
 
-                    if let Some((button, handler)) = self.click_handlers.on_mouse_up {
+                    if let Some((button, handler)) = self.mouse_handlers.on_mouse_up {
                         this = this.on_mouse_up(button, move |event, window, cx| {
                             behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
-                    if let Some(handler) = self.click_handlers.on_any_mouse_down {
+                    if let Some(handler) = self.mouse_handlers.on_any_mouse_down {
                         this = this.on_any_mouse_down(move |event, window, cx| {
                             behavior.apply(window, cx);
                             (handler)(event, window, cx);
                         });
                     }
 
-                    if let Some(handler) = self.click_handlers.on_any_mouse_up {
+                    if let Some(handler) = self.mouse_handlers.on_any_mouse_up {
                         this.interactivity()
                             .on_any_mouse_up(move |event, window, cx| {
                                 behavior.apply(window, cx);
@@ -624,7 +624,7 @@ impl RenderOnce for Button {
                             });
                     }
 
-                    let on_click = self.click_handlers.on_click;
+                    let on_click = self.mouse_handlers.on_click;
                     this.on_click(move |event, window, cx| {
                         behavior.apply(window, cx);
 
@@ -1070,7 +1070,7 @@ mod tests {
             });
 
             assert!(
-                button.click_handlers.on_click.is_some(),
+                button.mouse_handlers.on_click.is_some(),
                 "Button should have on_click callback"
             );
         });
@@ -1186,14 +1186,14 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_any_mouse_down_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let button =
                 Button::new("test-button").on_any_mouse_down(move |_event, _window, _cx| {});
 
             assert!(
-                button.click_handlers.on_any_mouse_down.is_some(),
+                button.mouse_handlers.on_any_mouse_down.is_some(),
                 "Button should have on_any_mouse_down callback"
             );
         });
@@ -1201,13 +1201,13 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_any_mouse_up_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
 
         cx.update(|_cx| {
             let button = Button::new("test-button").on_any_mouse_up(move |_event, _window, _cx| {});
 
             assert!(
-                button.click_handlers.on_any_mouse_up.is_some(),
+                button.mouse_handlers.on_any_mouse_up.is_some(),
                 "Button should have on_any_mouse_up callback"
             );
         });
@@ -1215,7 +1215,7 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_mouse_down_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
         use gpui::MouseButton;
 
         cx.update(|_cx| {
@@ -1223,11 +1223,11 @@ mod tests {
                 .on_mouse_down(MouseButton::Left, move |_event, _window, _cx| {});
 
             assert!(
-                button.click_handlers.on_mouse_down.is_some(),
+                button.mouse_handlers.on_mouse_down.is_some(),
                 "Button should have on_mouse_down callback"
             );
 
-            let (button, handler) = button.click_handlers.on_mouse_down.unwrap();
+            let (button, handler) = button.mouse_handlers.on_mouse_down.unwrap();
             assert_eq!(button, MouseButton::Left, "Should be left mouse button");
             drop(handler);
         });
@@ -1235,7 +1235,7 @@ mod tests {
 
     #[gpui::test]
     fn test_button_on_mouse_up_callback(cx: &mut TestAppContext) {
-        use crate::extensions::clickable::Clickable;
+        use crate::extensions::mouse_handleable::MouseHandleable;
         use gpui::MouseButton;
 
         cx.update(|_cx| {
@@ -1243,11 +1243,11 @@ mod tests {
                 .on_mouse_up(MouseButton::Right, move |_event, _window, _cx| {});
 
             assert!(
-                button.click_handlers.on_mouse_up.is_some(),
+                button.mouse_handlers.on_mouse_up.is_some(),
                 "Button should have on_mouse_up callback"
             );
 
-            let (button, handler) = button.click_handlers.on_mouse_up.unwrap();
+            let (button, handler) = button.mouse_handlers.on_mouse_up.unwrap();
             assert_eq!(button, MouseButton::Right, "Should be right mouse button");
             drop(handler);
         });
@@ -1255,11 +1255,11 @@ mod tests {
 
     #[gpui::test]
     fn test_button_click_behavior_default(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
             let mut button = Button::new("test-button");
-            let behavior = button.click_behavior_mut();
+            let behavior = button.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -1274,15 +1274,15 @@ mod tests {
 
     #[gpui::test]
     fn test_button_allow_click_propagation(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
-            let mut button = Button::new("test-button").allow_click_propagation();
-            let behavior = button.click_behavior_mut();
+            let mut button = Button::new("test-button").allow_mouse_propagation();
+            let behavior = button.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,
-                "Button should allow propagation after calling allow_click_propagation"
+                "Button should allow propagation after calling allow_mouse_propagation"
             );
             assert!(
                 !behavior.allow_default,
@@ -1293,11 +1293,11 @@ mod tests {
 
     #[gpui::test]
     fn test_button_allow_default_click_behaviour(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
-            let mut button = Button::new("test-button").allow_default_click_behaviour();
-            let behavior = button.click_behavior_mut();
+            let mut button = Button::new("test-button").allow_default_mouse_behaviour();
+            let behavior = button.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -1305,20 +1305,20 @@ mod tests {
             );
             assert!(
                 behavior.allow_default,
-                "Button should allow default after calling allow_default_click_behaviour"
+                "Button should allow default after calling allow_default_mouse_behaviour"
             );
         });
     }
 
     #[gpui::test]
     fn test_button_click_behavior_chain(cx: &mut TestAppContext) {
-        use crate::extensions::click_behavior::ClickBehaviorExt;
+        use crate::extensions::mouse_behavior::MouseBehaviorExt;
 
         cx.update(|_cx| {
             let mut button = Button::new("test-button")
-                .allow_click_propagation()
-                .allow_default_click_behaviour();
-            let behavior = button.click_behavior_mut();
+                .allow_mouse_propagation()
+                .allow_default_mouse_behaviour();
+            let behavior = button.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,

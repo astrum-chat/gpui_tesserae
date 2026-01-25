@@ -7,8 +7,8 @@ use crate::{
     PositionalParentElement,
     components::{Button, ButtonVariant, GranularButtonVariant},
     extensions::{
-        click_behavior::{ClickBehavior, ClickBehaviorExt},
-        clickable::{ClickHandlers, Clickable},
+        mouse_behavior::{MouseBehavior, MouseBehaviorExt},
+        mouse_handleable::{MouseHandleable, MouseHandlers},
     },
     utils::RgbaExt,
 };
@@ -289,15 +289,15 @@ impl Toggle {
     }
 }
 
-impl Clickable for Toggle {
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
-        self.base.click_handlers_mut()
+impl MouseHandleable for Toggle {
+    fn mouse_handlers_mut(&mut self) -> &mut MouseHandlers {
+        self.base.mouse_handlers_mut()
     }
 }
 
-impl ClickBehaviorExt for Toggle {
-    fn click_behavior_mut(&mut self) -> &mut ClickBehavior {
-        self.base.click_behavior_mut()
+impl MouseBehaviorExt for Toggle {
+    fn mouse_behavior_mut(&mut self) -> &mut MouseBehavior {
+        self.base.mouse_behavior_mut()
     }
 }
 
@@ -416,10 +416,10 @@ mod tests {
     use gpui::TestAppContext;
 
     #[gpui::test]
-    fn test_toggle_click_behavior_default(cx: &mut TestAppContext) {
+    fn test_toggle_mouse_behavior_default(cx: &mut TestAppContext) {
         cx.update(|_cx| {
             let mut toggle = Toggle::new("test-toggle");
-            let behavior = toggle.click_behavior_mut();
+            let behavior = toggle.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -433,14 +433,14 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_toggle_allow_click_propagation(cx: &mut TestAppContext) {
+    fn test_toggle_allow_mouse_propagation(cx: &mut TestAppContext) {
         cx.update(|_cx| {
-            let mut toggle = Toggle::new("test-toggle").allow_click_propagation();
-            let behavior = toggle.click_behavior_mut();
+            let mut toggle = Toggle::new("test-toggle").allow_mouse_propagation();
+            let behavior = toggle.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,
-                "Toggle should allow propagation after calling allow_click_propagation"
+                "Toggle should allow propagation after calling allow_mouse_propagation"
             );
             assert!(
                 !behavior.allow_default,
@@ -450,10 +450,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_toggle_allow_default_click_behaviour(cx: &mut TestAppContext) {
+    fn test_toggle_allow_default_mouse_behaviour(cx: &mut TestAppContext) {
         cx.update(|_cx| {
-            let mut toggle = Toggle::new("test-toggle").allow_default_click_behaviour();
-            let behavior = toggle.click_behavior_mut();
+            let mut toggle = Toggle::new("test-toggle").allow_default_mouse_behaviour();
+            let behavior = toggle.mouse_behavior_mut();
 
             assert!(
                 !behavior.allow_propagation,
@@ -461,18 +461,18 @@ mod tests {
             );
             assert!(
                 behavior.allow_default,
-                "Toggle should allow default after calling allow_default_click_behaviour"
+                "Toggle should allow default after calling allow_default_mouse_behaviour"
             );
         });
     }
 
     #[gpui::test]
-    fn test_toggle_click_behavior_chain(cx: &mut TestAppContext) {
+    fn test_toggle_mouse_behavior_chain(cx: &mut TestAppContext) {
         cx.update(|_cx| {
             let mut toggle = Toggle::new("test-toggle")
-                .allow_click_propagation()
-                .allow_default_click_behaviour();
-            let behavior = toggle.click_behavior_mut();
+                .allow_mouse_propagation()
+                .allow_default_mouse_behaviour();
+            let behavior = toggle.mouse_behavior_mut();
 
             assert!(
                 behavior.allow_propagation,
