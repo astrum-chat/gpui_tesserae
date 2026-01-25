@@ -345,6 +345,18 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                 let hovered_item_for_hover = hovered_item.clone();
                                 let item_name_for_hover = item_name.clone();
 
+                                let variant = if selected {
+                                    ToggleVariant::Secondary
+                                } else {
+                                    ToggleVariant::Tertiary
+                                };
+
+                                let variant_granular = if selected {
+                                    ToggleVariant::Secondary.as_granular_toggle(cx).truthy
+                                } else {
+                                    ToggleVariant::Tertiary.as_granular_toggle(cx).falsey
+                                };
+
                                 div()
                                     .id(self.id.with_suffix("item_row").with_suffix(item_name))
                                     .w_full()
@@ -357,15 +369,15 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                         .w_full()
                                         .max_w(relative(1.))
                                         .checked(selected)
-                                        .variant(if selected {
-                                            ToggleVariant::Secondary
-                                        } else {
-                                            ToggleVariant::Tertiary
-                                        })
+                                        .variant(variant)
                                         .force_hover(show_highlight)
                                         .justify_start()
                                         .rounded(corner_radius - padding)
-                                        .child_left(entry.item.display(window, cx))
+                                        .child_left(entry.item.display(
+                                            window,
+                                            cx,
+                                            variant_granular.text_color.into(),
+                                        ))
                                         .pl(horizontal_padding)
                                         .pr(horizontal_padding)
                                         .pt(vertical_padding)

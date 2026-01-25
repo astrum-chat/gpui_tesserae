@@ -336,12 +336,12 @@ pub enum ToggleVariant {
 
 /// Fine-grained color configuration for toggle button states.
 pub struct GranularToggleVariant {
-    truthy: GranularButtonVariant,
-    falsey: GranularButtonVariant,
+    pub truthy: GranularButtonVariant,
+    pub falsey: GranularButtonVariant,
 }
 
 impl GranularToggleVariant {
-    fn from_button_variant(variant: ButtonVariant, cx: &mut App) -> Self {
+    fn from_button_variant(variant: ButtonVariant, cx: &App) -> Self {
         let variant = variant.as_granular(cx);
 
         Self {
@@ -378,7 +378,8 @@ impl From<GranularToggleVariant> for ToggleVariantEither {
 }
 
 impl ToggleVariant {
-    fn as_granular_toggle(&self, cx: &mut App) -> GranularToggleVariant {
+    /// Converts this variant to a granular toggle variant using theme colors.
+    pub fn as_granular_toggle(&self, cx: &App) -> GranularToggleVariant {
         match self {
             ToggleVariant::Primary => {
                 GranularToggleVariant::from_button_variant(ButtonVariant::Primary, cx)

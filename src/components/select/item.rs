@@ -1,4 +1,4 @@
-use gpui::{App, FocusHandle, IntoElement, SharedString, Window};
+use gpui::{App, FocusHandle, Hsla, IntoElement, SharedString, Window};
 
 /// Defines how an item in a select menu is identified, accessed, and displayed.
 pub trait SelectItem {
@@ -12,8 +12,11 @@ pub trait SelectItem {
     fn value(&self) -> &Self::Value;
 
     /// Renders the item for display in the select menu.
+    ///
+    /// The `text_color` parameter provides the correct color for the current variant
+    /// (selected vs unselected state).
     #[allow(unused)]
-    fn display(&self, window: &mut Window, cx: &App) -> impl IntoElement {
+    fn display(&self, window: &mut Window, cx: &App, text_color: Hsla) -> impl IntoElement {
         self.name().into_any_element()
     }
 }

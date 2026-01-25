@@ -497,7 +497,6 @@ impl RenderOnce for Button {
             })
             .w(self.style.width)
             .h_auto()
-            .overflow_hidden()
             .when_some(self.style.min_width, |this, v| this.min_w(v))
             .when_some(self.style.min_height, |this, v| this.min_h(v))
             .when_some(self.style.max_width, |this, v| this.max_w(v))
@@ -709,7 +708,7 @@ pub enum ButtonVariant {
 
 impl ButtonVariant {
     /// Converts this variant to a granular variant using theme colors.
-    pub fn as_granular(&self, cx: &mut App) -> GranularButtonVariant {
+    pub fn as_granular(&self, cx: &App) -> GranularButtonVariant {
         const HOVER_STRENGTH: f32 = 0.15;
         const FOCUS_STRENGTH: f32 = 0.35;
 

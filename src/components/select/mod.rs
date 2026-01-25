@@ -315,7 +315,7 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                                 .text_size(text_size)
                                 .text_color(primary_text_color)
                                 .font_family(font_family)
-                                .child(entry.item.display(window, cx)),
+                                .child(entry.item.display(window, cx, primary_text_color.into())),
                         )
                     })
                     .child(
@@ -386,7 +386,7 @@ pub fn default_on_item_click<V: 'static, I: SelectItem<Value = V> + 'static>(
 #[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
-    use gpui::{App, AppContext, SharedString, TestAppContext, VisualTestContext, Window};
+    use gpui::{App, AppContext, Hsla, SharedString, TestAppContext, VisualTestContext, Window};
     use gpui_transitions::{BoolLerp, TransitionState};
 
     /// Helper to create select state entities for tests
@@ -434,7 +434,7 @@ mod tests {
             &self.value
         }
 
-        fn display(&self, _window: &mut Window, _cx: &App) -> impl IntoElement {
+        fn display(&self, _window: &mut Window, _cx: &App, _text_color: Hsla) -> impl IntoElement {
             gpui::div().child(self.name.clone()).into_any_element()
         }
     }
