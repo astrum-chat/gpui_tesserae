@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    CursorStyle, ElementId, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, StatefulInteractiveElement, Styled, div, ease_out_quint, prelude::FluentBuilder,
-    px,
+    App, CursorStyle, ElementId, Entity, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
+    prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -29,7 +29,7 @@ pub struct Switch {
     force_hover: bool,
     focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
-    click_handlers: ClickHandlers,
+    click_handlers: ClickHandlers<bool>,
     click_behavior: ClickBehavior,
 }
 
@@ -89,8 +89,8 @@ impl Switch {
     }
 }
 
-impl Clickable for Switch {
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
+impl Clickable<bool> for Switch {
+    fn click_handlers_mut(&mut self) -> &mut ClickHandlers<bool> {
         &mut self.click_handlers
     }
 }
@@ -102,8 +102,9 @@ impl ClickBehaviorExt for Switch {
 }
 
 impl RenderOnce for Switch {
-    fn render(self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
+    fn render(mut self, window: &mut gpui::Window, cx: &mut gpui::App) -> impl IntoElement {
         const INNER_SIZE_FOCUS_MULT: f32 = 1.25;
+        const DRAG_THRESHOLD: f32 = 10.0;
 
         let inner_size = cx.get_theme().layout.size.md;
         let padding = cx.get_theme().layout.padding.md;
@@ -120,14 +121,6 @@ impl RenderOnce for Switch {
         let border_hover_color = border_color.lerp(&primary_text_color, 0.07);
         let border_click_down_color = border_color.lerp(&primary_text_color, 0.16);
 
-        let checked_transition = checked_transition(
-            self.id.clone(),
-            window,
-            cx,
-            Duration::from_millis(200),
-            self.checked,
-        );
-
         let is_disabled = self.disabled;
 
         let is_hover_state =
@@ -140,6 +133,31 @@ impl RenderOnce for Switch {
             |_cx, _window| false,
         );
         let is_click_down = *is_click_down_state.read(cx);
+
+        // Drag state: stores initial X position when drag starts
+        let drag_start_x_state = window.use_keyed_state(
+            self.id.with_suffix("state:drag_start_x"),
+            cx,
+            |_cx, _window| None::<f32>,
+        );
+
+        // Drag state: stores intermediate checked state during drag
+        let dragged_checked_state = window.use_keyed_state(
+            self.id.with_suffix("state:dragged_checked"),
+            cx,
+            |_cx, _window| None::<bool>,
+        );
+
+        // Use dragged_checked for visual state if actively dragging
+        let effective_checked = dragged_checked_state.read(cx).unwrap_or(self.checked);
+
+        let checked_transition = checked_transition(
+            self.id.clone(),
+            window,
+            cx,
+            Duration::from_millis(200),
+            effective_checked,
+        );
 
         let focus_handle = self
             .focus_handle
@@ -160,6 +178,17 @@ impl RenderOnce for Switch {
 
         if is_focus && is_disabled {
             window.blur();
+        }
+
+        // Register mouse move handler on Root when dragging is active
+        if let Some(start_x) = *drag_start_x_state.read(cx) {
+            register_drag_handler(
+                window,
+                cx,
+                start_x,
+                DRAG_THRESHOLD,
+                dragged_checked_state.clone(),
+            );
         }
 
         let border_color_transition = conitional_transition!(
@@ -245,7 +274,14 @@ impl RenderOnce for Switch {
                 let is_hover_state_on_hover = is_hover_state.clone();
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();
                 let is_click_down_state_on_click = is_click_down_state.clone();
+                let drag_start_x_state_on_mouse_down = drag_start_x_state.clone();
+                let drag_start_x_state_on_mouse_up_out = drag_start_x_state.clone();
+                let dragged_checked_state_on_mouse_up_out = dragged_checked_state.clone();
                 let behavior = self.click_behavior;
+                let checked = self.checked;
+
+                // Wrap the on_click callback in Rc so it can be shared between on_click and on_mouse_up_out
+                let on_click_callback = std::rc::Rc::new(self.click_handlers.on_click.take());
 
                 this.on_hover(move |hover, window, cx| {
                     is_hover_state_on_hover.update(cx, |this, cx| {
@@ -257,8 +293,14 @@ impl RenderOnce for Switch {
                         (callback)(hover, window, cx);
                     }
                 })
-                .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                .on_mouse_down(gpui::MouseButton::Left, move |event, window, cx| {
                     behavior.apply(window, cx);
+
+                    // Store initial X position for drag detection
+                    drag_start_x_state_on_mouse_down.update(cx, |this, cx| {
+                        *this = Some(event.position.x.to_f64() as f32);
+                        cx.notify();
+                    });
 
                     is_click_down_state_on_mouse_down.update(cx, |this, cx| {
                         *this = true;
@@ -267,6 +309,9 @@ impl RenderOnce for Switch {
                 })
                 .map(|mut this| {
                     let behavior = self.click_behavior;
+                    let drag_start_x_state_on_click = drag_start_x_state.clone();
+                    let dragged_checked_state_on_click = dragged_checked_state.clone();
+                    let on_click_callback_clone = on_click_callback.clone();
 
                     if let Some((button, handler)) = self.click_handlers.on_mouse_down {
                         if button != gpui::MouseButton::Left {
@@ -299,12 +344,10 @@ impl RenderOnce for Switch {
                             });
                     }
 
-                    let on_click = self.click_handlers.on_click;
-                    this.on_click(move |event, window, cx| {
+                    this.on_click(move |_event, window, cx| {
                         behavior.apply(window, cx);
 
                         if !is_focus {
-                            // We only want to blur if something else may be focused.
                             window.blur();
                         }
 
@@ -313,14 +356,24 @@ impl RenderOnce for Switch {
                             cx.notify();
                         });
 
-                        if let Some(on_click) = &on_click {
-                            (on_click)(event, window, cx);
+                        let dragged = *dragged_checked_state_on_click.read(cx);
+                        let (should_toggle, new_checked) = resolve_click_toggle(dragged, checked);
+
+                        // Clear drag states
+                        drag_start_x_state_on_click.update(cx, |this, _cx| *this = None);
+                        dragged_checked_state_on_click.update(cx, |this, cx| {
+                            *this = None;
+                            cx.notify();
+                        });
+
+                        if should_toggle {
+                            if let Some(on_click) = on_click_callback_clone.as_ref() {
+                                (on_click)(&new_checked, window, cx);
+                            }
                         }
                     })
                 })
-                .on_mouse_up_out(gpui::MouseButton::Left, move |_event, _window, cx| {
-                    // We need to clean up states when the mouse clicks down on the component, leaves its bounds, then unclicks.
-
+                .on_mouse_up_out(gpui::MouseButton::Left, move |_event, window, cx| {
                     is_hover_state.update(cx, |this, cx| {
                         *this = false;
                         cx.notify();
@@ -330,6 +383,23 @@ impl RenderOnce for Switch {
                         *this = false;
                         cx.notify();
                     });
+
+                    let dragged = *dragged_checked_state_on_mouse_up_out.read(cx);
+                    let (should_toggle, new_checked) =
+                        resolve_mouse_up_out_toggle(dragged, checked);
+
+                    // Clear drag states
+                    drag_start_x_state_on_mouse_up_out.update(cx, |this, _cx| *this = None);
+                    dragged_checked_state_on_mouse_up_out.update(cx, |this, cx| {
+                        *this = None;
+                        cx.notify();
+                    });
+
+                    if should_toggle {
+                        if let Some(on_click) = on_click_callback.as_ref() {
+                            (on_click)(&new_checked, window, cx);
+                        }
+                    }
                 })
                 .track_focus(&focus_handle)
             })
@@ -339,6 +409,81 @@ impl RenderOnce for Switch {
 /// Linearly remaps a value from one range to another.
 pub fn remap(value: f32, from_min: f32, from_max: f32, to_min: f32, to_max: f32) -> f32 {
     (value - from_min) / (from_max - from_min) * (to_max - to_min) + to_min
+}
+
+/// Calculates the dragged checked state based on mouse movement.
+/// Returns `Some(true)` if dragged right past threshold, `Some(false)` if dragged left past threshold,
+/// or the current dragged_checked state if within threshold.
+fn calculate_dragged_checked(
+    current_x: f32,
+    start_x: f32,
+    threshold: f32,
+    current_dragged_checked: Option<bool>,
+) -> Option<bool> {
+    let delta = current_x - start_x;
+    if delta > threshold {
+        Some(true)
+    } else if delta < -threshold {
+        Some(false)
+    } else {
+        current_dragged_checked
+    }
+}
+
+/// Registers a mouse move handler on Root to track drag gestures.
+/// This allows the switch to detect mouse movement even when the cursor leaves its bounds.
+fn register_drag_handler(
+    window: &mut Window,
+    cx: &mut App,
+    start_x: f32,
+    threshold: f32,
+    dragged_checked_state: Entity<Option<bool>>,
+) {
+    let root = window
+        .root::<crate::views::Root>()
+        .flatten()
+        .expect("expected gpui_tesserae::Root");
+
+    root.update(cx, |root, cx| {
+        root.on_mouse_move(move |event, _window, cx| {
+            let current_dragged = *dragged_checked_state.read(cx);
+            let new_dragged = calculate_dragged_checked(
+                event.position.x.to_f64() as f32,
+                start_x,
+                threshold,
+                current_dragged,
+            );
+
+            if new_dragged != current_dragged {
+                dragged_checked_state.update(cx, |this, cx| {
+                    *this = new_dragged;
+                    cx.notify();
+                });
+            }
+        });
+        cx.notify();
+    });
+}
+
+/// Determines whether a toggle should occur on click and what the new checked state should be.
+/// Returns `(should_toggle, new_checked_state)`.
+fn resolve_click_toggle(dragged_checked: Option<bool>, current_checked: bool) -> (bool, bool) {
+    match dragged_checked {
+        Some(new_checked) => (new_checked != current_checked, new_checked),
+        None => (true, !current_checked), // No drag occurred, normal click toggles
+    }
+}
+
+/// Determines whether a toggle should occur on mouse up out and what the new checked state should be.
+/// Returns `(should_toggle, new_checked_state)`.
+fn resolve_mouse_up_out_toggle(
+    dragged_checked: Option<bool>,
+    current_checked: bool,
+) -> (bool, bool) {
+    match dragged_checked {
+        Some(new_checked) => (new_checked != current_checked, new_checked),
+        None => (false, current_checked), // No drag occurred, don't toggle on mouse_up_out
+    }
 }
 
 #[cfg(all(test, feature = "test-support"))]

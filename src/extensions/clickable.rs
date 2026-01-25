@@ -1,7 +1,7 @@
 use gpui::{App, ClickEvent, MouseButton, MouseDownEvent, MouseUpEvent, Window};
 
 /// Type alias for the on_click callback that receives a ClickEvent.
-pub type OnClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+pub type OnClickHandler<CE> = Box<dyn Fn(&CE, &mut Window, &mut App) + 'static>;
 
 /// Type alias for the on_mouse_down callback that receives a MouseDownEvent.
 pub type OnMouseDownHandler = Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
@@ -14,9 +14,9 @@ pub type OnMouseUpHandler = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut App) + '
 /// This struct encapsulates the various mouse click event handlers that can be
 /// attached to interactive components.
 #[derive(Default)]
-pub struct ClickHandlers {
+pub struct ClickHandlers<CE: Default = ClickEvent> {
     /// Handler called when the element is clicked (mouse down + up within bounds).
-    pub on_click: Option<OnClickHandler>,
+    pub on_click: Option<OnClickHandler<CE>>,
     /// Handler called when a specific mouse button is pressed down on the element.
     pub on_mouse_down: Option<(MouseButton, OnMouseDownHandler)>,
     /// Handler called when a specific mouse button is released on the element.
@@ -27,7 +27,7 @@ pub struct ClickHandlers {
     pub on_any_mouse_up: Option<OnMouseUpHandler>,
 }
 
-impl ClickHandlers {
+impl<CE: Default> ClickHandlers<CE> {
     /// Creates a new empty ClickHandlers instance.
     pub fn new() -> Self {
         Self::default()
@@ -38,14 +38,14 @@ impl ClickHandlers {
 ///
 /// Implement this trait to add support for `on_click`, `on_mouse_down`, `on_mouse_up`,
 /// `on_any_mouse_down`, and `on_any_mouse_up` handlers to your component.
-pub trait Clickable: Sized {
+pub trait Clickable<CE: Default = ClickEvent>: Sized {
     /// Returns a mutable reference to the click handlers.
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers;
+    fn click_handlers_mut(&mut self) -> &mut ClickHandlers<CE>;
 
     /// Sets the on_click handler.
     ///
     /// The handler is called when the element is clicked (mouse down + up within bounds).
-    fn on_click(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+    fn on_click(mut self, handler: impl Fn(&CE, &mut Window, &mut App) + 'static) -> Self {
         self.click_handlers_mut().on_click = Some(Box::new(handler));
         self
     }

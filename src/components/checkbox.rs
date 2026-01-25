@@ -30,7 +30,7 @@ pub struct Checkbox {
     force_hover: bool,
     focus_handle: Option<FocusHandle>,
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
-    click_handlers: ClickHandlers,
+    click_handlers: ClickHandlers<bool>,
     click_behavior: ClickBehavior,
 }
 
@@ -97,8 +97,8 @@ impl Checkbox {
     }
 }
 
-impl Clickable for Checkbox {
-    fn click_handlers_mut(&mut self) -> &mut ClickHandlers {
+impl Clickable<bool> for Checkbox {
+    fn click_handlers_mut(&mut self) -> &mut ClickHandlers<bool> {
         &mut self.click_handlers
     }
 }
@@ -231,6 +231,7 @@ impl RenderOnce for Checkbox {
                 let is_click_down_state_on_mouse_down = is_click_down_state.clone();
                 let is_click_down_state_on_click = is_click_down_state.clone();
                 let behavior = self.click_behavior;
+                let checked = self.checked;
 
                 this.on_hover(move |hover, window, cx| {
                     is_hover_state_on_hover.update(cx, |this, cx| {
@@ -285,11 +286,10 @@ impl RenderOnce for Checkbox {
                     }
 
                     let on_click = self.click_handlers.on_click;
-                    this.on_click(move |event, window, cx| {
+                    this.on_click(move |_event, window, cx| {
                         behavior.apply(window, cx);
 
                         if !is_focus {
-                            // We only want to blur if something else may be focused.
                             window.blur();
                         }
 
@@ -299,7 +299,8 @@ impl RenderOnce for Checkbox {
                         });
 
                         if let Some(on_click) = &on_click {
-                            (on_click)(event, window, cx);
+                            let new_checked = !checked;
+                            (on_click)(&new_checked, window, cx);
                         }
                     })
                 })

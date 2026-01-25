@@ -52,8 +52,8 @@ impl Render for Main {
                 Checkbox::new("checkbox")
                     .checked(self.checkbox_checked)
                     .disabled(self.switch_checked)
-                    .on_click(cx.listener(|view, _event, _window, cx| {
-                        view.checkbox_checked = !view.checkbox_checked;
+                    .on_click(cx.listener(|view, checked, _window, cx| {
+                        view.checkbox_checked = *checked;
                         cx.notify();
                     })),
             )
@@ -61,8 +61,8 @@ impl Render for Main {
                 Switch::new("switch")
                     .checked(self.switch_checked)
                     .disabled(self.checkbox_checked)
-                    .on_click(cx.listener(|view, _event, _window, cx| {
-                        view.switch_checked = !view.switch_checked;
+                    .on_click(cx.listener(|view, checked, _window, cx| {
+                        view.switch_checked = *checked;
                         cx.notify();
                     })),
             )

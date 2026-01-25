@@ -2,7 +2,7 @@ use std::{any::TypeId, cell::RefCell, cmp::Ordering, collections::BTreeMap, rc::
 
 use gpui::{
     AnyElement, AnyView, App, Bounds, ClickEvent, Context, ElementId, InteractiveElement,
-    IntoElement, Length, MouseDownEvent, MouseUpEvent, ParentElement, Render,
+    IntoElement, Length, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, WindowHandle, div, prelude::FluentBuilder, px,
 };
 
@@ -120,6 +120,7 @@ struct MouseEvents {
     on_click: Rc<RefCell<Vec<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>>>,
     on_mouse_down: Rc<RefCell<Vec<Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>>>>,
     on_mouse_up: Rc<RefCell<Vec<Box<dyn Fn(&MouseUpEvent, &mut Window, &mut App) + 'static>>>>,
+    on_mouse_move: Rc<RefCell<Vec<Box<dyn Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static>>>>,
 }
 
 impl MouseEvents {
@@ -128,6 +129,7 @@ impl MouseEvents {
             on_click: Rc::new(RefCell::new(vec![])),
             on_mouse_down: Rc::new(RefCell::new(vec![])),
             on_mouse_up: Rc::new(RefCell::new(vec![])),
+            on_mouse_move: Rc::new(RefCell::new(vec![])),
         }
     }
 
@@ -135,6 +137,7 @@ impl MouseEvents {
         self.on_click.borrow().is_empty()
             && self.on_mouse_down.borrow().is_empty()
             && self.on_mouse_up.borrow().is_empty()
+            && self.on_mouse_move.borrow().is_empty()
     }
 }
 
@@ -204,6 +207,17 @@ impl Root {
             .on_mouse_up
             .borrow_mut()
             .push(Box::new(on_mouse_up));
+    }
+
+    /// Registers a mouse move handler that fires for any mouse move on the root overlay.
+    pub fn on_mouse_move(
+        &mut self,
+        on_mouse_move: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
+    ) {
+        self.mouse_events
+            .on_mouse_move
+            .borrow_mut()
+            .push(Box::new(on_mouse_move));
     }
 
     /// Returns whether any mouse event handlers are registered.
@@ -317,6 +331,20 @@ impl Render for Root {
                                     });
 
                                     this
+                                } else {
+                                    this
+                                }
+                            })
+                            .map(|this| {
+                                let on_mouse_move =
+                                    std::mem::take(&mut self.mouse_events.on_mouse_move);
+
+                                if on_mouse_move.borrow().len() != 0 {
+                                    this.on_mouse_move(move |event, window, cx| {
+                                        for callback in on_mouse_move.borrow().iter() {
+                                            (callback)(event, window, cx)
+                                        }
+                                    })
                                 } else {
                                     this
                                 }

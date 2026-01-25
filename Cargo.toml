@@ -3,9 +3,9 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.dependencies]
-gpui_primitives = { git = "https://github.com/astrum-chat/gpui_tesserae" }
+# gpui_primitives = { git = "https://github.com/astrum-chat/gpui_tesserae" }
 # Local development
-# gpui_primitives = { path = "crates/gpui_primitives" }
+gpui_primitives = { path = "crates/gpui_primitives" }
 
 gpui_squircle = { git = "https://github.com/astrum-chat/gpui_squircle" }
 gpui = "0.2.2"

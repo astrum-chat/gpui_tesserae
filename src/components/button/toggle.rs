@@ -336,7 +336,9 @@ pub enum ToggleVariant {
 
 /// Fine-grained color configuration for toggle button states.
 pub struct GranularToggleVariant {
+    /// The button variant applied when the toggle is checked (true state).
     pub truthy: GranularButtonVariant,
+    /// The button variant applied when the toggle is unchecked (false state).
     pub falsey: GranularButtonVariant,
 }
 
