@@ -63,7 +63,7 @@ pub struct OverlayEntry {
     /// Position and size of the overlay within the root.
     pub bounds: Bounds<Length>,
     /// Factory function that creates the overlay element.
-    pub element: Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement + Send + 'static>,
+    pub element: Box<dyn FnOnce(&mut Window, &mut App) -> AnyElement + 'static>,
 }
 
 impl OverlayEntry {
@@ -71,7 +71,7 @@ impl OverlayEntry {
     pub fn new(
         id: impl Into<ElementId>,
         bounds: Bounds<Length>,
-        element: impl FnOnce(&mut Window, &mut App) -> AnyElement + Send + 'static,
+        element: impl FnOnce(&mut Window, &mut App) -> AnyElement + 'static,
     ) -> Self {
         Self {
             id: id.into(),
@@ -153,7 +153,7 @@ impl Root {
         &mut self,
         id: impl Into<ElementId>,
         bounds: Bounds<Length>,
-        element: impl FnOnce(&mut Window, &mut App) -> E + Send + 'static,
+        element: impl FnOnce(&mut Window, &mut App) -> E + 'static,
     ) {
         let id = id.into();
 

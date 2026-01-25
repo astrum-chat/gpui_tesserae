@@ -215,6 +215,78 @@ impl Toggle {
         self.base = self.base.w_full();
         self
     }
+
+    /// Sets the minimum width of the element. [Docs](https://tailwindcss.com/docs/min-width)
+    pub fn min_w(mut self, width: impl Into<Length>) -> Self {
+        self.base = self.base.min_w(width);
+        self
+    }
+
+    /// Sets the minimum width to 0. [Docs](https://tailwindcss.com/docs/min-width)
+    pub fn min_w_0(mut self) -> Self {
+        self.base = self.base.min_w_0();
+        self
+    }
+
+    /// Sets the minimum width to 100%. [Docs](https://tailwindcss.com/docs/min-width)
+    pub fn min_w_full(mut self) -> Self {
+        self.base = self.base.min_w_full();
+        self
+    }
+
+    /// Sets the minimum height of the element. [Docs](https://tailwindcss.com/docs/min-height)
+    pub fn min_h(mut self, height: impl Into<Length>) -> Self {
+        self.base = self.base.min_h(height);
+        self
+    }
+
+    /// Sets the minimum height to 0. [Docs](https://tailwindcss.com/docs/min-height)
+    pub fn min_h_0(mut self) -> Self {
+        self.base = self.base.min_h_0();
+        self
+    }
+
+    /// Sets the minimum height to 100%. [Docs](https://tailwindcss.com/docs/min-height)
+    pub fn min_h_full(mut self) -> Self {
+        self.base = self.base.min_h_full();
+        self
+    }
+
+    /// Sets the maximum width of the element. [Docs](https://tailwindcss.com/docs/max-width)
+    pub fn max_w(mut self, width: impl Into<Length>) -> Self {
+        self.base = self.base.max_w(width);
+        self
+    }
+
+    /// Sets the maximum width to 0. [Docs](https://tailwindcss.com/docs/max-width)
+    pub fn max_w_0(mut self) -> Self {
+        self.base = self.base.max_w_0();
+        self
+    }
+
+    /// Sets the maximum width to 100%. [Docs](https://tailwindcss.com/docs/max-width)
+    pub fn max_w_full(mut self) -> Self {
+        self.base = self.base.max_w_full();
+        self
+    }
+
+    /// Sets the maximum height of the element. [Docs](https://tailwindcss.com/docs/max-height)
+    pub fn max_h(mut self, height: impl Into<Length>) -> Self {
+        self.base = self.base.max_h(height);
+        self
+    }
+
+    /// Sets the maximum height to 0. [Docs](https://tailwindcss.com/docs/max-height)
+    pub fn max_h_0(mut self) -> Self {
+        self.base = self.base.max_h_0();
+        self
+    }
+
+    /// Sets the maximum height to 100%. [Docs](https://tailwindcss.com/docs/max-height)
+    pub fn max_h_full(mut self) -> Self {
+        self.base = self.base.max_h_full();
+        self
+    }
 }
 
 impl Clickable for Toggle {

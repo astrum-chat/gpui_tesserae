@@ -30,6 +30,10 @@ struct ButtonStyles {
     corner_radii: Corners<Option<Pixels>>,
     icon_rotate: Radians,
     width: Length,
+    min_width: Option<Length>,
+    min_height: Option<Length>,
+    max_width: Option<Length>,
+    max_height: Option<Length>,
 }
 
 impl Default for ButtonStyles {
@@ -40,6 +44,10 @@ impl Default for ButtonStyles {
             corner_radii: Corners::default(),
             icon_rotate: Radians(0.),
             width: Length::Auto,
+            min_width: None,
+            min_height: None,
+            max_width: None,
+            max_height: None,
         }
     }
 }
@@ -269,6 +277,78 @@ impl Button {
         self.style.width = relative(100.).into();
         self
     }
+
+    /// Sets the minimum width of the element. [Docs](https://tailwindcss.com/docs/min-width)
+    pub fn min_w(mut self, width: impl Into<Length>) -> Self {
+        self.style.min_width = Some(width.into());
+        self
+    }
+
+    /// Sets the minimum width to 0. [Docs](https://tailwindcss.com/docs/min-width)
+    pub fn min_w_0(mut self) -> Self {
+        self.style.min_width = Some(px(0.).into());
+        self
+    }
+
+    /// Sets the minimum width to 100%. [Docs](https://tailwindcss.com/docs/min-width)
+    pub fn min_w_full(mut self) -> Self {
+        self.style.min_width = Some(relative(100.).into());
+        self
+    }
+
+    /// Sets the minimum height of the element. [Docs](https://tailwindcss.com/docs/min-height)
+    pub fn min_h(mut self, height: impl Into<Length>) -> Self {
+        self.style.min_height = Some(height.into());
+        self
+    }
+
+    /// Sets the minimum height to 0. [Docs](https://tailwindcss.com/docs/min-height)
+    pub fn min_h_0(mut self) -> Self {
+        self.style.min_height = Some(px(0.).into());
+        self
+    }
+
+    /// Sets the minimum height to 100%. [Docs](https://tailwindcss.com/docs/min-height)
+    pub fn min_h_full(mut self) -> Self {
+        self.style.min_height = Some(relative(100.).into());
+        self
+    }
+
+    /// Sets the maximum width of the element. [Docs](https://tailwindcss.com/docs/max-width)
+    pub fn max_w(mut self, width: impl Into<Length>) -> Self {
+        self.style.max_width = Some(width.into());
+        self
+    }
+
+    /// Sets the maximum width to 0. [Docs](https://tailwindcss.com/docs/max-width)
+    pub fn max_w_0(mut self) -> Self {
+        self.style.max_width = Some(px(0.).into());
+        self
+    }
+
+    /// Sets the maximum width to 100%. [Docs](https://tailwindcss.com/docs/max-width)
+    pub fn max_w_full(mut self) -> Self {
+        self.style.max_width = Some(relative(100.).into());
+        self
+    }
+
+    /// Sets the maximum height of the element. [Docs](https://tailwindcss.com/docs/max-height)
+    pub fn max_h(mut self, height: impl Into<Length>) -> Self {
+        self.style.max_height = Some(height.into());
+        self
+    }
+
+    /// Sets the maximum height to 0. [Docs](https://tailwindcss.com/docs/max-height)
+    pub fn max_h_0(mut self) -> Self {
+        self.style.max_height = Some(px(0.).into());
+        self
+    }
+
+    /// Sets the maximum height to 100%. [Docs](https://tailwindcss.com/docs/max-height)
+    pub fn max_h_full(mut self) -> Self {
+        self.style.max_height = Some(relative(100.).into());
+        self
+    }
 }
 
 impl Clickable for Button {
@@ -417,6 +497,11 @@ impl RenderOnce for Button {
             })
             .w(self.style.width)
             .h_auto()
+            .overflow_hidden()
+            .when_some(self.style.min_width, |this, v| this.min_w(v))
+            .when_some(self.style.min_height, |this, v| this.min_h(v))
+            .when_some(self.style.max_width, |this, v| this.max_w(v))
+            .when_some(self.style.max_height, |this, v| this.max_h(v))
             .map(|this| {
                 apply_padding!(this, padding_override, vertical_padding, horizontal_padding)
             })

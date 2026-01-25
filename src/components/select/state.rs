@@ -23,7 +23,7 @@ pub type OnItemClickFn<V, I> =
 
 /// Shared state for a Select component, managing items, selection, and menu visibility.
 pub struct SelectState<V: 'static, I: SelectItem<Value = V> + 'static> {
-    pub(crate) items: Entity<SelectItemsMap<V, I>>,
+    pub items: Entity<SelectItemsMap<V, I>>,
     pub(crate) selected_item: Entity<Option<SharedString>>,
     pub(crate) highlighted_item: Entity<Option<SharedString>>,
     /// Animated transition for menu visibility.
