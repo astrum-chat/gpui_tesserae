@@ -96,7 +96,7 @@ pub struct SelectableTextState {
 
 impl SelectableTextState {
     /// Creates a new selectable text state with default values and a fresh focus handle.
-    pub fn new(cx: &mut App) -> Self {
+    pub fn new(cx: &App) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             text: SharedString::default(),
@@ -120,7 +120,7 @@ impl SelectableTextState {
     }
 
     /// Sets the text content. Clears selection and triggers recomputation of wrapped lines.
-    pub fn set_text(&mut self, text: impl Into<SharedString>) {
+    pub fn text(&mut self, text: impl Into<SharedString>) {
         self.text = text.into();
         self.selected_range = 0..0;
         self.selection_reversed = false;
@@ -130,7 +130,7 @@ impl SelectableTextState {
     }
 
     /// Returns the current text content.
-    pub fn text(&self) -> SharedString {
+    pub fn get_text(&self) -> SharedString {
         self.text.clone()
     }
 
@@ -151,7 +151,7 @@ impl SelectableTextState {
         text_color: Hsla,
         window: &Window,
     ) -> usize {
-        let text = self.text();
+        let text = self.get_text();
 
         // Update cache and track width used for this computation
         self.cached_wrap_width = Some(width);
@@ -350,7 +350,7 @@ impl SelectableTextState {
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
-                self.text()[self.selected_range.clone()].to_string(),
+                self.get_text()[self.selected_range.clone()].to_string(),
             ));
         }
     }
@@ -359,7 +359,7 @@ impl SelectableTextState {
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.is_select_all = true;
         self.move_to_without_scroll(0, cx);
-        self.select_to_without_scroll(self.text().len(), cx)
+        self.select_to_without_scroll(self.get_text().len(), cx)
     }
 
     /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
@@ -441,7 +441,7 @@ impl SelectableTextState {
 
     /// Moves cursor to end of text.
     pub fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.text().len(), cx);
+        self.move_to(self.get_text().len(), cx);
     }
 
     /// Moves cursor to start of current line.
@@ -499,7 +499,7 @@ impl SelectableTextState {
 
     /// Moves cursor to end of document.
     pub fn move_to_end(&mut self, _: &MoveToEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.text().len(), cx);
+        self.move_to(self.get_text().len(), cx);
     }
 
     /// Extends selection to start of document.
@@ -509,7 +509,7 @@ impl SelectableTextState {
 
     /// Extends selection to end of document.
     pub fn select_to_end(&mut self, _: &SelectToEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_to(self.text().len(), cx);
+        self.select_to(self.get_text().len(), cx);
     }
 
     /// Moves past whitespace/punctuation to start of previous word.
@@ -578,7 +578,7 @@ impl SelectableTextState {
         position: gpui::Point<Pixels>,
         line_height: Pixels,
     ) -> usize {
-        let text = self.text();
+        let text = self.get_text();
         if text.is_empty() {
             return 0;
         }

@@ -76,9 +76,9 @@ fn main() {
             },
             |_window, cx| {
                 let state = cx.new(|cx| {
-                    let mut s = SelectableTextState::new(cx);
-                    s.set_text(SAMPLE_TEXT);
-                    s
+                    let mut state = SelectableTextState::new(cx);
+                    state.text(SAMPLE_TEXT);
+                    state
                 });
 
                 cx.new(|_cx| ExampleApp { state })

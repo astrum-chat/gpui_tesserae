@@ -71,7 +71,7 @@ impl SelectableText {
 
     /// Returns the current text value from state.
     pub fn read_text(&self, cx: &mut App) -> SharedString {
-        self.state.read(cx).text()
+        self.state.read(cx).get_text()
     }
 }
 
@@ -195,7 +195,7 @@ impl RenderOnce for SelectableText {
                     line_count,
                     move |visible_range, _window, cx| {
                         let state = state_entity.read(cx);
-                        let value = state.text();
+                        let value = state.get_text();
                         let selected_range = state.selected_range.clone();
                         let is_select_all = state.is_select_all;
 

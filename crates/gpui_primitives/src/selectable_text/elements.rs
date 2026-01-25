@@ -74,7 +74,7 @@ impl Element for LineElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let state = self.state.read(cx);
-        let full_value = state.text();
+        let full_value = state.get_text();
 
         let line_content: String =
             full_value[self.line_start_offset..self.line_end_offset].to_string();
@@ -280,7 +280,7 @@ impl Element for WrappedLineElement {
             };
         };
 
-        let value = state.text();
+        let value = state.get_text();
         let segment = &value[info.start_offset..info.end_offset];
         let display_text: SharedString = segment.to_string().into();
 
