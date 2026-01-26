@@ -323,6 +323,7 @@ impl RenderOnce for SelectableText {
                     child: list.into_any_element(),
                 })
             })
+            .bg(gpui::red())
     }
 }
 
