@@ -23,6 +23,8 @@ pub(crate) struct LineElement {
     pub font: Font,
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
+    /// Measured width for w_auto support (None means use relative(1.))
+    pub measured_width: Option<Pixels>,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -58,6 +60,9 @@ impl Element for LineElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
+        // Always fill parent width so prepaint can detect actual available width.
+        // This allows the clamping detection to work when the parent resizes.
+        // The text content will still render at the correct wrapped positions.
         style.size.width = relative(1.).into();
         style.size.height = self.line_height.into();
 
@@ -93,6 +98,18 @@ impl Element for LineElement {
         let line = window
             .text_system()
             .shape_line(display_text, self.font_size, &[run], None);
+
+        // Measure line width for w_auto support (only if not already using measured width)
+        if self.measured_width.is_none() {
+            let line_width = line.width;
+            self.state.update(cx, |state, cx| {
+                let current_max = state.measured_max_line_width.unwrap_or(Pixels::ZERO);
+                if line_width > current_max {
+                    state.measured_max_line_width = Some(line_width);
+                    cx.notify(); // Trigger re-render with new width
+                }
+            });
+        }
 
         let selection_intersects = self.selected_range.start <= self.line_end_offset
             && self.selected_range.end >= self.line_start_offset;
@@ -234,6 +251,9 @@ impl Element for WrappedLineElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
+        // Always fill parent width so prepaint can detect actual available width.
+        // This allows the clamping detection to work when the parent resizes.
+        // The text content will still render at the correct wrapped positions.
         style.size.width = relative(1.).into();
         style.size.height = self.line_height.into();
 
@@ -253,9 +273,12 @@ impl Element for WrappedLineElement {
         {
             let state = self.state.read(cx);
             if let Some(precomputed_width) = state.precomputed_at_width {
-                if (precomputed_width - actual_line_width).abs() > WRAP_WIDTH_EPSILON
-                    && !state.needs_wrap_recompute
-                {
+                // Update cached_wrap_width if:
+                // 1. We were CLAMPED (actual < what we asked for) - max_size kicked in
+                // 2. Width INCREASED (actual > precomputed) - parent grew, we should re-wrap
+                let was_clamped = actual_line_width < precomputed_width - WRAP_WIDTH_EPSILON;
+                let width_increased = actual_line_width > precomputed_width + WRAP_WIDTH_EPSILON;
+                if (was_clamped || width_increased) && !state.needs_wrap_recompute {
                     let _ = state;
                     self.state.update(cx, |state, cx| {
                         state.cached_wrap_width = Some(actual_line_width);

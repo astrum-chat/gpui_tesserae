@@ -1,67 +1,85 @@
 use gpui::{
     App, AppContext as _, Application, Bounds, Context, Entity, IntoElement, ParentElement, Render,
-    Styled, Window, WindowBounds, WindowOptions, div, px, rgb, size,
+    Styled, Window, WindowBounds, WindowOptions, div, px, relative, rgb, size,
 };
 use gpui_primitives::selectable_text::{self, SelectableText, SelectableTextState};
 
 struct ExampleApp {
-    state: Entity<SelectableTextState>,
+    wrapped_state: Entity<SelectableTextState>,
+    non_wrapped_state: Entity<SelectableTextState>,
 }
 
 impl Render for ExampleApp {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .bg(rgb(0x1e1e2e))
-            .p_4()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .child(
-                        div()
-                            .text_color(rgb(0xcdd6f4))
-                            .text_size(px(18.))
-                            .child("Selectable Text Example"),
-                    )
-                    .child(
-                        div()
-                            .p_3()
-                            .bg(rgb(0x313244))
-                            .rounded_md()
-                            .child(
-                                SelectableText::new("example-text", self.state.clone())
-                                    .line_clamp(10)
-                                    .word_wrap(true)
-                                    .text_color(rgb(0xcdd6f4))
-                                    .text_size(px(14.))
-                                    .line_height(px(22.))
-                                    .font_family("Berkeley Mono"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_color(rgb(0x6c7086))
-                            .text_size(px(12.))
-                            .child("Click and drag to select text. Double-click to select a word. Triple-click to select all. Cmd+C to copy."),
+        div().size_full().bg(rgb(0x1e1e2e)).p_4().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(
+                    div()
+                        .text_color(rgb(0xcdd6f4))
+                        .text_size(px(18.))
+                        .child("Selectable Text w_auto Example"),
+                )
+                // Wrapped mode with w_auto
+                .child(
+                    div()
+                        .text_color(rgb(0x6c7086))
+                        .text_size(px(12.))
+                        .child("Wrapped mode (w_auto):"),
+                )
+                .child(
+                    div().max_w(px(300.)).child(
+                        div().w_full().p_3().bg(rgb(0x313244)).rounded_md().child(
+                            SelectableText::new("wrapped-text", self.wrapped_state.clone())
+                                .max_w_full()
+                                .w_auto()
+                                .word_wrap(true)
+                                .line_clamp(5)
+                                .bg(gpui::red())
+                                .text_color(rgb(0xcdd6f4))
+                                .text_size(px(14.))
+                                .line_height(px(22.))
+                                .font_family("Berkeley Mono"),
+                        ),
                     ),
-            )
+                )
+                // Non-wrapped mode with w_auto
+                .child(
+                    div()
+                        .text_color(rgb(0x6c7086))
+                        .text_size(px(12.))
+                        .child("Non-wrapped mode (w_auto):"),
+                )
+                .child(
+                    div().w_auto().p_3().bg(rgb(0x313244)).rounded_md().child(
+                        SelectableText::new("non-wrapped-text", self.non_wrapped_state.clone())
+                            .w_auto()
+                            .line_clamp(3)
+                            .word_wrap(false)
+                            .text_color(rgb(0xcdd6f4))
+                            .text_size(px(14.))
+                            .line_height(px(22.))
+                            .bg(gpui::red())
+                            .font_family("Berkeley Mono"),
+                    ),
+                )
+                .child(
+                    div()
+                        .text_color(rgb(0x6c7086))
+                        .text_size(px(12.))
+                        .child("Both boxes should size to their content width."),
+                ),
+        )
     }
 }
 
-const SAMPLE_TEXT: &str = r#"The selectable_text primitive provides a read-only text component with full selection support.
+const WRAPPED_TEXT: &str = "This is a long line that should wrap when max_w_full is applied.";
 
-Features:
-- Word wrapping with configurable line clamp
-- Click, drag, double-click (word), and triple-click (line) selection
-- Keyboard navigation with arrow keys
-- Copy to clipboard with Cmd+C / Ctrl+C
-- Shift-click to extend selection
-
-This component is useful for displaying code, logs, or any text content where users need to select and copy portions of the text without being able to edit it.
-
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."#;
+const NON_WRAPPED_TEXT: &str = "Line one
+Line two is longer
+Short";
 
 fn main() {
     Application::new().run(|cx: &mut App| {
@@ -75,13 +93,22 @@ fn main() {
                 ..Default::default()
             },
             |_window, cx| {
-                let state = cx.new(|cx| {
+                let wrapped_state = cx.new(|cx| {
                     let mut state = SelectableTextState::new(cx);
-                    state.text(SAMPLE_TEXT);
+                    state.text(WRAPPED_TEXT);
                     state
                 });
 
-                cx.new(|_cx| ExampleApp { state })
+                let non_wrapped_state = cx.new(|cx| {
+                    let mut state = SelectableTextState::new(cx);
+                    state.text(NON_WRAPPED_TEXT);
+                    state
+                });
+
+                cx.new(|_cx| ExampleApp {
+                    wrapped_state,
+                    non_wrapped_state,
+                })
             },
         )
         .unwrap();

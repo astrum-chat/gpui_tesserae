@@ -92,6 +92,8 @@ pub struct SelectableTextState {
     pub(crate) last_bounds: Option<Bounds<Pixels>>,
     /// Whether the current selection is a "select all" (cmd+a)
     pub is_select_all: bool,
+    /// Maximum measured line width across all logical lines (for w_auto support)
+    pub(crate) measured_max_line_width: Option<Pixels>,
 }
 
 impl SelectableTextState {
@@ -116,6 +118,7 @@ impl SelectableTextState {
             visible_lines_info: Vec::new(),
             last_bounds: None,
             is_select_all: false,
+            measured_max_line_width: None,
         }
     }
 
@@ -127,6 +130,7 @@ impl SelectableTextState {
         self.precomputed_visual_lines.clear();
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
+        self.measured_max_line_width = None;
     }
 
     /// Returns the current text content.
@@ -153,8 +157,8 @@ impl SelectableTextState {
     ) -> usize {
         let text = self.get_text();
 
-        // Update cache and track width used for this computation
-        self.cached_wrap_width = Some(width);
+        // Track width used for this computation (don't overwrite cached_wrap_width -
+        // that's set by prepaint when it detects the actual parent constraint)
         self.precomputed_at_width = Some(width);
 
         // Clear previous data
@@ -186,6 +190,16 @@ impl SelectableTextState {
             .text_system()
             .shape_text(text.clone(), font_size, &[run], Some(width), None)
             .unwrap_or_default();
+
+        // Measure max unwrapped line width for w_auto support
+        let mut max_unwrapped_width = Pixels::ZERO;
+        for wrapped_line in wrapped_lines.iter() {
+            let unwrapped_width = wrapped_line.unwrapped_layout.width;
+            if unwrapped_width > max_unwrapped_width {
+                max_unwrapped_width = unwrapped_width;
+            }
+        }
+        self.measured_max_line_width = Some(max_unwrapped_width);
 
         // Build visual line info from wrap boundaries
         let mut text_offset = 0;
