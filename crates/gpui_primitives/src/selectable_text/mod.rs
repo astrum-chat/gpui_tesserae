@@ -93,7 +93,6 @@ impl RenderOnce for SelectableText {
             .unwrap_or_else(|| window.line_height());
         let scale_factor = window.scale_factor();
         let line_height = pixel_perfect_round(line_height, scale_factor);
-
         let font = Font {
             family: text_style
                 .font_family
@@ -204,10 +203,15 @@ impl RenderOnce for SelectableText {
                                 // No measured width yet - use cached as fallback
                                 this.style().size.width = Some(cached.into());
                             }
-                            (None, _) => {
-                                // First render: use relative(1.) so max_w_full() can clamp us.
-                                // Setting explicit pixel width would override the max_size constraint.
-                                // Prepaint will detect actual width and cache it for next render.
+                            (None, Some(measured)) => {
+                                // First render without cached width: use measured width.
+                                // Using relative(1.) doesn't work with right-aligned containers
+                                // because the parent doesn't provide a constrained width.
+                                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                                this.style().size.width = Some(auto_width.into());
+                            }
+                            (None, None) => {
+                                // No width info at all: use relative(1.) as last resort
                                 this.style().size.width = Some(gpui::relative(1.).into());
                             }
                         }
@@ -406,8 +410,15 @@ impl RenderOnce for SelectableText {
                                 // No measured width yet - use cached as fallback
                                 (Some(cached), false)
                             }
-                            (None, _) => {
-                                // First render: use relative(1.) so max_w_full() can clamp us
+                            (None, Some(measured)) => {
+                                // First render without cached width: use measured width.
+                                // Using relative(1.) doesn't work with right-aligned containers
+                                // because the parent doesn't provide a constrained width.
+                                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                                (Some(auto_width), false)
+                            }
+                            (None, None) => {
+                                // No width info at all: use relative(1.) as last resort
                                 (None, true)
                             }
                         }
@@ -482,14 +493,19 @@ impl RenderOnce for SelectableText {
                     },
                 )
                 .track_scroll(&scroll_handle)
-                .map(|mut list| {
+                .map(move |mut list| {
                     if !needs_scroll {
                         list.style().overflow.y = Some(Overflow::Hidden);
                     }
-                    // Always fill parent width - the outer div handles auto-width sizing.
-                    // This ensures element bounds reflect actual container width for
-                    // width-change detection in prepaint.
+                    // Always use relative width so element can shrink with container.
+                    // This ensures the uniform_list receives actual container bounds
+                    // during prepaint, enabling proper width-change detection.
                     list.style().size.width = Some(gpui::relative(1.).into());
+                    // Use max-width to limit expansion in auto-width mode.
+                    // This allows the element to shrink below this width when container shrinks.
+                    if let Some(width) = effective_width {
+                        list.style().max_size.width = Some(width.into());
+                    }
                     list
                 })
                 .h(multiline_height(

@@ -794,6 +794,28 @@ impl SelectableTextState {
     }
 }
 
+impl SelectableTextState {
+    /// Prints debug information about width-related state values.
+    /// Useful for debugging auto-width behavior and layout issues.
+    pub fn debug_widths(&self) {
+        println!("=== SelectableText Debug ===");
+        println!("  cached_wrap_width: {:?}", self.cached_wrap_width);
+        println!(
+            "  measured_max_line_width: {:?}",
+            self.measured_max_line_width
+        );
+        println!("  precomputed_at_width: {:?}", self.precomputed_at_width);
+        println!("  using_auto_width: {}", self.using_auto_width);
+        println!("  needs_wrap_recompute: {}", self.needs_wrap_recompute);
+        println!("  is_wrapped: {}", self.is_wrapped);
+        println!(
+            "  visual_lines_count: {}",
+            self.precomputed_visual_lines.len()
+        );
+        println!("=============================");
+    }
+}
+
 impl Render for SelectableTextState {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()

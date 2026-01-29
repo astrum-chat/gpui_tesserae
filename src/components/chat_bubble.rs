@@ -10,7 +10,7 @@ use smallvec::SmallVec;
 
 use crate::{
     ElementIdExt, conitional_transition,
-    primitives::{FocusRing, min_w0_wrapper},
+    primitives::FocusRing,
     theme::{ThemeExt, ThemeLayerKind},
     utils::PixelsExt,
 };
@@ -106,12 +106,11 @@ impl RenderOnce for ChatBubble {
         .with_easing(ease_out_quint());
 
         div()
-            .w_auto()
             .max_w(relative(0.75))
+            .h_auto()
             .flex()
             .flex_col()
-            .items_start()
-            .justify_start()
+            .flex_grow()
             .text_color(secondary_text_color)
             .text_size(text_size)
             .font_weight(FontWeight::NORMAL)

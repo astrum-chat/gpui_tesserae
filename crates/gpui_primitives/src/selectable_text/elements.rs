@@ -269,56 +269,8 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let actual_line_width = bounds.size.width;
-        {
-            let state = self.state.read(cx);
-            if let Some(precomputed_width) = state.precomputed_at_width {
-                // Determine if we need to recompute based on current mode:
-                // - In fill mode (using relative(1.)): trigger on clamp (actual < precomputed)
-                // - In auto mode (using measured width): trigger on increase (actual > cached)
-                //   because that means the container grew and we might be able to unwrap
-                let using_auto_width = state.using_auto_width;
-                let cached = state.cached_wrap_width;
-
-                let should_recompute = if using_auto_width {
-                    // In auto mode, we set width to measured + epsilon.
-                    // We need to recompute if:
-                    // 1. Container grew: actual > cached (text might be able to unwrap)
-                    // 2. Got clamped: actual < measured (container shrank below text width)
-                    //
-                    // Note: We compare against measured, not cached, because in auto mode
-                    // cached might be the old container width before we switched to auto.
-                    // What matters is whether our text (measured) still fits.
-                    let container_grew = if let Some(cached_w) = cached {
-                        actual_line_width > cached_w + WRAP_WIDTH_EPSILON
-                    } else {
-                        false
-                    };
-                    let got_clamped = if let Some(measured_w) = state.measured_max_line_width {
-                        // If actual < measured, we got clamped below our text width
-                        actual_line_width < measured_w - WRAP_WIDTH_EPSILON
-                    } else {
-                        false
-                    };
-                    container_grew || got_clamped
-                } else {
-                    // In fill mode: recompute if clamped OR if width increased
-                    let was_clamped = actual_line_width < precomputed_width - WRAP_WIDTH_EPSILON;
-                    let width_increased =
-                        actual_line_width > precomputed_width + WRAP_WIDTH_EPSILON;
-                    was_clamped || width_increased
-                };
-
-                if should_recompute && !state.needs_wrap_recompute {
-                    let _ = state;
-                    self.state.update(cx, |state, cx| {
-                        state.cached_wrap_width = Some(actual_line_width);
-                        state.needs_wrap_recompute = true;
-                        cx.notify();
-                    });
-                }
-            }
-        }
+        // Note: Width change detection now happens in UniformListElement.prepaint()
+        // which receives actual container bounds.
 
         let state = self.state.read(cx);
 
@@ -444,10 +396,51 @@ impl Element for WrappedLineElement {
     }
 }
 
-/// Coordinates the uniform_list with selection handling.
+// Note: Width change detection has been moved to UniformListElement.check_container_width_change()
+// which receives actual container bounds rather than the fixed-width uniform_list bounds.
+
 pub(crate) struct UniformListElement {
     pub state: Entity<SelectableTextState>,
     pub child: AnyElement,
+}
+
+impl UniformListElement {
+    /// Checks if the container width has changed significantly and triggers a rewrap if needed.
+    /// This is called from prepaint where we have the actual container bounds.
+    fn check_container_width_change(&self, actual_width: Pixels, cx: &mut App) {
+        // Guard against invalid widths from unresolved layout (e.g., right-aligned containers)
+        if actual_width <= Pixels::ZERO {
+            return;
+        }
+
+        let state = self.state.read(cx);
+
+        let Some(precomputed_width) = state.precomputed_at_width else {
+            // Initialize cached_wrap_width on first render
+            if state.cached_wrap_width.is_none() {
+                self.state.update(cx, |state, cx| {
+                    state.cached_wrap_width = Some(actual_width);
+                    state.needs_wrap_recompute = true;
+                    cx.notify();
+                });
+            }
+            return;
+        };
+
+        if state.needs_wrap_recompute {
+            return;
+        }
+
+        let width_changed = (actual_width - precomputed_width).abs() > WRAP_WIDTH_EPSILON;
+
+        if width_changed {
+            self.state.update(cx, |state, cx| {
+                state.cached_wrap_width = Some(actual_width);
+                state.needs_wrap_recompute = true;
+                cx.notify();
+            });
+        }
+    }
 }
 
 impl IntoElement for UniformListElement {
@@ -485,11 +478,13 @@ impl Element for UniformListElement {
         &mut self,
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        // Check if container width changed - this triggers rewrap when container shrinks
+        self.check_container_width_change(bounds.size.width, cx);
         self.child.prepaint(window, cx);
     }
 
