@@ -273,12 +273,43 @@ impl Element for WrappedLineElement {
         {
             let state = self.state.read(cx);
             if let Some(precomputed_width) = state.precomputed_at_width {
-                // Update cached_wrap_width if:
-                // 1. We were CLAMPED (actual < what we asked for) - max_size kicked in
-                // 2. Width INCREASED (actual > precomputed) - parent grew, we should re-wrap
-                let was_clamped = actual_line_width < precomputed_width - WRAP_WIDTH_EPSILON;
-                let width_increased = actual_line_width > precomputed_width + WRAP_WIDTH_EPSILON;
-                if (was_clamped || width_increased) && !state.needs_wrap_recompute {
+                // Determine if we need to recompute based on current mode:
+                // - In fill mode (using relative(1.)): trigger on clamp (actual < precomputed)
+                // - In auto mode (using measured width): trigger on increase (actual > cached)
+                //   because that means the container grew and we might be able to unwrap
+                let using_auto_width = state.using_auto_width;
+                let cached = state.cached_wrap_width;
+
+                let should_recompute = if using_auto_width {
+                    // In auto mode, we set width to measured + epsilon.
+                    // We need to recompute if:
+                    // 1. Container grew: actual > cached (text might be able to unwrap)
+                    // 2. Got clamped: actual < measured (container shrank below text width)
+                    //
+                    // Note: We compare against measured, not cached, because in auto mode
+                    // cached might be the old container width before we switched to auto.
+                    // What matters is whether our text (measured) still fits.
+                    let container_grew = if let Some(cached_w) = cached {
+                        actual_line_width > cached_w + WRAP_WIDTH_EPSILON
+                    } else {
+                        false
+                    };
+                    let got_clamped = if let Some(measured_w) = state.measured_max_line_width {
+                        // If actual < measured, we got clamped below our text width
+                        actual_line_width < measured_w - WRAP_WIDTH_EPSILON
+                    } else {
+                        false
+                    };
+                    container_grew || got_clamped
+                } else {
+                    // In fill mode: recompute if clamped OR if width increased
+                    let was_clamped = actual_line_width < precomputed_width - WRAP_WIDTH_EPSILON;
+                    let width_increased =
+                        actual_line_width > precomputed_width + WRAP_WIDTH_EPSILON;
+                    was_clamped || width_increased
+                };
+
+                if should_recompute && !state.needs_wrap_recompute {
                     let _ = state;
                     self.state.update(cx, |state, cx| {
                         state.cached_wrap_width = Some(actual_line_width);

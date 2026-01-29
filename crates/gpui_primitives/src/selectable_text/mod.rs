@@ -7,7 +7,7 @@ use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable,
     RenderOnce, SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
-    relative, rgb, uniform_list,
+    rgb, uniform_list,
 };
 
 use crate::utils::{
@@ -153,8 +153,9 @@ impl RenderOnce for SelectableText {
             .selection_color
             .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
 
-        // Get measured width for w_auto support on the outer container
+        // Get measured width and cached wrap width for w_auto support on the outer container
         let container_width = state.measured_max_line_width;
+        let cached_wrap_width = state.cached_wrap_width;
         // Check if user specified w_auto (width is None or Length::Auto)
         let user_wants_auto_width = match self.style.size.width {
             None => true,                     // No width set, treat as auto
@@ -180,25 +181,46 @@ impl RenderOnce for SelectableText {
             .min_w_0() // Allow shrinking in flex contexts
             .map(|mut this| {
                 this.style().refine(&self.style);
-                // If user wants auto width and we have a measured width, apply it
-                // Add epsilon to prevent premature wrapping due to floating-point precision
-                // GPUI's layout will clamp via max_size if set (works like CSS)
+                // If user wants auto width, set width based on content or cached wrap width
                 if user_wants_auto_width {
-                    if let Some(measured) = container_width {
-                        let auto_width = measured + WRAP_WIDTH_EPSILON;
-
-                        // Determine the effective width based on constraints
-                        // Always set size.width - GPUI's max_size will clamp for relative max widths
-                        let effective = if let Some(max_w) = max_width_px {
-                            // Absolute max_width - clamp directly
-                            auto_width.min(max_w)
-                        } else {
-                            // No absolute max or relative max - set measured width
-                            // GPUI's layout will clamp via max_size if relative max is set
-                            auto_width
-                        };
-
-                        this.style().size.width = Some(effective.into());
+                    if has_max_width_constraint {
+                        // With max-width constraint (like max_w_full):
+                        // - If we have cached width (from prepaint detecting actual available space),
+                        //   compare with measured to decide between auto and fill
+                        // - If no cached width yet (first render), use relative(1.) so GPUI's
+                        //   max_size constraint can clamp us, then prepaint will cache the result
+                        match (cached_wrap_width, container_width) {
+                            (Some(cached), Some(measured)) => {
+                                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                                if auto_width <= cached {
+                                    // Text fits within available space - use auto width
+                                    this.style().size.width = Some(auto_width.into());
+                                } else {
+                                    // Text exceeds available space - fill parent, max_w will clamp
+                                    this.style().size.width = Some(gpui::relative(1.).into());
+                                }
+                            }
+                            (Some(cached), None) => {
+                                // No measured width yet - use cached as fallback
+                                this.style().size.width = Some(cached.into());
+                            }
+                            (None, _) => {
+                                // First render: use relative(1.) so max_w_full() can clamp us.
+                                // Setting explicit pixel width would override the max_size constraint.
+                                // Prepaint will detect actual width and cache it for next render.
+                                this.style().size.width = Some(gpui::relative(1.).into());
+                            }
+                        }
+                    } else {
+                        // No max-width: use measured width, clamped by absolute max if present
+                        if let Some(measured) = container_width {
+                            let auto_width = measured + WRAP_WIDTH_EPSILON;
+                            let width = match max_width_px {
+                                Some(max_w) => auto_width.min(max_w),
+                                None => auto_width,
+                            };
+                            this.style().size.width = Some(width.into());
+                        }
                     }
                 }
                 this
@@ -268,7 +290,7 @@ impl RenderOnce for SelectableText {
                 let measured_width = if user_wants_auto_width {
                     state.measured_max_line_width
                 } else {
-                    None // Use relative(1.) for fixed width containers
+                    None // Fixed width - let layout handle it
                 };
 
                 let needs_scroll = line_count > line_clamp;
@@ -362,30 +384,55 @@ impl RenderOnce for SelectableText {
                     Some(max_w) => wrap_width.min(max_w),
                     None => wrap_width,
                 };
-                // For proper resize detection, always use None (fill parent) when there's
-                // a max_width constraint. This allows prepaint to detect actual available
-                // width changes in both directions (shrink and grow).
-                let effective_width = if user_wants_auto_width && has_max_width_constraint {
-                    // With max_width constraint, always fill parent to detect width changes
-                    None
-                } else if user_wants_auto_width {
-                    // No max_width constraint - use measured width for auto-sizing
-                    match measured_max_line_width {
-                        Some(measured) => {
-                            let auto_width = measured + WRAP_WIDTH_EPSILON;
-                            let clamped = match max_width_px {
-                                Some(max_w) => auto_width.min(max_w),
-                                None => auto_width,
-                            };
-                            Some(clamped)
+                // Calculate effective width for w_auto support.
+                // Same logic as outer div: use cached width to decide between auto and fill.
+                let (effective_width, use_relative_width) = if user_wants_auto_width {
+                    if has_max_width_constraint {
+                        // With max-width constraint (like max_w_full):
+                        // - If we have cached width, compare with measured to decide
+                        // - If no cached width yet (first render), use relative(1.)
+                        match (cached_wrap_width, measured_max_line_width) {
+                            (Some(cached), Some(measured)) => {
+                                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                                if auto_width <= cached {
+                                    // Text fits within available space - use auto width
+                                    (Some(auto_width), false)
+                                } else {
+                                    // Text exceeds available space - fill parent
+                                    (None, true)
+                                }
+                            }
+                            (Some(cached), None) => {
+                                // No measured width yet - use cached as fallback
+                                (Some(cached), false)
+                            }
+                            (None, _) => {
+                                // First render: use relative(1.) so max_w_full() can clamp us
+                                (None, true)
+                            }
                         }
-                        None => None,
+                    } else {
+                        // No max-width: always use measured width
+                        match measured_max_line_width {
+                            Some(measured) => {
+                                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                                let clamped = match max_width_px {
+                                    Some(max_w) => auto_width.min(max_w),
+                                    None => auto_width,
+                                };
+                                (Some(clamped), false)
+                            }
+                            None => (None, false),
+                        }
                     }
                 } else {
-                    None // Fixed width - let layout handle it
+                    (None, false) // Fixed width - let layout handle it
                 };
 
                 let visual_line_count = self.state.update(cx, |state, _cx| {
+                    // Track whether we're using auto width so prepaint knows how to interpret changes
+                    state.using_auto_width = !use_relative_width && effective_width.is_some();
+
                     let should_recompute =
                         state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty();
 
@@ -439,19 +486,10 @@ impl RenderOnce for SelectableText {
                     if !needs_scroll {
                         list.style().overflow.y = Some(Overflow::Hidden);
                     }
-                    // Apply effective width for w_auto support
-                    match effective_width {
-                        Some(width) => {
-                            list.style().size.width = Some(width.into());
-                        }
-                        None if has_max_width_constraint => {
-                            // Relative max_width without cached width - fill parent to detect constraint
-                            list.style().size.width = Some(relative(1.).into());
-                        }
-                        None => {
-                            // No constraints - leave default
-                        }
-                    }
+                    // Always fill parent width - the outer div handles auto-width sizing.
+                    // This ensures element bounds reflect actual container width for
+                    // width-change detection in prepaint.
+                    list.style().size.width = Some(gpui::relative(1.).into());
                     list
                 })
                 .h(multiline_height(
@@ -562,31 +600,56 @@ mod tests {
         }
     }
 
-    /// Helper to compute effective_width given the inputs, mimicking the logic in render()
+    /// Helper to compute effective_width and use_relative_width, mimicking the logic in render()
+    /// Returns (effective_width, use_relative_width)
     fn compute_effective_width(
         user_wants_auto_width: bool,
         has_max_width_constraint: bool,
+        cached_wrap_width: Option<Pixels>,
         measured_max_line_width: Option<Pixels>,
         max_width_px: Option<Pixels>,
-    ) -> Option<Pixels> {
-        if user_wants_auto_width && has_max_width_constraint {
-            // With max_width constraint, always fill parent to detect width changes
-            None
-        } else if user_wants_auto_width {
-            // No max_width constraint - use measured width for auto-sizing
-            match measured_max_line_width {
-                Some(measured) => {
-                    let auto_width = measured + WRAP_WIDTH_EPSILON;
-                    let clamped = match max_width_px {
-                        Some(max_w) => auto_width.min(max_w),
-                        None => auto_width,
-                    };
-                    Some(clamped)
+    ) -> (Option<Pixels>, bool) {
+        if user_wants_auto_width {
+            if has_max_width_constraint {
+                // With max-width constraint (like max_w_full):
+                // - If we have cached width, compare with measured to decide
+                // - If no cached width yet (first render), use relative(1.)
+                match (cached_wrap_width, measured_max_line_width) {
+                    (Some(cached), Some(measured)) => {
+                        let auto_width = measured + WRAP_WIDTH_EPSILON;
+                        if auto_width <= cached {
+                            // Text fits within available space - use auto width
+                            (Some(auto_width), false)
+                        } else {
+                            // Text exceeds available space - fill parent
+                            (None, true)
+                        }
+                    }
+                    (Some(cached), None) => {
+                        // No measured width yet - use cached as fallback
+                        (Some(cached), false)
+                    }
+                    (None, _) => {
+                        // First render: use relative(1.) so max_w_full() can clamp us
+                        (None, true)
+                    }
                 }
-                None => None,
+            } else {
+                // No max-width: always use measured width
+                match measured_max_line_width {
+                    Some(measured) => {
+                        let auto_width = measured + WRAP_WIDTH_EPSILON;
+                        let clamped = match max_width_px {
+                            Some(max_w) => auto_width.min(max_w),
+                            None => auto_width,
+                        };
+                        (Some(clamped), false)
+                    }
+                    None => (None, false),
+                }
             }
         } else {
-            None // Fixed width - let layout handle it
+            (None, false) // Fixed width - let layout handle it
         }
     }
 
@@ -645,47 +708,81 @@ mod tests {
     // ==================== effective_width tests ====================
 
     #[test]
-    fn test_effective_width_none_when_has_max_width_constraint() {
-        // With max_width constraint (like max_w_full), effective_width should be None
-        // to allow the element to fill the parent and detect width changes
-        let result = compute_effective_width(true, true, Some(px(400.)), None);
-        assert_eq!(result, None);
+    fn test_effective_width_uses_relative_on_first_render_with_max_constraint() {
+        // First render (no cached width) with max_width constraint: use relative(1.)
+        // This allows GPUI's max_size to clamp, prepaint will detect and cache actual width
+        let (width, use_relative) = compute_effective_width(true, true, None, Some(px(400.)), None);
+        assert_eq!(width, None);
+        assert!(use_relative);
     }
 
     #[test]
-    fn test_effective_width_none_when_has_max_width_constraint_even_with_absolute_max() {
-        // Even with absolute max_width, when has_max_width_constraint is true,
-        // effective_width should be None
-        let result = compute_effective_width(true, true, Some(px(400.)), Some(px(300.)));
-        assert_eq!(result, None);
+    fn test_effective_width_uses_auto_when_text_fits() {
+        // With cached width and measured width that fits: use auto width
+        let (width, use_relative) =
+            compute_effective_width(true, true, Some(px(500.)), Some(px(400.)), None);
+        assert_eq!(width, Some(px(400.) + WRAP_WIDTH_EPSILON));
+        assert!(!use_relative);
+    }
+
+    #[test]
+    fn test_effective_width_uses_relative_when_text_exceeds_available() {
+        // With cached width and measured width that exceeds: use relative(1.)
+        let (width, use_relative) =
+            compute_effective_width(true, true, Some(px(300.)), Some(px(400.)), None);
+        assert_eq!(width, None);
+        assert!(use_relative);
+    }
+
+    #[test]
+    fn test_effective_width_uses_cached_when_no_measured() {
+        // With cached width but no measured: use cached as fallback
+        let (width, use_relative) = compute_effective_width(true, true, Some(px(300.)), None, None);
+        assert_eq!(width, Some(px(300.)));
+        assert!(!use_relative);
+    }
+
+    #[test]
+    fn test_effective_width_uses_relative_when_nothing_available() {
+        // No cached, no measured: use relative to fill parent
+        let (width, use_relative) = compute_effective_width(true, true, None, None, None);
+        assert_eq!(width, None);
+        assert!(use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_measured_when_no_max_constraint() {
         // Without max_width constraint, should use measured width + epsilon
-        let result = compute_effective_width(true, false, Some(px(400.)), None);
-        assert_eq!(result, Some(px(400.) + WRAP_WIDTH_EPSILON));
+        let (width, use_relative) =
+            compute_effective_width(true, false, None, Some(px(400.)), None);
+        assert_eq!(width, Some(px(400.) + WRAP_WIDTH_EPSILON));
+        assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_clamped_by_absolute_max_when_no_relative_constraint() {
         // Without relative max_width constraint but with absolute max_width_px
-        let result = compute_effective_width(true, false, Some(px(400.)), Some(px(300.)));
-        assert_eq!(result, Some(px(300.)));
+        let (width, use_relative) =
+            compute_effective_width(true, false, None, Some(px(400.)), Some(px(300.)));
+        assert_eq!(width, Some(px(300.)));
+        assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_none_when_not_auto_width() {
         // When user doesn't want auto width (fixed width), effective_width should be None
-        let result = compute_effective_width(false, false, Some(px(400.)), None);
-        assert_eq!(result, None);
+        let (width, use_relative) =
+            compute_effective_width(false, false, None, Some(px(400.)), None);
+        assert_eq!(width, None);
+        assert!(!use_relative);
     }
 
     #[test]
-    fn test_effective_width_none_when_not_measured_yet() {
-        // When text hasn't been measured yet, effective_width should be None
-        let result = compute_effective_width(true, false, None, None);
-        assert_eq!(result, None);
+    fn test_effective_width_none_when_not_measured_yet_no_max_constraint() {
+        // When text hasn't been measured yet (no max constraint), effective_width should be None
+        let (width, use_relative) = compute_effective_width(true, false, None, None, None);
+        assert_eq!(width, None);
+        assert!(!use_relative);
     }
 
     // ==================== recompute trigger tests ====================

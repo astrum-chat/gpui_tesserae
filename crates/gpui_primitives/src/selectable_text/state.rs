@@ -80,6 +80,9 @@ pub struct SelectableTextState {
     pub(crate) precomputed_wrapped_lines: Vec<WrappedLine>,
     /// Width that was used to compute current precomputed_visual_lines
     pub(crate) precomputed_at_width: Option<Pixels>,
+    /// Whether we're currently using auto width (text fits) vs fill width (text exceeds available)
+    /// This affects how prepaint interprets width changes
+    pub(crate) using_auto_width: bool,
     /// Flag indicating visual lines need recompute due to width mismatch
     pub(crate) needs_wrap_recompute: bool,
     /// Flag to scroll cursor into view on next render
@@ -113,6 +116,7 @@ impl SelectableTextState {
             precomputed_visual_lines: Vec::new(),
             precomputed_wrapped_lines: Vec::new(),
             precomputed_at_width: None,
+            using_auto_width: false,
             needs_wrap_recompute: false,
             scroll_to_cursor_on_next_render: false,
             visible_lines_info: Vec::new(),

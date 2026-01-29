@@ -106,11 +106,15 @@ impl RenderOnce for ChatBubble {
         .with_easing(ease_out_quint());
 
         div()
+            .w_auto()
             .max_w(relative(0.75))
             .flex()
             .flex_col()
             .items_start()
             .justify_start()
+            .text_color(secondary_text_color)
+            .text_size(text_size)
+            .font_weight(FontWeight::NORMAL)
             .pt(vertical_padding)
             .pb(vertical_padding)
             .pl(horizontal_padding)
@@ -138,13 +142,7 @@ impl RenderOnce for ChatBubble {
                     })
                     .border_color(*border_color_transition.evaluate(window, cx)),
             )
-            .child(
-                min_w0_wrapper()
-                    .text_color(secondary_text_color)
-                    .text_size(text_size)
-                    .font_weight(FontWeight::NORMAL)
-                    .children(self.children),
-            )
+            .children(self.children)
     }
 }
 
