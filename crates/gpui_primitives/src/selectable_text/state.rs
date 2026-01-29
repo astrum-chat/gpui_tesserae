@@ -99,8 +99,6 @@ pub struct SelectableTextState {
     pub(crate) measured_max_line_width: Option<Pixels>,
     /// Whether text is constrained (wrapped due to space limit, not natural line breaks)
     pub(crate) is_constrained: bool,
-    /// True during the probe frame when checking if container has grown
-    pub(crate) probing_for_growth: bool,
 }
 
 impl SelectableTextState {
@@ -128,7 +126,6 @@ impl SelectableTextState {
             is_select_all: false,
             measured_max_line_width: None,
             is_constrained: false,
-            probing_for_growth: false,
         }
     }
 
@@ -157,13 +154,14 @@ impl SelectableTextState {
     /// Sets the wrap mode and resets cached state if the mode changed.
     pub(crate) fn set_wrap_mode(&mut self, wrapped: bool) {
         if self.is_wrapped != wrapped {
-            // Wrap mode changed - clear all wrap-specific cached state
+            // Wrap mode changed - clear wrap-specific cached state
+            // Note: We don't clear measured_max_line_width because it represents
+            // the unwrapped text width, which is the same regardless of display mode
             self.cached_wrap_width = None;
             self.precomputed_visual_lines.clear();
             self.precomputed_wrapped_lines.clear();
             self.precomputed_at_width = None;
             self.needs_wrap_recompute = true;
-            self.measured_max_line_width = None;
         }
         self.is_wrapped = wrapped;
     }
@@ -811,30 +809,6 @@ impl SelectableTextState {
                 self.select_to_multiline(event.position, line_height, cx);
             }
         }
-    }
-}
-
-impl SelectableTextState {
-    /// Prints debug information about width-related state values.
-    /// Useful for debugging auto-width behavior and layout issues.
-    pub fn debug_widths(&self) {
-        println!("=== SelectableText Debug ===");
-        println!("  cached_wrap_width: {:?}", self.cached_wrap_width);
-        println!(
-            "  measured_max_line_width: {:?}",
-            self.measured_max_line_width
-        );
-        println!("  precomputed_at_width: {:?}", self.precomputed_at_width);
-        println!("  using_auto_width: {}", self.using_auto_width);
-        println!("  needs_wrap_recompute: {}", self.needs_wrap_recompute);
-        println!("  is_wrapped: {}", self.is_wrapped);
-        println!("  is_constrained: {}", self.is_constrained);
-        println!("  probing_for_growth: {}", self.probing_for_growth);
-        println!(
-            "  visual_lines_count: {}",
-            self.precomputed_visual_lines.len()
-        );
-        println!("=============================");
     }
 }
 

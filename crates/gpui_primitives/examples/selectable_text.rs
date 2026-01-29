@@ -9,10 +9,7 @@ struct ExampleApp {
 }
 
 impl Render for ExampleApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Debug: print state info
-        self.wrapped_state.read(cx).debug_widths();
-
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().size_full().flex().bg(rgb(0x1e1e2e)).p_4().child(
             div()
                 .w_full()
@@ -37,45 +34,37 @@ impl Render for ExampleApp {
                     div()
                         .id("bob")
                         .w_full()
-                        .bg(gpui::red())
                         .flex()
                         .flex_col()
                         .items_end()
                         .child(
                             // Flex row wrapper
-                            div()
-                                .flex()
-                                .bg(gpui::black())
-                                .flex_row()
-                                .max_w_full()
-                                .min_w_auto()
-                                .child(
-                                    div()
-                                        .id("nigel")
+                            div().flex().flex_row().max_w_full().min_w_auto().child(
+                                div()
+                                    .id("nigel")
+                                    .max_w_full()
+                                    .min_w_auto()
+                                    .h_auto()
+                                    .flex()
+                                    .flex_row()
+                                    .bg(rgb(0x313244))
+                                    .p(px(15.))
+                                    .rounded_md()
+                                    .child(
+                                        SelectableText::new(
+                                            "wrapped-text",
+                                            self.wrapped_state.clone(),
+                                        )
                                         .max_w_full()
                                         .min_w_auto()
-                                        .h_auto()
-                                        .flex()
-                                        .flex_row()
-                                        .bg(rgb(0x313244))
-                                        .p(px(15.))
-                                        .rounded_md()
-                                        .child(
-                                            SelectableText::new(
-                                                "wrapped-text",
-                                                self.wrapped_state.clone(),
-                                            )
-                                            .max_w_full()
-                                            .min_w_auto()
-                                            .w_auto()
-                                            .word_wrap(true)
-                                            .bg(gpui::red())
-                                            .text_color(rgb(0xcdd6f4))
-                                            .text_size(px(16.))
-                                            .line_height(px(24.))
-                                            .font_family("Geist"),
-                                        ),
-                                ),
+                                        .w_auto()
+                                        .word_wrap(true)
+                                        .text_color(rgb(0xcdd6f4))
+                                        .text_size(px(16.))
+                                        .line_height(px(24.))
+                                        .font_family("Geist"),
+                                    ),
+                            ),
                         ),
                 ),
         )

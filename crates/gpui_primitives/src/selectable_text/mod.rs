@@ -168,23 +168,11 @@ impl SelectableText {
     }
 
     fn apply_auto_width(&self, style: &mut StyleRefinement, params: &WidthParams) {
-        println!("=== apply_auto_width ===");
-        println!("  user_wants_auto_width: {}", params.user_wants_auto_width);
-        println!("  is_wrapped: {}", params.is_wrapped);
-        println!(
-            "  has_max_width_constraint: {}",
-            params.has_max_width_constraint
-        );
-        println!("  container_width: {:?}", params.container_width);
-        println!("  cached_wrap_width: {:?}", params.cached_wrap_width);
-        println!("  max_width_px: {:?}", params.max_width_px);
-
         if !params.user_wants_auto_width {
-            println!("  -> EARLY RETURN: user doesn't want auto width");
             return;
         }
 
-        // For non-wrapped mode, use measured width directly (ignore cached_wrap_width)
+        // For non-wrapped mode, use measured width directly
         if !params.is_wrapped {
             if let Some(measured) = params.container_width {
                 let auto_width = measured + WRAP_WIDTH_EPSILON;
@@ -196,37 +184,20 @@ impl SelectableText {
             return;
         }
 
-        // Wrapped mode
+        // Wrapped mode with max constraint
         if params.has_max_width_constraint {
-            // Has max constraint - use compute_effective_width logic
-            let (effective_width, use_relative) = compute_effective_width(
-                true,
-                true,
-                params.cached_wrap_width,
-                params.container_width,
-                params.max_width_px,
-            );
-
-            if let Some(width) = effective_width {
-                // Text fits within constraints - use auto width
-                style.size.width = Some(width.into());
-            } else if use_relative {
-                // Text exceeds constraints and we should use relative width
-                if let Some(cached) = params.cached_wrap_width {
-                    // Use cached width as the actual constraint - this is the max available space
-                    style.size.width = Some(cached.into());
-                } else if let Some(measured) = params.container_width {
-                    // No cached width yet but we have measured width - use it as initial size
-                    // This breaks the chicken-and-egg cycle on first render
-                    let auto_width = measured + WRAP_WIDTH_EPSILON;
-                    style.size.width = Some(auto_width.into());
-                } else {
-                    // Fallback to relative
-                    style.size.width = Some(gpui::relative(1.).into());
-                }
+            // Strategy: Use the measured text width as the element's desired size.
+            // The parent's max_w_full() constraint will cap this when the container is smaller.
+            // This allows both shrink-wrap (when space available) and wrapping (when constrained).
+            if let Some(measured) = params.container_width {
+                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                // Set the element width to the text's natural width
+                // The parent's max constraint will limit this when needed
+                style.size.width = Some(auto_width.into());
             }
+            // If no measured width yet, let GPUI determine the width
         } else {
-            // No max constraint - use measured width directly (same as non-wrapped)
+            // No max constraint - use measured width directly
             if let Some(measured) = params.container_width {
                 let auto_width = measured + WRAP_WIDTH_EPSILON;
                 let clamped = params
@@ -241,7 +212,6 @@ impl SelectableText {
 struct WidthParams {
     user_wants_auto_width: bool,
     has_max_width_constraint: bool,
-    cached_wrap_width: Option<Pixels>,
     container_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
     is_wrapped: bool,
@@ -324,7 +294,6 @@ impl RenderOnce for SelectableText {
         let width_params = WidthParams {
             user_wants_auto_width,
             has_max_width_constraint,
-            cached_wrap_width,
             container_width,
             max_width_px,
             is_wrapped: self.word_wrap,

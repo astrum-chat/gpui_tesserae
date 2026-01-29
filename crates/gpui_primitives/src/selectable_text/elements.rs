@@ -372,14 +372,20 @@ impl UniformListElement {
             )
         };
 
-        let Some(precomputed_width) = precomputed_at_width else {
-            if cached_wrap_width.is_none() {
-                self.state.update(cx, |state, cx| {
-                    state.cached_wrap_width = Some(actual_width);
+        // Initialize cached_wrap_width if not set yet
+        if cached_wrap_width.is_none() {
+            self.state.update(cx, |state, cx| {
+                state.cached_wrap_width = Some(actual_width);
+                // Only trigger recompute if we don't already have precomputed lines
+                if precomputed_at_width.is_none() {
                     state.needs_wrap_recompute = true;
-                    cx.notify();
-                });
-            }
+                }
+                cx.notify();
+            });
+            return;
+        }
+
+        let Some(precomputed_width) = precomputed_at_width else {
             return;
         };
 
