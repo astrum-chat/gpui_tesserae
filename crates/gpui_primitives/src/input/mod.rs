@@ -336,7 +336,6 @@ impl RenderOnce for Input {
                         let value = state.value();
                         let selected_range = state.selected_range.clone();
                         let cursor_offset = state.cursor_offset();
-                        let is_empty = value.is_empty();
 
                         let mut line_offsets: Vec<(usize, usize)> = Vec::new();
                         let mut start = 0;
@@ -367,7 +366,6 @@ impl RenderOnce for Input {
                                     selected_range: selected_range.clone(),
                                     cursor_offset,
                                     placeholder: placeholder.clone(),
-                                    is_empty,
                                 }
                             })
                             .collect()
@@ -436,7 +434,6 @@ impl RenderOnce for Input {
                         let state = input_state.read(cx);
                         let selected_range = state.selected_range.clone();
                         let cursor_offset = state.cursor_offset();
-                        let is_empty = state.value().is_empty();
 
                         visible_range
                             .map(|visual_idx| WrappedLineElement {
@@ -453,7 +450,6 @@ impl RenderOnce for Input {
                                 selected_range: selected_range.clone(),
                                 cursor_offset,
                                 placeholder: placeholder.clone(),
-                                is_empty,
                             })
                             .collect()
                     },

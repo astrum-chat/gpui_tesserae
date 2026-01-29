@@ -376,11 +376,16 @@ impl UniformListElement {
         if cached_wrap_width.is_none() {
             self.state.update(cx, |state, cx| {
                 state.cached_wrap_width = Some(actual_width);
-                // Only trigger recompute if we don't already have precomputed lines
-                if precomputed_at_width.is_none() {
+                // Only trigger recompute if actual width differs significantly from precomputed width
+                if let Some(precomputed_width) = precomputed_at_width {
+                    if (actual_width - precomputed_width).abs() > WRAP_WIDTH_EPSILON {
+                        state.needs_wrap_recompute = true;
+                        cx.notify();
+                    }
+                } else {
                     state.needs_wrap_recompute = true;
+                    cx.notify();
                 }
-                cx.notify();
             });
             return;
         }
@@ -479,9 +484,8 @@ impl Element for UniformListElement {
 
         self.child.paint(window, cx);
 
-        self.state.update(cx, |state, cx| {
+        self.state.update(cx, |state, _cx| {
             state.last_bounds = Some(bounds);
-            cx.notify();
         });
     }
 }

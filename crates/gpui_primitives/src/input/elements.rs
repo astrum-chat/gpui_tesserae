@@ -253,7 +253,6 @@ pub(crate) struct LineElement {
     pub selected_range: Range<usize>,
     pub cursor_offset: usize,
     pub placeholder: SharedString,
-    pub is_empty: bool,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -309,12 +308,29 @@ impl Element for LineElement {
         let input = self.input.read(cx);
         let full_value = input.value();
         let is_select_all = input.is_select_all;
+        let is_actually_empty = full_value.is_empty();
 
-        let line_content: String =
-            full_value[self.line_start_offset..self.line_end_offset].to_string();
+        // Check bounds before slicing
+        if !is_actually_empty
+            && (self.line_start_offset > full_value.len()
+                || self.line_end_offset > full_value.len())
+        {
+            return LinePrepaintState {
+                line: None,
+                cursor: None,
+                selection: None,
+                scroll_offset: Pixels::ZERO,
+            };
+        }
+
+        let line_content: String = if is_actually_empty {
+            String::new()
+        } else {
+            full_value[self.line_start_offset..self.line_end_offset].to_string()
+        };
 
         let (display_text, text_color): (SharedString, Hsla) =
-            if self.is_empty && self.line_index == 0 {
+            if is_actually_empty && self.line_index == 0 {
                 (self.placeholder.clone(), self.placeholder_text_color)
             } else if let Some(transform) = &self.transform_text {
                 let transformed: String = line_content.chars().map(|c| transform(c)).collect();
@@ -523,7 +539,6 @@ pub(crate) struct WrappedLineElement {
     pub selected_range: Range<usize>,
     pub cursor_offset: usize,
     pub placeholder: SharedString,
-    pub is_empty: bool,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
@@ -607,11 +622,27 @@ impl Element for WrappedLineElement {
             };
         };
 
+        let value = input.value();
+        let is_actually_empty = value.is_empty();
+
         let (display_text, text_color): (SharedString, Hsla) =
-            if self.is_empty && self.visual_line_index == 0 {
+            if is_actually_empty && self.visual_line_index == 0 {
                 (self.placeholder.clone(), self.placeholder_text_color)
+            } else if is_actually_empty {
+                // Value is empty but this isn't the first visual line - nothing to render
+                return WrappedLinePrepaintState {
+                    line: None,
+                    cursor: None,
+                    selection: None,
+                };
+            } else if info.start_offset > value.len() || info.end_offset > value.len() {
+                // Offsets are stale/invalid for current value - nothing to render
+                return WrappedLinePrepaintState {
+                    line: None,
+                    cursor: None,
+                    selection: None,
+                };
             } else {
-                let value = input.value();
                 let segment = &value[info.start_offset..info.end_offset];
                 let text: SharedString = if let Some(transform) = &self.transform_text {
                     segment

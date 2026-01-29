@@ -459,6 +459,7 @@ impl InputState {
 
     /// Takes and returns the current value, leaving the input empty.
     pub fn clear(&mut self) -> Option<SharedString> {
+        self.selected_range = 0..0;
         self.value.take()
     }
 

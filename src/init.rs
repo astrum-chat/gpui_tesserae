@@ -1,10 +1,15 @@
 use gpui::{App, Window};
 
-use crate::{components::select, primitives::input, theme::ThemeExt};
+use crate::{
+    components::select,
+    primitives::{input, selectable_text},
+    theme::ThemeExt,
+};
 
 /// Initializes global tesserae state. Call once at application startup.
 pub fn init(cx: &mut App) {
     input::init(cx);
+    selectable_text::init(cx);
     select::init(cx);
 }
 
