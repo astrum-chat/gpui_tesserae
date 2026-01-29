@@ -97,6 +97,10 @@ pub struct SelectableTextState {
     pub is_select_all: bool,
     /// Maximum measured line width across all logical lines (for w_auto support)
     pub(crate) measured_max_line_width: Option<Pixels>,
+    /// Whether text is constrained (wrapped due to space limit, not natural line breaks)
+    pub(crate) is_constrained: bool,
+    /// True during the probe frame when checking if container has grown
+    pub(crate) probing_for_growth: bool,
 }
 
 impl SelectableTextState {
@@ -123,6 +127,8 @@ impl SelectableTextState {
             last_bounds: None,
             is_select_all: false,
             measured_max_line_width: None,
+            is_constrained: false,
+            probing_for_growth: false,
         }
     }
 
@@ -146,6 +152,20 @@ impl SelectableTextState {
     pub(crate) fn set_multiline_params(&mut self, line_height: Pixels, line_clamp: usize) {
         self.line_height = Some(line_height);
         self.line_clamp = line_clamp;
+    }
+
+    /// Sets the wrap mode and resets cached state if the mode changed.
+    pub(crate) fn set_wrap_mode(&mut self, wrapped: bool) {
+        if self.is_wrapped != wrapped {
+            // Wrap mode changed - clear all wrap-specific cached state
+            self.cached_wrap_width = None;
+            self.precomputed_visual_lines.clear();
+            self.precomputed_wrapped_lines.clear();
+            self.precomputed_at_width = None;
+            self.needs_wrap_recompute = true;
+            self.measured_max_line_width = None;
+        }
+        self.is_wrapped = wrapped;
     }
 
     /// Pre-compute visual line info for wrapped text.
@@ -808,6 +828,8 @@ impl SelectableTextState {
         println!("  using_auto_width: {}", self.using_auto_width);
         println!("  needs_wrap_recompute: {}", self.needs_wrap_recompute);
         println!("  is_wrapped: {}", self.is_wrapped);
+        println!("  is_constrained: {}", self.is_constrained);
+        println!("  probing_for_growth: {}", self.probing_for_growth);
         println!(
             "  visual_lines_count: {}",
             self.precomputed_visual_lines.len()

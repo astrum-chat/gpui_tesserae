@@ -10,6 +10,63 @@ use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{WRAP_WIDTH_EPSILON, make_selection_quad, should_show_trailing_whitespace};
 
+fn create_text_run(font: Font, color: Hsla, len: usize) -> TextRun {
+    TextRun {
+        len,
+        font,
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
+fn compute_selection_quad(
+    line: &ShapedLine,
+    bounds: Bounds<Pixels>,
+    selected_range: &Range<usize>,
+    line_start: usize,
+    line_end: usize,
+    is_select_all: bool,
+    font: &Font,
+    font_size: Pixels,
+    text_color: Hsla,
+    highlight_color: Hsla,
+    window: &mut Window,
+) -> Option<PaintQuad> {
+    let selection_intersects = selected_range.start <= line_end && selected_range.end >= line_start;
+
+    if selected_range.is_empty() || !selection_intersects {
+        return None;
+    }
+
+    let line_len = line_end - line_start;
+    let local_start = selected_range
+        .start
+        .saturating_sub(line_start)
+        .min(line_len);
+    let local_end = selected_range.end.saturating_sub(line_start).min(line_len);
+
+    let selection_start_x = line.x_for_index(local_start);
+    let mut selection_end_x = line.x_for_index(local_end);
+
+    if should_show_trailing_whitespace(selected_range, line_end, is_select_all) {
+        let space_run = create_text_run(font.clone(), text_color, 1);
+        let space_line = window
+            .text_system()
+            .shape_line(" ".into(), font_size, &[space_run], None);
+        selection_end_x = selection_end_x + space_line.x_for_index(1);
+    }
+
+    Some(make_selection_quad(
+        bounds,
+        selection_start_x,
+        selection_end_x,
+        Pixels::ZERO,
+        highlight_color,
+    ))
+}
+
 /// Renders one logical line in non-wrapped multiline mode.
 pub(crate) struct LineElement {
     pub state: Entity<SelectableTextState>,
@@ -23,7 +80,6 @@ pub(crate) struct LineElement {
     pub font: Font,
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
-    /// Measured width for w_auto support (None means use relative(1.))
     pub measured_width: Option<Pixels>,
 }
 
@@ -60,12 +116,8 @@ impl Element for LineElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
-        // Always fill parent width so prepaint can detect actual available width.
-        // This allows the clamping detection to work when the parent resizes.
-        // The text content will still render at the correct wrapped positions.
         style.size.width = relative(1.).into();
         style.size.height = self.line_height.into();
-
         (window.request_layout(style, [], cx), ())
     }
 
@@ -80,85 +132,39 @@ impl Element for LineElement {
     ) -> Self::PrepaintState {
         let state = self.state.read(cx);
         let full_value = state.get_text();
-
         let line_content: String =
             full_value[self.line_start_offset..self.line_end_offset].to_string();
+        let display_text: SharedString = line_content.into();
 
-        let display_text: SharedString = line_content.clone().into();
-
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: self.text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-
+        let run = create_text_run(self.font.clone(), self.text_color, display_text.len());
         let line = window
             .text_system()
             .shape_line(display_text, self.font_size, &[run], None);
 
-        // Measure line width for w_auto support (only if not already using measured width)
         if self.measured_width.is_none() {
             let line_width = line.width;
             self.state.update(cx, |state, cx| {
                 let current_max = state.measured_max_line_width.unwrap_or(Pixels::ZERO);
                 if line_width > current_max {
                     state.measured_max_line_width = Some(line_width);
-                    cx.notify(); // Trigger re-render with new width
+                    cx.notify();
                 }
             });
         }
 
-        let selection_intersects = self.selected_range.start <= self.line_end_offset
-            && self.selected_range.end >= self.line_start_offset;
-
-        let selection = if !self.selected_range.is_empty() && selection_intersects {
-            let local_start = self
-                .selected_range
-                .start
-                .saturating_sub(self.line_start_offset)
-                .min(line_content.len());
-            let local_end = self
-                .selected_range
-                .end
-                .saturating_sub(self.line_start_offset)
-                .min(line_content.len());
-
-            let selection_start_x = line.x_for_index(local_start);
-            let mut selection_end_x = line.x_for_index(local_end);
-
-            if should_show_trailing_whitespace(
-                &self.selected_range,
-                self.line_end_offset,
-                self.is_select_all,
-            ) {
-                let space_run = TextRun {
-                    len: 1,
-                    font: self.font.clone(),
-                    color: self.text_color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let space_line =
-                    window
-                        .text_system()
-                        .shape_line(" ".into(), self.font_size, &[space_run], None);
-                selection_end_x = selection_end_x + space_line.x_for_index(1);
-            }
-
-            Some(make_selection_quad(
-                bounds,
-                selection_start_x,
-                selection_end_x,
-                Pixels::ZERO,
-                self.highlight_text_color,
-            ))
-        } else {
-            None
-        };
+        let selection = compute_selection_quad(
+            &line,
+            bounds,
+            &self.selected_range,
+            self.line_start_offset,
+            self.line_end_offset,
+            self.is_select_all,
+            &self.font,
+            self.font_size,
+            self.text_color,
+            self.highlight_text_color,
+            window,
+        );
 
         LinePrepaintState {
             line: Some(line),
@@ -251,12 +257,8 @@ impl Element for WrappedLineElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut style = Style::default();
-        // Always fill parent width so prepaint can detect actual available width.
-        // This allows the clamping detection to work when the parent resizes.
-        // The text content will still render at the correct wrapped positions.
         style.size.width = relative(1.).into();
         style.size.height = self.line_height.into();
-
         (window.request_layout(style, [], cx), ())
     }
 
@@ -269,9 +271,6 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        // Note: Width change detection now happens in UniformListElement.prepaint()
-        // which receives actual container bounds.
-
         let state = self.state.read(cx);
 
         let visual_info = state
@@ -290,67 +289,24 @@ impl Element for WrappedLineElement {
         let segment = &value[info.start_offset..info.end_offset];
         let display_text: SharedString = segment.to_string().into();
 
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: self.text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-
+        let run = create_text_run(self.font.clone(), self.text_color, display_text.len());
         let line = window
             .text_system()
             .shape_line(display_text, self.font_size, &[run], None);
 
-        let line_start = info.start_offset;
-        let line_end = info.end_offset;
-        let line_len = line_end - line_start;
-
-        let selection_intersects =
-            self.selected_range.start <= line_end && self.selected_range.end >= line_start;
-
-        let selection = if !self.selected_range.is_empty() && selection_intersects {
-            let local_start = self
-                .selected_range
-                .start
-                .saturating_sub(line_start)
-                .min(line_len);
-            let local_end = self
-                .selected_range
-                .end
-                .saturating_sub(line_start)
-                .min(line_len);
-
-            let selection_start_x = line.x_for_index(local_start);
-            let mut selection_end_x = line.x_for_index(local_end);
-
-            if should_show_trailing_whitespace(&self.selected_range, line_end, self.is_select_all) {
-                let space_run = TextRun {
-                    len: 1,
-                    font: self.font.clone(),
-                    color: self.text_color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let space_line =
-                    window
-                        .text_system()
-                        .shape_line(" ".into(), self.font_size, &[space_run], None);
-                selection_end_x = selection_end_x + space_line.x_for_index(1);
-            }
-
-            Some(make_selection_quad(
-                bounds,
-                selection_start_x,
-                selection_end_x,
-                Pixels::ZERO,
-                self.highlight_text_color,
-            ))
-        } else {
-            None
-        };
+        let selection = compute_selection_quad(
+            &line,
+            bounds,
+            &self.selected_range,
+            info.start_offset,
+            info.end_offset,
+            self.is_select_all,
+            &self.font,
+            self.font_size,
+            self.text_color,
+            self.highlight_text_color,
+            window,
+        );
 
         WrappedLinePrepaintState {
             line: Some(line),
@@ -396,28 +352,28 @@ impl Element for WrappedLineElement {
     }
 }
 
-// Note: Width change detection has been moved to UniformListElement.check_container_width_change()
-// which receives actual container bounds rather than the fixed-width uniform_list bounds.
-
 pub(crate) struct UniformListElement {
     pub state: Entity<SelectableTextState>,
     pub child: AnyElement,
 }
 
 impl UniformListElement {
-    /// Checks if the container width has changed significantly and triggers a rewrap if needed.
-    /// This is called from prepaint where we have the actual container bounds.
     fn check_container_width_change(&self, actual_width: Pixels, cx: &mut App) {
-        // Guard against invalid widths from unresolved layout (e.g., right-aligned containers)
         if actual_width <= Pixels::ZERO {
             return;
         }
 
-        let state = self.state.read(cx);
+        let (precomputed_at_width, cached_wrap_width, needs_wrap_recompute) = {
+            let state = self.state.read(cx);
+            (
+                state.precomputed_at_width,
+                state.cached_wrap_width,
+                state.needs_wrap_recompute,
+            )
+        };
 
-        let Some(precomputed_width) = state.precomputed_at_width else {
-            // Initialize cached_wrap_width on first render
-            if state.cached_wrap_width.is_none() {
+        let Some(precomputed_width) = precomputed_at_width else {
+            if cached_wrap_width.is_none() {
                 self.state.update(cx, |state, cx| {
                     state.cached_wrap_width = Some(actual_width);
                     state.needs_wrap_recompute = true;
@@ -427,7 +383,7 @@ impl UniformListElement {
             return;
         };
 
-        if state.needs_wrap_recompute {
+        if needs_wrap_recompute {
             return;
         }
 
@@ -470,8 +426,7 @@ impl Element for UniformListElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let layout_id = self.child.request_layout(window, cx);
-        (layout_id, ())
+        (self.child.request_layout(window, cx), ())
     }
 
     fn prepaint(
@@ -483,7 +438,6 @@ impl Element for UniformListElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        // Check if container width changed - this triggers rewrap when container shrinks
         self.check_container_width_change(bounds.size.width, cx);
         self.child.prepaint(window, cx);
     }
