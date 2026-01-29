@@ -358,6 +358,7 @@ pub(crate) struct UniformListElement {
 }
 
 impl UniformListElement {
+    /// Checks if the container width changed and triggers a wrap recompute if needed.
     fn check_container_width_change(&self, actual_width: Pixels, cx: &mut App) {
         if actual_width <= Pixels::ZERO {
             return;
@@ -372,41 +373,46 @@ impl UniformListElement {
             )
         };
 
-        // Initialize cached_wrap_width if not set yet
         if cached_wrap_width.is_none() {
-            self.state.update(cx, |state, cx| {
-                state.cached_wrap_width = Some(actual_width);
-                // Only trigger recompute if actual width differs significantly from precomputed width
-                if let Some(precomputed_width) = precomputed_at_width {
-                    if (actual_width - precomputed_width).abs() > WRAP_WIDTH_EPSILON {
-                        state.needs_wrap_recompute = true;
-                        cx.notify();
-                    }
-                } else {
-                    state.needs_wrap_recompute = true;
-                    cx.notify();
-                }
-            });
+            self.initialize_wrap_width(actual_width, precomputed_at_width, cx);
             return;
         }
-
-        let Some(precomputed_width) = precomputed_at_width else {
-            return;
-        };
 
         if needs_wrap_recompute {
             return;
         }
 
-        let width_changed = (actual_width - precomputed_width).abs() > WRAP_WIDTH_EPSILON;
+        if let Some(precomputed_width) = precomputed_at_width {
+            if (actual_width - precomputed_width).abs() > WRAP_WIDTH_EPSILON {
+                self.trigger_wrap_recompute(actual_width, cx);
+            }
+        }
+    }
 
-        if width_changed {
-            self.state.update(cx, |state, cx| {
-                state.cached_wrap_width = Some(actual_width);
+    fn initialize_wrap_width(
+        &self,
+        actual_width: Pixels,
+        precomputed_at_width: Option<Pixels>,
+        cx: &mut App,
+    ) {
+        self.state.update(cx, |state, cx| {
+            state.cached_wrap_width = Some(actual_width);
+            let needs_recompute = precomputed_at_width
+                .map(|pw| (actual_width - pw).abs() > WRAP_WIDTH_EPSILON)
+                .unwrap_or(true);
+            if needs_recompute {
                 state.needs_wrap_recompute = true;
                 cx.notify();
-            });
-        }
+            }
+        });
+    }
+
+    fn trigger_wrap_recompute(&self, actual_width: Pixels, cx: &mut App) {
+        self.state.update(cx, |state, cx| {
+            state.cached_wrap_width = Some(actual_width);
+            state.needs_wrap_recompute = true;
+            cx.notify();
+        });
     }
 }
 

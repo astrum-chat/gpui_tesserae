@@ -48,11 +48,9 @@ mod actions {
 pub use actions::*;
 
 /// Core state for selectable text, managing text content, selection, and scroll position.
-/// Unlike InputState, this is read-only and does not support editing, undo/redo, or IME.
 pub struct SelectableTextState {
     /// Handle for keyboard focus management.
     pub focus_handle: FocusHandle,
-    /// The text content to display.
     text: SharedString,
     /// Byte range of the current selection. Empty range means cursor position only.
     pub selected_range: Range<usize>,
@@ -61,43 +59,25 @@ pub struct SelectableTextState {
     /// True while the user is dragging to select text.
     pub is_selecting: bool,
 
-    // Multiline support
-    /// Scroll handle for uniform_list
+    /// Scroll handle for uniform_list.
     pub scroll_handle: UniformListScrollHandle,
-    /// Maximum visible lines (for scroll calculations)
     pub(crate) line_clamp: usize,
-    /// Whether text wrapping is enabled
     pub(crate) is_wrapped: bool,
-    /// Line height for multiline calculations (set during render)
     pub(crate) line_height: Option<Pixels>,
 
-    // Wrapped line computation
-    /// Cached container width for wrapped text calculations
     pub(crate) cached_wrap_width: Option<Pixels>,
-    /// Pre-computed visual lines for wrapped uniform_list mode
     pub(crate) precomputed_visual_lines: Vec<VisualLineInfo>,
-    /// Pre-computed wrapped lines (the actual WrappedLine objects)
     pub(crate) precomputed_wrapped_lines: Vec<WrappedLine>,
-    /// Width that was used to compute current precomputed_visual_lines
     pub(crate) precomputed_at_width: Option<Pixels>,
-    /// Whether we're currently using auto width (text fits) vs fill width (text exceeds available)
-    /// This affects how prepaint interprets width changes
     pub(crate) using_auto_width: bool,
-    /// Flag indicating visual lines need recompute due to width mismatch
     pub(crate) needs_wrap_recompute: bool,
-    /// Flag to scroll cursor into view on next render
     pub(crate) scroll_to_cursor_on_next_render: bool,
 
-    // Hit testing
-    /// Visible line info for uniform_list mode - populated during paint
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
-    /// Cached bounds from last render
     pub(crate) last_bounds: Option<Bounds<Pixels>>,
-    /// Whether the current selection is a "select all" (cmd+a)
+    /// Whether the current selection is a "select all" (cmd+a).
     pub is_select_all: bool,
-    /// Maximum measured line width across all logical lines (for w_auto support)
     pub(crate) measured_max_line_width: Option<Pixels>,
-    /// Whether text is constrained (wrapped due to space limit, not natural line breaks)
     pub(crate) is_constrained: bool,
 }
 
@@ -129,7 +109,7 @@ impl SelectableTextState {
         }
     }
 
-    /// Sets the text content. Clears selection and triggers recomputation of wrapped lines.
+    /// Sets the text content, clearing selection and triggering recomputation.
     pub fn text(&mut self, text: impl Into<SharedString>) {
         self.text = text.into();
         self.selected_range = 0..0;
@@ -145,18 +125,13 @@ impl SelectableTextState {
         self.text.clone()
     }
 
-    /// Set multiline mode parameters (called during render)
     pub(crate) fn set_multiline_params(&mut self, line_height: Pixels, line_clamp: usize) {
         self.line_height = Some(line_height);
         self.line_clamp = line_clamp;
     }
 
-    /// Sets the wrap mode and resets cached state if the mode changed.
     pub(crate) fn set_wrap_mode(&mut self, wrapped: bool) {
         if self.is_wrapped != wrapped {
-            // Wrap mode changed - clear wrap-specific cached state
-            // Note: We don't clear measured_max_line_width because it represents
-            // the unwrapped text width, which is the same regardless of display mode
             self.cached_wrap_width = None;
             self.precomputed_visual_lines.clear();
             self.precomputed_wrapped_lines.clear();
@@ -166,9 +141,8 @@ impl SelectableTextState {
         self.is_wrapped = wrapped;
     }
 
-    /// Pre-compute visual line info for wrapped text.
-    /// Called during render to prepare data for uniform_list.
-    /// Returns the number of visual lines.
+    /// Pre-computes visual line info for wrapped text. Called during render to prepare
+    /// data for uniform_list. Returns the number of visual lines.
     pub(crate) fn precompute_wrapped_lines(
         &mut self,
         width: Pixels,
@@ -178,17 +152,11 @@ impl SelectableTextState {
         window: &Window,
     ) -> usize {
         let text = self.get_text();
-
-        // Track width used for this computation (don't overwrite cached_wrap_width -
-        // that's set by prepaint when it detects the actual parent constraint)
         self.precomputed_at_width = Some(width);
-
-        // Clear previous data
         self.precomputed_visual_lines.clear();
         self.precomputed_wrapped_lines.clear();
 
         if text.is_empty() {
-            // For empty text, create one visual line
             self.precomputed_visual_lines.push(VisualLineInfo {
                 start_offset: 0,
                 end_offset: 0,
@@ -198,7 +166,6 @@ impl SelectableTextState {
             return 1;
         }
 
-        // Shape text with wrapping
         let run = TextRun {
             len: text.len(),
             font,
@@ -213,25 +180,19 @@ impl SelectableTextState {
             .shape_text(text.clone(), font_size, &[run], Some(width), None)
             .unwrap_or_default();
 
-        // Measure max unwrapped line width for w_auto support
-        let mut max_unwrapped_width = Pixels::ZERO;
-        for wrapped_line in wrapped_lines.iter() {
-            let unwrapped_width = wrapped_line.unwrapped_layout.width;
-            if unwrapped_width > max_unwrapped_width {
-                max_unwrapped_width = unwrapped_width;
-            }
-        }
-        self.measured_max_line_width = Some(max_unwrapped_width);
+        self.measured_max_line_width = Some(
+            wrapped_lines
+                .iter()
+                .map(|line| line.unwrapped_layout.width)
+                .fold(Pixels::ZERO, |a, b| if b > a { b } else { a }),
+        );
 
-        // Build visual line info from wrap boundaries
         let mut text_offset = 0;
-
         for (wrapped_idx, wrapped_line) in wrapped_lines.iter().enumerate() {
             let line_len = wrapped_line.len();
             let wrap_boundaries = &wrapped_line.wrap_boundaries;
 
             if wrap_boundaries.is_empty() {
-                // No wrapping within this line
                 self.precomputed_visual_lines.push(VisualLineInfo {
                     start_offset: text_offset,
                     end_offset: text_offset + line_len,
@@ -239,44 +200,56 @@ impl SelectableTextState {
                     visual_index_in_wrapped: 0,
                 });
             } else {
-                // Line has wrap boundaries - create visual line for each segment
-                let mut segment_start = 0;
-                for (visual_idx, boundary) in wrap_boundaries.iter().enumerate() {
-                    let run = &wrapped_line.unwrapped_layout.runs[boundary.run_ix];
-                    let glyph = &run.glyphs[boundary.glyph_ix];
-                    let segment_end = glyph.index;
-
-                    self.precomputed_visual_lines.push(VisualLineInfo {
-                        start_offset: text_offset + segment_start,
-                        end_offset: text_offset + segment_end,
-                        wrapped_line_index: wrapped_idx,
-                        visual_index_in_wrapped: visual_idx,
-                    });
-                    segment_start = segment_end;
-                }
-                // Add final segment after last wrap boundary
-                self.precomputed_visual_lines.push(VisualLineInfo {
-                    start_offset: text_offset + segment_start,
-                    end_offset: text_offset + line_len,
-                    wrapped_line_index: wrapped_idx,
-                    visual_index_in_wrapped: wrap_boundaries.len(),
-                });
+                self.build_visual_lines_from_boundaries(
+                    wrapped_line,
+                    wrapped_idx,
+                    text_offset,
+                    line_len,
+                );
             }
-
-            // Account for newline character between logical lines
             text_offset += line_len + 1;
         }
 
-        // Store the wrapped lines for rendering
         self.precomputed_wrapped_lines = wrapped_lines.into_vec();
 
-        // Handle deferred scroll now that visual lines are computed
         if self.scroll_to_cursor_on_next_render {
             self.scroll_to_cursor_on_next_render = false;
             self.ensure_cursor_visible();
         }
 
         self.precomputed_visual_lines.len().max(1)
+    }
+
+    fn build_visual_lines_from_boundaries(
+        &mut self,
+        wrapped_line: &WrappedLine,
+        wrapped_idx: usize,
+        text_offset: usize,
+        line_len: usize,
+    ) {
+        let wrap_boundaries = &wrapped_line.wrap_boundaries;
+        let mut segment_start = 0;
+
+        for (visual_idx, boundary) in wrap_boundaries.iter().enumerate() {
+            let run = &wrapped_line.unwrapped_layout.runs[boundary.run_ix];
+            let glyph = &run.glyphs[boundary.glyph_ix];
+            let segment_end = glyph.index;
+
+            self.precomputed_visual_lines.push(VisualLineInfo {
+                start_offset: text_offset + segment_start,
+                end_offset: text_offset + segment_end,
+                wrapped_line_index: wrapped_idx,
+                visual_index_in_wrapped: visual_idx,
+            });
+            segment_start = segment_end;
+        }
+
+        self.precomputed_visual_lines.push(VisualLineInfo {
+            start_offset: text_offset + segment_start,
+            end_offset: text_offset + line_len,
+            wrapped_line_index: wrapped_idx,
+            visual_index_in_wrapped: wrap_boundaries.len(),
+        });
     }
 
     /// Ensure the cursor is visible by scrolling if necessary.

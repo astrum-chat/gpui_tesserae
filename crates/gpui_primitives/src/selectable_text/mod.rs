@@ -22,8 +22,6 @@ pub use state::{
     SelectToStartOfLine, SelectUp, SelectableTextState, Up, VisibleLineInfo, VisualLineInfo,
 };
 
-/// Computes the effective width for auto-width layout.
-/// Returns (effective_width, use_relative_width).
 fn compute_effective_width(
     user_wants_auto_width: bool,
     has_max_width_constraint: bool,
@@ -46,7 +44,6 @@ fn compute_effective_width(
                 }
             }
             (Some(cached), None) => (Some(cached), false),
-            // First render: use relative(1.) so GPUI's max_size can clamp us
             (None, _) => (None, true),
         }
     } else {
@@ -61,7 +58,6 @@ fn compute_effective_width(
     }
 }
 
-/// Computes the wrap width for text wrapping.
 fn compute_wrap_width(
     cached_wrap_width: Option<Pixels>,
     measured_width: Option<Pixels>,
@@ -172,39 +168,19 @@ impl SelectableText {
             return;
         }
 
-        // For non-wrapped mode, use measured width directly
-        if !params.is_wrapped {
-            if let Some(measured) = params.container_width {
-                let auto_width = measured + WRAP_WIDTH_EPSILON;
-                let clamped = params
-                    .max_width_px
-                    .map_or(auto_width, |max_w| auto_width.min(max_w));
-                style.size.width = Some(clamped.into());
-            }
+        let Some(measured) = params.container_width else {
             return;
-        }
+        };
 
-        // Wrapped mode with max constraint
-        if params.has_max_width_constraint {
-            // Strategy: Use the measured text width as the element's desired size.
-            // The parent's max_w_full() constraint will cap this when the container is smaller.
-            // This allows both shrink-wrap (when space available) and wrapping (when constrained).
-            if let Some(measured) = params.container_width {
-                let auto_width = measured + WRAP_WIDTH_EPSILON;
-                // Set the element width to the text's natural width
-                // The parent's max constraint will limit this when needed
-                style.size.width = Some(auto_width.into());
-            }
-            // If no measured width yet, let GPUI determine the width
+        let auto_width = measured + WRAP_WIDTH_EPSILON;
+
+        if params.is_wrapped && params.has_max_width_constraint {
+            style.size.width = Some(auto_width.into());
         } else {
-            // No max constraint - use measured width directly
-            if let Some(measured) = params.container_width {
-                let auto_width = measured + WRAP_WIDTH_EPSILON;
-                let clamped = params
-                    .max_width_px
-                    .map_or(auto_width, |max_w| auto_width.min(max_w));
-                style.size.width = Some(clamped.into());
-            }
+            let clamped = params
+                .max_width_px
+                .map_or(auto_width, |max_w| auto_width.min(max_w));
+            style.size.width = Some(clamped.into());
         }
     }
 }
@@ -217,49 +193,95 @@ struct WidthParams {
     is_wrapped: bool,
 }
 
+struct RenderParams {
+    font: Font,
+    font_size: Pixels,
+    line_height: Pixels,
+    scale_factor: f32,
+    text_color: Hsla,
+    highlight_text_color: Hsla,
+}
+
+fn register_actions(
+    element: gpui::Stateful<gpui::Div>,
+    window: &mut Window,
+    state: &Entity<SelectableTextState>,
+) -> gpui::Stateful<gpui::Div> {
+    element
+        .on_action(window.listener_for(state, SelectableTextState::left))
+        .on_action(window.listener_for(state, SelectableTextState::right))
+        .on_action(window.listener_for(state, SelectableTextState::up))
+        .on_action(window.listener_for(state, SelectableTextState::down))
+        .on_action(window.listener_for(state, SelectableTextState::home))
+        .on_action(window.listener_for(state, SelectableTextState::end))
+        .on_action(window.listener_for(state, SelectableTextState::select_left))
+        .on_action(window.listener_for(state, SelectableTextState::select_right))
+        .on_action(window.listener_for(state, SelectableTextState::select_up))
+        .on_action(window.listener_for(state, SelectableTextState::select_down))
+        .on_action(window.listener_for(state, SelectableTextState::select_all))
+        .on_action(window.listener_for(state, SelectableTextState::move_to_start_of_line))
+        .on_action(window.listener_for(state, SelectableTextState::move_to_end_of_line))
+        .on_action(window.listener_for(state, SelectableTextState::select_to_start_of_line))
+        .on_action(window.listener_for(state, SelectableTextState::select_to_end_of_line))
+        .on_action(window.listener_for(state, SelectableTextState::move_to_start))
+        .on_action(window.listener_for(state, SelectableTextState::move_to_end))
+        .on_action(window.listener_for(state, SelectableTextState::select_to_start))
+        .on_action(window.listener_for(state, SelectableTextState::select_to_end))
+        .on_action(window.listener_for(state, SelectableTextState::move_to_previous_word))
+        .on_action(window.listener_for(state, SelectableTextState::move_to_next_word))
+        .on_action(window.listener_for(state, SelectableTextState::select_to_previous_word_start))
+        .on_action(window.listener_for(state, SelectableTextState::select_to_next_word_end))
+        .on_action(window.listener_for(state, SelectableTextState::copy))
+}
+
+fn register_mouse_handlers(
+    element: gpui::Stateful<gpui::Div>,
+    window: &mut Window,
+    state: &Entity<SelectableTextState>,
+) -> gpui::Stateful<gpui::Div> {
+    element
+        .on_mouse_down(
+            MouseButton::Left,
+            window.listener_for(state, SelectableTextState::on_mouse_down),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            window.listener_for(state, SelectableTextState::on_mouse_up),
+        )
+        .on_mouse_up_out(
+            MouseButton::Left,
+            window.listener_for(state, SelectableTextState::on_mouse_up),
+        )
+        .on_mouse_move(window.listener_for(state, SelectableTextState::on_mouse_move))
+}
+
+fn compute_line_offsets(text: &str) -> Vec<(usize, usize)> {
+    text.split('\n')
+        .scan(0, |start, line| {
+            let end = *start + line.len();
+            let offsets = (*start, end);
+            *start = end + 1;
+            Some(offsets)
+        })
+        .collect()
+}
+
 impl RenderOnce for SelectableText {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let text_style = &self.style.text;
-        let font_size = match text_style
-            .font_size
-            .unwrap_or_else(|| window.text_style().font_size)
-        {
-            AbsoluteLength::Pixels(px) => px,
-            AbsoluteLength::Rems(rems) => rems.to_pixels(window.rem_size()),
-        };
-        let line_height = text_style
-            .line_height
-            .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
-            .unwrap_or_else(|| window.line_height());
-        let scale_factor = window.scale_factor();
-        let line_height = pixel_perfect_round(line_height, scale_factor);
-        let font = Font {
-            family: text_style
-                .font_family
-                .clone()
-                .unwrap_or_else(|| window.text_style().font_family),
-            features: text_style.font_features.clone().unwrap_or_default(),
-            fallbacks: text_style.font_fallbacks.clone(),
-            weight: text_style.font_weight.unwrap_or_default(),
-            style: text_style.font_style.unwrap_or_default(),
-        };
+        let params = self.compute_render_params(window);
 
         self.state.update(cx, |state, _cx| {
-            state.set_multiline_params(line_height, self.line_clamp);
+            state.set_multiline_params(params.line_height, self.line_clamp);
             state.set_wrap_mode(self.word_wrap);
         });
 
-        let text_color = self
-            .style
-            .text
-            .color
-            .unwrap_or_else(|| rgb(0xE8E4FF).into());
-
-        self.measure_text_width(&font, font_size, text_color, window, cx);
-
-        let highlight_text_color = self
-            .selection_color
-            .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
+        self.measure_text_width(
+            &params.font,
+            params.font_size,
+            params.text_color,
+            window,
+            cx,
+        );
 
         let (container_width, cached_wrap_width, focus_handle) = {
             let state = self.state.read(cx);
@@ -299,7 +321,7 @@ impl RenderOnce for SelectableText {
             is_wrapped: self.word_wrap,
         };
 
-        div()
+        let base = div()
             .id(self.id.clone())
             .min_w_0()
             .map(|mut this| {
@@ -309,227 +331,265 @@ impl RenderOnce for SelectableText {
             })
             .key_context("SelectableText")
             .track_focus(&focus_handle)
-            .cursor(CursorStyle::IBeam)
-            .on_action(window.listener_for(&self.state, SelectableTextState::left))
-            .on_action(window.listener_for(&self.state, SelectableTextState::right))
-            .on_action(window.listener_for(&self.state, SelectableTextState::up))
-            .on_action(window.listener_for(&self.state, SelectableTextState::down))
-            .on_action(window.listener_for(&self.state, SelectableTextState::home))
-            .on_action(window.listener_for(&self.state, SelectableTextState::end))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_left))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_right))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_up))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_down))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_all))
-            .on_action(window.listener_for(&self.state, SelectableTextState::move_to_start_of_line))
-            .on_action(window.listener_for(&self.state, SelectableTextState::move_to_end_of_line))
-            .on_action(
-                window.listener_for(&self.state, SelectableTextState::select_to_start_of_line),
+            .cursor(CursorStyle::IBeam);
+
+        let base = register_actions(base, window, &self.state);
+        let base = register_mouse_handlers(base, window, &self.state);
+
+        base.when(!self.word_wrap, |this| {
+            self.render_unwrapped_list(this, &params, user_wants_auto_width, max_width_px, cx)
+        })
+        .when(self.word_wrap, |this| {
+            self.render_wrapped_list(
+                this,
+                &params,
+                user_wants_auto_width,
+                has_max_width_constraint,
+                max_width_px,
+                window,
+                cx,
             )
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_to_end_of_line))
-            .on_action(window.listener_for(&self.state, SelectableTextState::move_to_start))
-            .on_action(window.listener_for(&self.state, SelectableTextState::move_to_end))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_to_start))
-            .on_action(window.listener_for(&self.state, SelectableTextState::select_to_end))
-            .on_action(window.listener_for(&self.state, SelectableTextState::move_to_previous_word))
-            .on_action(window.listener_for(&self.state, SelectableTextState::move_to_next_word))
-            .on_action(window.listener_for(
-                &self.state,
-                SelectableTextState::select_to_previous_word_start,
-            ))
-            .on_action(
-                window.listener_for(&self.state, SelectableTextState::select_to_next_word_end),
+        })
+    }
+}
+
+impl SelectableText {
+    fn compute_render_params(&self, window: &Window) -> RenderParams {
+        let text_style = &self.style.text;
+        let font_size = match text_style
+            .font_size
+            .unwrap_or_else(|| window.text_style().font_size)
+        {
+            AbsoluteLength::Pixels(px) => px,
+            AbsoluteLength::Rems(rems) => rems.to_pixels(window.rem_size()),
+        };
+        let line_height = text_style
+            .line_height
+            .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
+            .unwrap_or_else(|| window.line_height());
+        let scale_factor = window.scale_factor();
+        let line_height = pixel_perfect_round(line_height, scale_factor);
+        let font = Font {
+            family: text_style
+                .font_family
+                .clone()
+                .unwrap_or_else(|| window.text_style().font_family),
+            features: text_style.font_features.clone().unwrap_or_default(),
+            fallbacks: text_style.font_fallbacks.clone(),
+            weight: text_style.font_weight.unwrap_or_default(),
+            style: text_style.font_style.unwrap_or_default(),
+        };
+        let text_color = self
+            .style
+            .text
+            .color
+            .unwrap_or_else(|| rgb(0xE8E4FF).into());
+        let highlight_text_color = self
+            .selection_color
+            .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
+
+        RenderParams {
+            font,
+            font_size,
+            line_height,
+            scale_factor,
+            text_color,
+            highlight_text_color,
+        }
+    }
+
+    fn render_unwrapped_list(
+        &self,
+        container: gpui::Stateful<gpui::Div>,
+        params: &RenderParams,
+        user_wants_auto_width: bool,
+        max_width_px: Option<Pixels>,
+        cx: &mut App,
+    ) -> gpui::Stateful<gpui::Div> {
+        let font = params.font.clone();
+        let (line_count, scroll_handle, measured_width) = {
+            let state = self.state.read(cx);
+            (
+                state.line_count().max(1),
+                state.scroll_handle.clone(),
+                if user_wants_auto_width {
+                    state.measured_max_line_width
+                } else {
+                    None
+                },
             )
-            .on_action(window.listener_for(&self.state, SelectableTextState::copy))
-            .on_mouse_down(
-                MouseButton::Left,
-                window.listener_for(&self.state, SelectableTextState::on_mouse_down),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                window.listener_for(&self.state, SelectableTextState::on_mouse_up),
-            )
-            .on_mouse_up_out(
-                MouseButton::Left,
-                window.listener_for(&self.state, SelectableTextState::on_mouse_up),
-            )
-            .on_mouse_move(window.listener_for(&self.state, SelectableTextState::on_mouse_move))
-            .when(!self.word_wrap, |this| {
-                let font = font.clone();
-                let (line_count, scroll_handle, measured_width) = {
-                    let state = self.state.read(cx);
-                    (
-                        state.line_count().max(1),
-                        state.scroll_handle.clone(),
-                        if user_wants_auto_width {
-                            state.measured_max_line_width
-                        } else {
-                            None
-                        },
-                    )
-                };
-                let state_entity = self.state.clone();
-                let line_clamp = self.line_clamp;
-                let needs_scroll = line_count > line_clamp;
+        };
+        let state_entity = self.state.clone();
+        let line_clamp = self.line_clamp;
+        let needs_scroll = line_count > line_clamp;
+        let text_color = params.text_color;
+        let highlight_text_color = params.highlight_text_color;
+        let line_height = params.line_height;
+        let font_size = params.font_size;
+        let scale_factor = params.scale_factor;
 
-                let list = uniform_list(
-                    self.id.clone(),
-                    line_count,
-                    move |visible_range, _window, cx| {
-                        let state = state_entity.read(cx);
-                        let value = state.get_text();
-                        let selected_range = state.selected_range.clone();
-                        let is_select_all = state.is_select_all;
+        let list = uniform_list(
+            self.id.clone(),
+            line_count,
+            move |visible_range, _window, cx| {
+                let state = state_entity.read(cx);
+                let value = state.get_text();
+                let selected_range = state.selected_range.clone();
+                let is_select_all = state.is_select_all;
+                let line_offsets = compute_line_offsets(&value);
 
-                        let line_offsets: Vec<_> = value
-                            .split('\n')
-                            .scan(0, |start, line| {
-                                let end = *start + line.len();
-                                let offsets = (*start, end);
-                                *start = end + 1;
-                                Some(offsets)
-                            })
-                            .collect();
+                visible_range
+                    .map(|line_idx| {
+                        let (line_start, line_end) =
+                            line_offsets.get(line_idx).copied().unwrap_or((0, 0));
 
-                        visible_range
-                            .map(|line_idx| {
-                                let (line_start, line_end) =
-                                    line_offsets.get(line_idx).copied().unwrap_or((0, 0));
-
-                                LineElement {
-                                    state: state_entity.clone(),
-                                    line_index: line_idx,
-                                    line_start_offset: line_start,
-                                    line_end_offset: line_end,
-                                    text_color,
-                                    highlight_text_color,
-                                    line_height,
-                                    font_size,
-                                    font: font.clone(),
-                                    selected_range: selected_range.clone(),
-                                    is_select_all,
-                                    measured_width,
-                                }
-                            })
-                            .collect()
-                    },
-                )
-                .track_scroll(&scroll_handle)
-                .map(move |mut list| {
-                    if !needs_scroll {
-                        list.style().overflow.y = Some(Overflow::Hidden);
-                    }
-                    if let Some(width) = measured_width {
-                        let auto_width = width + WRAP_WIDTH_EPSILON;
-                        let clamped =
-                            max_width_px.map_or(auto_width, |max_w| auto_width.min(max_w));
-                        list.style().size.width = Some(clamped.into());
-                    }
-                    list
-                })
-                .h(multiline_height(
-                    line_height,
-                    line_clamp.min(line_count).max(1),
-                    scale_factor,
-                ));
-
-                this.child(UniformListElement {
-                    state: self.state.clone(),
-                    child: list.into_any_element(),
-                })
-            })
-            .when(self.word_wrap, |this| {
-                let font = font.clone();
-                let (scroll_handle, cached_wrap_width, measured_max_line_width) = {
-                    let state = self.state.read(cx);
-                    (
-                        state.scroll_handle.clone(),
-                        state.cached_wrap_width,
-                        state.measured_max_line_width,
-                    )
-                };
-                let state_entity = self.state.clone();
-                let line_clamp = self.line_clamp;
-
-                let wrap_width =
-                    compute_wrap_width(cached_wrap_width, measured_max_line_width, max_width_px);
-
-                let (effective_width, use_relative_width) = compute_effective_width(
-                    user_wants_auto_width,
-                    has_max_width_constraint,
-                    cached_wrap_width,
-                    measured_max_line_width,
-                    max_width_px,
-                );
-
-                let visual_line_count = self.state.update(cx, |state, _cx| {
-                    state.using_auto_width = !use_relative_width && effective_width.is_some();
-
-                    if state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty() {
-                        state.needs_wrap_recompute = false;
-                        state.precompute_wrapped_lines(
-                            wrap_width,
-                            font_size,
-                            font.clone(),
+                        LineElement {
+                            state: state_entity.clone(),
+                            line_index: line_idx,
+                            line_start_offset: line_start,
+                            line_end_offset: line_end,
                             text_color,
-                            window,
-                        )
-                    } else {
-                        if state.scroll_to_cursor_on_next_render {
-                            state.scroll_to_cursor_on_next_render = false;
-                            state.ensure_cursor_visible();
+                            highlight_text_color,
+                            line_height,
+                            font_size,
+                            font: font.clone(),
+                            selected_range: selected_range.clone(),
+                            is_select_all,
+                            measured_width,
                         }
-                        state.precomputed_visual_lines.len()
-                    }
-                });
+                    })
+                    .collect()
+            },
+        )
+        .track_scroll(&scroll_handle)
+        .map(move |mut list| {
+            if !needs_scroll {
+                list.style().overflow.y = Some(Overflow::Hidden);
+            }
+            if let Some(width) = measured_width {
+                let auto_width = width + WRAP_WIDTH_EPSILON;
+                let clamped = max_width_px.map_or(auto_width, |max_w| auto_width.min(max_w));
+                list.style().size.width = Some(clamped.into());
+            }
+            list
+        })
+        .h(multiline_height(
+            line_height,
+            line_clamp.min(line_count).max(1),
+            scale_factor,
+        ));
 
-                let needs_scroll = visual_line_count > line_clamp;
+        container.child(UniformListElement {
+            state: self.state.clone(),
+            child: list.into_any_element(),
+        })
+    }
 
-                let list = uniform_list(
-                    self.id.clone(),
-                    visual_line_count,
-                    move |visible_range, _window, cx| {
-                        let state = state_entity.read(cx);
-                        let selected_range = state.selected_range.clone();
-                        let is_select_all = state.is_select_all;
+    fn render_wrapped_list(
+        &self,
+        container: gpui::Stateful<gpui::Div>,
+        params: &RenderParams,
+        user_wants_auto_width: bool,
+        has_max_width_constraint: bool,
+        max_width_px: Option<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> gpui::Stateful<gpui::Div> {
+        let font = params.font.clone();
+        let (scroll_handle, cached_wrap_width, measured_max_line_width) = {
+            let state = self.state.read(cx);
+            (
+                state.scroll_handle.clone(),
+                state.cached_wrap_width,
+                state.measured_max_line_width,
+            )
+        };
+        let state_entity = self.state.clone();
+        let line_clamp = self.line_clamp;
+        let text_color = params.text_color;
+        let highlight_text_color = params.highlight_text_color;
+        let line_height = params.line_height;
+        let font_size = params.font_size;
+        let scale_factor = params.scale_factor;
 
-                        visible_range
-                            .map(|visual_idx| WrappedLineElement {
-                                state: state_entity.clone(),
-                                visual_line_index: visual_idx,
-                                text_color,
-                                highlight_text_color,
-                                line_height,
-                                font_size,
-                                font: font.clone(),
-                                selected_range: selected_range.clone(),
-                                is_select_all,
-                            })
-                            .collect()
-                    },
+        let wrap_width =
+            compute_wrap_width(cached_wrap_width, measured_max_line_width, max_width_px);
+
+        let (effective_width, use_relative_width) = compute_effective_width(
+            user_wants_auto_width,
+            has_max_width_constraint,
+            cached_wrap_width,
+            measured_max_line_width,
+            max_width_px,
+        );
+
+        let visual_line_count = self.state.update(cx, |state, _cx| {
+            state.using_auto_width = !use_relative_width && effective_width.is_some();
+
+            if state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty() {
+                state.needs_wrap_recompute = false;
+                state.precompute_wrapped_lines(
+                    wrap_width,
+                    font_size,
+                    font.clone(),
+                    text_color,
+                    window,
                 )
-                .track_scroll(&scroll_handle)
-                .map(move |mut list| {
-                    if !needs_scroll {
-                        list.style().overflow.y = Some(Overflow::Hidden);
-                    }
-                    list.style().size.width = Some(gpui::relative(1.).into());
-                    if let Some(width) = effective_width {
-                        list.style().max_size.width = Some(width.into());
-                    }
-                    list
-                })
-                .h(multiline_height(
-                    line_height,
-                    line_clamp.min(visual_line_count).max(1),
-                    scale_factor,
-                ));
+            } else {
+                if state.scroll_to_cursor_on_next_render {
+                    state.scroll_to_cursor_on_next_render = false;
+                    state.ensure_cursor_visible();
+                }
+                state.precomputed_visual_lines.len()
+            }
+        });
 
-                this.child(UniformListElement {
-                    state: self.state.clone(),
-                    child: list.into_any_element(),
-                })
-            })
+        let needs_scroll = visual_line_count > line_clamp;
+
+        let list = uniform_list(
+            self.id.clone(),
+            visual_line_count,
+            move |visible_range, _window, cx| {
+                let state = state_entity.read(cx);
+                let selected_range = state.selected_range.clone();
+                let is_select_all = state.is_select_all;
+
+                visible_range
+                    .map(|visual_idx| WrappedLineElement {
+                        state: state_entity.clone(),
+                        visual_line_index: visual_idx,
+                        text_color,
+                        highlight_text_color,
+                        line_height,
+                        font_size,
+                        font: font.clone(),
+                        selected_range: selected_range.clone(),
+                        is_select_all,
+                    })
+                    .collect()
+            },
+        )
+        .track_scroll(&scroll_handle)
+        .map(move |mut list| {
+            if !needs_scroll {
+                list.style().overflow.y = Some(Overflow::Hidden);
+            }
+            list.style().size.width = Some(gpui::relative(1.).into());
+            if let Some(width) = effective_width {
+                list.style().max_size.width = Some(width.into());
+            }
+            list
+        })
+        .h(multiline_height(
+            line_height,
+            line_clamp.min(visual_line_count).max(1),
+            scale_factor,
+        ));
+
+        container.child(UniformListElement {
+            state: self.state.clone(),
+            child: list.into_any_element(),
+        })
     }
 }
 
