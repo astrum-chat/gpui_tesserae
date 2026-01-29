@@ -73,6 +73,12 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
         }
     }
 
+    /// Sets the layer of the select.
+    pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
+        self.layer = layer;
+        self
+    }
+
     /// Sets a fixed width.
     pub fn w(mut self, width: impl Into<Length>) -> Self {
         self.style.width = width.into();
