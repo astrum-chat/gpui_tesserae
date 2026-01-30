@@ -25,6 +25,7 @@ struct SelectStyles {
     max_width: Option<Length>,
     max_height: Option<Length>,
     max_menu_height: Option<Length>,
+    placeholder: Option<SharedString>,
 }
 
 impl Default for SelectStyles {
@@ -36,6 +37,7 @@ impl Default for SelectStyles {
             max_width: None,
             max_height: None,
             max_menu_height: None,
+            placeholder: None,
         }
     }
 }
@@ -182,6 +184,12 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
         self.disabled = disabled;
         self
     }
+
+    /// Sets a custom placeholder text shown when no item is selected.
+    pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
+        self.style.placeholder = Some(placeholder.into());
+        self
+    }
 }
 
 impl<V: 'static, I: SelectItem<Value = V> + 'static> MouseBehaviorExt for Select<V, I> {
@@ -320,7 +328,13 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                             .as_ref()
                             .and_then(|this| self.state.items.read(cx).get(&this))
                         else {
-                            return this.child("No item selected");
+                            let placeholder = self
+                                .style
+                                .placeholder
+                                .as_ref()
+                                .map(|p| p.clone())
+                                .unwrap_or_else(|| "No item selected".into());
+                            return this.child(placeholder);
                         };
 
                         this.child(

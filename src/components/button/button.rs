@@ -536,6 +536,7 @@ impl RenderOnce for Button {
                     .children(self.children.left)
                     .child(
                         div()
+                            .max_w_full()
                             .flex()
                             .items_center()
                             .gap(horizontal_padding)
@@ -557,7 +558,11 @@ impl RenderOnce for Button {
                                     self.text.clone(),
                                     |this, text| {
                                         this.child(
-                                            min_w0_wrapper().child(text).text_color(text_color),
+                                            min_w0_wrapper()
+                                                .text_ellipsis()
+                                                .child(text)
+                                                .max_w_full()
+                                                .text_color(text_color),
                                         )
                                     },
                                 )
