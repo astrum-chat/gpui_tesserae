@@ -4,7 +4,7 @@ use gpui::{Bounds, Hsla, PaintQuad, Pixels, fill, point, px, size};
 
 /// Small epsilon used when comparing wrap widths to prevent janky text wrapping
 /// caused by floating point precision issues triggering unnecessary recomputes.
-pub const WRAP_WIDTH_EPSILON: Pixels = px(1.5);
+pub const WRAP_WIDTH_EPSILON: Pixels = px(1.25);
 
 /// Rounds a pixel value to the nearest pixel-perfect increment based on scale factor.
 pub fn pixel_perfect_round(value: Pixels, scale_factor: f32) -> Pixels {

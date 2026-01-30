@@ -219,7 +219,6 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> SelectState<V, I> {
         self.selected_item.read(cx).clone()
     }
 
-
     /// Clears the current selection.
     pub fn remove_selection(&self, cx: &mut App) {
         self.selected_item.update(cx, |this, cx| {

@@ -24,6 +24,7 @@ struct SelectStyles {
     min_height: Option<Length>,
     max_width: Option<Length>,
     max_height: Option<Length>,
+    max_menu_height: Option<Length>,
 }
 
 impl Default for SelectStyles {
@@ -34,6 +35,7 @@ impl Default for SelectStyles {
             min_height: None,
             max_width: None,
             max_height: None,
+            max_menu_height: None,
         }
     }
 }
@@ -76,6 +78,12 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
     /// Sets the layer of the select.
     pub fn layer(mut self, layer: ThemeLayerKind) -> Self {
         self.layer = layer;
+        self
+    }
+
+    /// Sets the height of the dropdown menu.
+    pub fn max_menu_h(mut self, height: impl Into<Length>) -> Self {
+        self.style.max_menu_height = Some(height.into());
         self
     }
 
@@ -305,11 +313,13 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                     .text_color(secondary_text_color)
                     .font_family(font_family.clone())
                     .map(|this| {
-                        let Some(item_name) = self.state.selected_item.read(cx) else {
-                            return this.child("No item selected");
-                        };
-
-                        let Some(entry) = self.state.items.read(cx).get(item_name) else {
+                        let Some(entry) = self
+                            .state
+                            .selected_item
+                            .read(cx)
+                            .as_ref()
+                            .and_then(|this| self.state.items.read(cx).get(&this))
+                        else {
                             return this.child("No item selected");
                         };
 
@@ -348,7 +358,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
                         .pt(cx.get_theme().layout.padding.md)
                         .child(
                             SelectMenu::new(self.id.with_suffix("menu"), self.state.clone())
-                                .focus_handle(focus_handle.clone()),
+                                .focus_handle(focus_handle.clone())
+                                .when_some(self.style.max_menu_height, |this, max_menu_height| {
+                                    this.max_h(max_menu_height)
+                                }),
                         ),
                 )
             })
