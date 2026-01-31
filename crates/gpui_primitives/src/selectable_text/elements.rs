@@ -397,13 +397,9 @@ impl UniformListElement {
     ) {
         self.state.update(cx, |state, cx| {
             state.cached_wrap_width = Some(actual_width);
-            // If we have a precomputed width, check if it differs significantly.
-            // If no precomputed width exists, only recompute if not using auto-width
-            // (auto-width means we wrapped at measured width, container will match).
-            let needs_recompute = match precomputed_at_width {
-                Some(pw) => (actual_width - pw).abs() > WRAP_WIDTH_EPSILON,
-                None => !state.using_auto_width,
-            };
+            let needs_recompute = precomputed_at_width
+                .map(|pw| (actual_width - pw).abs() > WRAP_WIDTH_EPSILON)
+                .unwrap_or(true);
             if needs_recompute {
                 state.needs_wrap_recompute = true;
                 cx.notify();

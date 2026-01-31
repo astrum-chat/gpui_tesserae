@@ -3,8 +3,6 @@
 mod elements;
 mod state;
 
-#[cfg(test)]
-use gpui::px;
 use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels,
@@ -65,10 +63,18 @@ fn compute_wrap_width(
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
 ) -> Pixels {
-    let wrap_width = cached_wrap_width
-        .or(measured_width)
-        .or(max_width_px)
-        .unwrap_or(Pixels::MAX);
+    // For auto-width: use measured width if larger than cached (text grew)
+    // For constrained width: use cached (container constraint)
+    let wrap_width = match (cached_wrap_width, measured_width) {
+        (Some(cached), Some(measured)) => {
+            // Use the larger of cached or measured - allows text to grow
+            cached.max(measured)
+        }
+        (Some(cached), None) => cached,
+        (None, Some(measured)) => measured,
+        (None, None) => max_width_px.unwrap_or(Pixels::MAX),
+    };
+    // Clamp to max_width if specified
     max_width_px.map_or(wrap_width, |max_w| wrap_width.min(max_w))
 }
 
@@ -671,11 +677,17 @@ impl Focusable for SelectableText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::px;
 
     #[test]
-    fn test_wrap_width_uses_cached_wrap_width_first() {
+    fn test_wrap_width_uses_larger_of_cached_and_measured() {
+        // When measured is larger (text grew), use measured
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None);
-        assert_eq!(result, px(200.));
+        assert_eq!(result, px(400.));
+
+        // When cached is larger, use cached
+        let result = compute_wrap_width(Some(px(400.)), Some(px(200.)), None);
+        assert_eq!(result, px(400.));
     }
 
     #[test]
