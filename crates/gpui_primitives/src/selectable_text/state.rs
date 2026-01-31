@@ -675,6 +675,33 @@ impl SelectableTextState {
                     return line_start + local_index;
                 }
             }
+
+            // Handle horizontal overflow when Y is within line bounds
+            for info in &self.visible_lines_info {
+                if position.y >= info.bounds.top() && position.y < info.bounds.bottom() {
+                    if self.is_wrapped {
+                        if let Some(visual_info) =
+                            self.precomputed_visual_lines.get(info.line_index)
+                        {
+                            if position.x < info.bounds.left() {
+                                return visual_info.start_offset;
+                            }
+                            if position.x > info.bounds.right() {
+                                return visual_info.end_offset;
+                            }
+                        }
+                    } else {
+                        let line_start = self.line_start_offset(info.line_index);
+                        let line_end = self.line_end_offset(info.line_index);
+                        if position.x < info.bounds.left() {
+                            return line_start;
+                        }
+                        if position.x > info.bounds.right() {
+                            return line_end;
+                        }
+                    }
+                }
+            }
         }
 
         // Fallback: estimate from position
