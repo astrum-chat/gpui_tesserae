@@ -826,6 +826,26 @@ impl SelectableTextState {
             }
         }
     }
+
+    /// Handles scroll wheel: stops propagation if there's scrollable content.
+    pub fn on_scroll_wheel(
+        &mut self,
+        _event: &gpui::ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Check if there's vertical scrollable content (more lines than visible)
+        let line_count = if self.is_wrapped {
+            self.precomputed_visual_lines.len()
+        } else {
+            self.line_count()
+        };
+        let has_vertical_scroll = line_count > self.line_clamp;
+
+        if has_vertical_scroll {
+            cx.stop_propagation();
+        }
+    }
 }
 
 impl Render for SelectableTextState {

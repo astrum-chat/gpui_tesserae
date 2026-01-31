@@ -806,24 +806,34 @@ impl InputState {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let line_height = self.line_height.unwrap_or(px(16.0));
+        let delta = event.delta.pixel_delta(line_height);
+
+        // Check if there's vertical scrollable content (more lines than visible)
+        let has_vertical_scroll = self.line_count() > self.line_clamp;
+
+        // Check if there's horizontal scrollable content
+        let container_width = self.last_bounds.map(|b| b.size.width).unwrap_or(px(100.0));
+        let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
+        let has_horizontal_scroll = !self.is_wrapped && max_scroll > Pixels::ZERO;
+
+        // Stop propagation if we have scrollable content in the scroll direction
+        let is_vertical_scroll = delta.y.abs() > delta.x.abs();
+        if (is_vertical_scroll && has_vertical_scroll)
+            || (!is_vertical_scroll && has_horizontal_scroll)
+        {
+            cx.stop_propagation();
+        }
+
         // Don't handle horizontal scroll in wrapped mode (text wraps instead)
         if self.is_wrapped {
             return;
         }
 
-        let line_height = self.line_height.unwrap_or(px(16.0));
-        let delta = event.delta.pixel_delta(line_height);
-
         // Only handle horizontal scroll (use px comparison)
         if delta.x.abs() < px(0.01) {
             return;
         }
-
-        // Get container width from last_bounds
-        let container_width = self.last_bounds.map(|b| b.size.width).unwrap_or(px(100.0));
-
-        // Calculate max scroll (text_width - container_width, but not negative)
-        let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
 
         // Apply horizontal scroll (negative delta.x = scroll right, positive = scroll left)
         // Note: delta.x is positive when scrolling left (content moves right)

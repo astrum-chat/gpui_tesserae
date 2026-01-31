@@ -256,6 +256,7 @@ fn register_mouse_handlers(
             window.listener_for(state, SelectableTextState::on_mouse_up),
         )
         .on_mouse_move(window.listener_for(state, SelectableTextState::on_mouse_move))
+        .on_scroll_wheel(window.listener_for(state, SelectableTextState::on_scroll_wheel))
 }
 
 fn compute_line_offsets(text: &str) -> Vec<(usize, usize)> {

@@ -331,6 +331,9 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for SelectMenu<V
                                 };
                                 this
                             })
+                            .on_scroll_wheel(|_event, _window, cx| {
+                                cx.stop_propagation();
+                            })
                             .children(state.items.read(cx).iter().map(|(item_name, entry)| {
                                 let highlighted_item =
                                     self.state.highlighted_item.read(cx).as_ref();
