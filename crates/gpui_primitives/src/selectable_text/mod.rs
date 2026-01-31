@@ -276,6 +276,7 @@ impl RenderOnce for SelectableText {
         self.state.update(cx, |state, _cx| {
             state.set_multiline_params(params.line_height, self.line_clamp);
             state.set_wrap_mode(self.word_wrap);
+            state.update_focus_state(window);
         });
 
         self.measure_text_width(

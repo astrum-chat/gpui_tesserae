@@ -79,6 +79,8 @@ pub struct SelectableTextState {
     pub is_select_all: bool,
     pub(crate) measured_max_line_width: Option<Pixels>,
     pub(crate) is_constrained: bool,
+    /// Tracks previous focus state to detect blur events.
+    was_focused: bool,
 }
 
 impl SelectableTextState {
@@ -106,6 +108,20 @@ impl SelectableTextState {
             is_select_all: false,
             measured_max_line_width: None,
             is_constrained: false,
+            was_focused: false,
+        }
+    }
+
+    /// Updates focus state and clears selection when focus is lost.
+    /// Call this during render to detect blur events.
+    pub fn update_focus_state(&mut self, window: &Window) {
+        let is_focused = self.focus_handle.is_focused(window);
+        if is_focused != self.was_focused {
+            self.was_focused = is_focused;
+            if !is_focused && !self.selected_range.is_empty() {
+                self.selected_range = 0..0;
+                self.is_select_all = false;
+            }
         }
     }
 
