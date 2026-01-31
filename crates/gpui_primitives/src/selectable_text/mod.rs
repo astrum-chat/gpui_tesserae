@@ -63,7 +63,10 @@ fn compute_wrap_width(
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
 ) -> Pixels {
-    let wrap_width = cached_wrap_width.or(measured_width).unwrap_or(px(300.));
+    let wrap_width = cached_wrap_width
+        .or(measured_width)
+        .or(max_width_px)
+        .unwrap_or(Pixels::MAX);
     max_width_px.map_or(wrap_width, |max_w| wrap_width.min(max_w))
 }
 
@@ -678,9 +681,9 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_width_defaults_to_300_when_nothing_available() {
+    fn test_wrap_width_defaults_to_max_when_nothing_available() {
         let result = compute_wrap_width(None, None, None);
-        assert_eq!(result, px(300.));
+        assert_eq!(result, Pixels::MAX);
     }
 
     #[test]
@@ -698,6 +701,12 @@ mod tests {
     #[test]
     fn test_wrap_width_measured_clamped_by_max() {
         let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)));
+        assert_eq!(result, px(300.));
+    }
+
+    #[test]
+    fn test_wrap_width_uses_max_as_fallback() {
+        let result = compute_wrap_width(None, None, Some(px(300.)));
         assert_eq!(result, px(300.));
     }
 
