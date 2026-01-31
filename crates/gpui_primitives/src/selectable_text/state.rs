@@ -134,6 +134,7 @@ impl SelectableTextState {
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
         self.measured_max_line_width = None;
+        self.cached_wrap_width = None;
     }
 
     /// Returns the current text content.
