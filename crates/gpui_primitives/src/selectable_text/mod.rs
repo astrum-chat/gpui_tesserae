@@ -62,20 +62,17 @@ fn compute_wrap_width(
     cached_wrap_width: Option<Pixels>,
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
+    user_wants_auto_width: bool,
 ) -> Pixels {
-    // For auto-width: use measured width if larger than cached (text grew)
-    // For constrained width: use cached (container constraint)
-    let wrap_width = match (cached_wrap_width, measured_width) {
-        (Some(cached), Some(measured)) => {
-            // Use the larger of cached or measured - allows text to grow
-            cached.max(measured)
-        }
-        (Some(cached), None) => cached,
-        (None, Some(measured)) => measured,
-        (None, None) => max_width_px.unwrap_or(Pixels::MAX),
-    };
-    // Clamp to max_width if specified
-    max_width_px.map_or(wrap_width, |max_w| wrap_width.min(max_w))
+    // For auto-width: use measured width (container grows to fit text)
+    // For fixed-width: use cached container width
+    if user_wants_auto_width {
+        let width = measured_width.unwrap_or(Pixels::MAX);
+        max_width_px.map_or(width, |max_w| width.min(max_w))
+    } else {
+        let width = cached_wrap_width.or(max_width_px).unwrap_or(Pixels::MAX);
+        max_width_px.map_or(width, |max_w| width.min(max_w))
+    }
 }
 
 /// A selectable text element for displaying read-only text with selection and copy support.
@@ -525,8 +522,12 @@ impl SelectableText {
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
 
-        let wrap_width =
-            compute_wrap_width(cached_wrap_width, measured_max_line_width, max_width_px);
+        let wrap_width = compute_wrap_width(
+            cached_wrap_width,
+            measured_max_line_width,
+            max_width_px,
+            user_wants_auto_width,
+        );
 
         let (effective_width, use_relative_width) = compute_effective_width(
             user_wants_auto_width,
@@ -680,50 +681,37 @@ mod tests {
     use gpui::px;
 
     #[test]
-    fn test_wrap_width_uses_larger_of_cached_and_measured() {
-        // When measured is larger (text grew), use measured
-        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None);
-        assert_eq!(result, px(400.));
-
-        // When cached is larger, use cached
-        let result = compute_wrap_width(Some(px(400.)), Some(px(200.)), None);
+    fn test_wrap_width_auto_uses_measured() {
+        // Auto-width uses measured width
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true);
         assert_eq!(result, px(400.));
     }
 
     #[test]
-    fn test_wrap_width_falls_back_to_measured_width() {
-        let result = compute_wrap_width(None, Some(px(400.)), None);
-        assert_eq!(result, px(400.));
-    }
-
-    #[test]
-    fn test_wrap_width_defaults_to_max_when_nothing_available() {
-        let result = compute_wrap_width(None, None, None);
-        assert_eq!(result, Pixels::MAX);
-    }
-
-    #[test]
-    fn test_wrap_width_clamped_by_absolute_max_width() {
-        let result = compute_wrap_width(Some(px(500.)), None, Some(px(300.)));
+    fn test_wrap_width_auto_clamped_by_max() {
+        // Auto-width clamped by max_width
+        let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true);
         assert_eq!(result, px(300.));
     }
 
     #[test]
-    fn test_wrap_width_not_clamped_when_smaller_than_max() {
-        let result = compute_wrap_width(Some(px(200.)), None, Some(px(300.)));
+    fn test_wrap_width_fixed_uses_cached() {
+        // Fixed-width uses cached container width
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false);
         assert_eq!(result, px(200.));
     }
 
     #[test]
-    fn test_wrap_width_measured_clamped_by_max() {
-        let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)));
+    fn test_wrap_width_fixed_falls_back_to_max() {
+        // Fixed-width falls back to max_width when no cached
+        let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false);
         assert_eq!(result, px(300.));
     }
 
     #[test]
-    fn test_wrap_width_uses_max_as_fallback() {
-        let result = compute_wrap_width(None, None, Some(px(300.)));
-        assert_eq!(result, px(300.));
+    fn test_wrap_width_defaults_to_max_when_nothing_available() {
+        let result = compute_wrap_width(None, None, None, false);
+        assert_eq!(result, Pixels::MAX);
     }
 
     #[test]
