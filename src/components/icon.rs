@@ -5,10 +5,14 @@ use gpui::{
 
 use crate::theme::ThemeExt;
 
+/// Style configuration for flex layout properties of an Icon.
 #[derive(Clone, Default)]
 pub struct IconStyle {
+    /// The flex grow factor for the icon.
     pub flex_grow: Option<f32>,
+    /// The flex shrink factor for the icon.
     pub flex_shrink: Option<f32>,
+    /// The flex basis for the icon.
     pub flex_basis: Option<Length>,
 }
 

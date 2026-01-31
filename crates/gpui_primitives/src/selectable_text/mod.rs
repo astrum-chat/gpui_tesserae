@@ -3,11 +3,13 @@
 mod elements;
 mod state;
 
+#[cfg(test)]
+use gpui::px;
 use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels,
     Refineable, RenderOnce, SharedString, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder, px, rgb, uniform_list,
+    prelude::FluentBuilder, rgb, uniform_list,
 };
 
 use crate::utils::{
