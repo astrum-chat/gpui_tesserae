@@ -1,9 +1,16 @@
 use gpui::{
     Hsla, IntoElement, Length, Radians, RenderOnce, SharedString, SizeRefinement, Styled,
-    Transformation, prelude::FluentBuilder, px, svg,
+    Transformation, prelude::FluentBuilder, px, relative, svg,
 };
 
 use crate::theme::ThemeExt;
+
+#[derive(Clone, Default)]
+pub struct IconStyle {
+    pub flex_grow: Option<f32>,
+    pub flex_shrink: Option<f32>,
+    pub flex_basis: Option<Length>,
+}
 
 /// An SVG icon component with configurable size, color, and rotation.
 #[derive(IntoElement)]
@@ -12,6 +19,7 @@ pub struct Icon {
     pub(crate) size: SizeRefinement<Length>,
     rotate: Radians,
     color: Option<Hsla>,
+    style: IconStyle,
 }
 
 impl Icon {
@@ -22,6 +30,7 @@ impl Icon {
             size: SizeRefinement::default(),
             rotate: Radians(0.),
             color: None,
+            style: IconStyle::default(),
         }
     }
 
@@ -46,6 +55,87 @@ impl Icon {
         self.rotate = rotate.into();
         self
     }
+
+    /// Sets the element to allow a flex item to grow and shrink as needed, ignoring its initial size.
+    /// [Docs](https://tailwindcss.com/docs/flex#flex-1)
+    pub fn flex_1(mut self) -> Self {
+        self.style.flex_grow = Some(1.);
+        self.style.flex_shrink = Some(1.);
+        self.style.flex_basis = Some(relative(0.).into());
+        self
+    }
+
+    /// Sets the element to allow a flex item to grow and shrink, taking into account its initial size.
+    /// [Docs](https://tailwindcss.com/docs/flex#auto)
+    pub fn flex_auto(mut self) -> Self {
+        self.style.flex_grow = Some(1.);
+        self.style.flex_shrink = Some(1.);
+        self.style.flex_basis = Some(Length::Auto);
+        self
+    }
+
+    /// Sets the element to allow a flex item to shrink but not grow, taking into account its initial size.
+    /// [Docs](https://tailwindcss.com/docs/flex#initial)
+    pub fn flex_initial(mut self) -> Self {
+        self.style.flex_grow = Some(0.);
+        self.style.flex_shrink = Some(1.);
+        self.style.flex_basis = Some(Length::Auto);
+        self
+    }
+
+    /// Sets the element to prevent a flex item from growing or shrinking.
+    /// [Docs](https://tailwindcss.com/docs/flex#none)
+    pub fn flex_none(mut self) -> Self {
+        self.style.flex_grow = Some(0.);
+        self.style.flex_shrink = Some(0.);
+        self
+    }
+
+    /// Sets the initial size of flex items for this element.
+    /// [Docs](https://tailwindcss.com/docs/flex-basis)
+    pub fn flex_basis(mut self, basis: impl Into<Length>) -> Self {
+        self.style.flex_basis = Some(basis.into());
+        self
+    }
+
+    /// Sets the element to allow a flex item to grow to fill any available space.
+    /// [Docs](https://tailwindcss.com/docs/flex-grow)
+    pub fn flex_grow(mut self) -> Self {
+        self.style.flex_grow = Some(1.);
+        self
+    }
+
+    /// Sets the flex grow factor to a specific value.
+    pub fn flex_grow_factor(mut self, value: f32) -> Self {
+        self.style.flex_grow = Some(value);
+        self
+    }
+
+    /// Sets the element to allow a flex item to shrink if needed.
+    /// [Docs](https://tailwindcss.com/docs/flex-shrink)
+    pub fn flex_shrink(mut self) -> Self {
+        self.style.flex_shrink = Some(1.);
+        self
+    }
+
+    /// Sets the flex shrink factor to a specific value.
+    pub fn flex_shrink_factor(mut self, value: f32) -> Self {
+        self.style.flex_shrink = Some(value);
+        self
+    }
+
+    /// Sets the element to prevent a flex item from shrinking.
+    /// [Docs](https://tailwindcss.com/docs/flex-shrink#dont-shrink)
+    pub fn flex_shrink_0(mut self) -> Self {
+        self.style.flex_shrink = Some(0.);
+        self
+    }
+
+    /// Applies an IconStyle to this icon.
+    pub fn style(mut self, style: IconStyle) -> Self {
+        self.style = style;
+        self
+    }
 }
 
 impl RenderOnce for Icon {
@@ -64,6 +154,15 @@ impl RenderOnce for Icon {
             .min_h(height)
             .with_transformation(Transformation::rotate(self.rotate))
             .when_some(self.color, |this, color| this.text_color(color))
+            .when_some(self.style.flex_grow, |mut this, value| {
+                this.style().flex_grow = Some(value);
+                this
+            })
+            .when_some(self.style.flex_shrink, |mut this, value| {
+                this.style().flex_shrink = Some(value);
+                this
+            })
+            .when_some(self.style.flex_basis, |this, value| this.flex_basis(value))
     }
 }
 

@@ -525,7 +525,10 @@ impl RenderOnce for Button {
             .child(
                 div()
                     .w_full()
+                    .max_w_full()
                     .flex()
+                    .flex_shrink()
+                    .bg(gpui::red())
                     .gap(horizontal_padding)
                     .map(|mut this| {
                         this.style().justify_content = Some(self.style.justify_content);
@@ -538,6 +541,8 @@ impl RenderOnce for Button {
                         div()
                             .max_w_full()
                             .flex()
+                            .flex_shrink()
+                            .bg(gpui::blue())
                             .items_center()
                             .gap(horizontal_padding)
                             .map(|this| {
@@ -561,7 +566,9 @@ impl RenderOnce for Button {
                                             min_w0_wrapper()
                                                 .text_ellipsis()
                                                 .child(text)
+                                                .bg(gpui::yellow().alpha(0.3))
                                                 .max_w_full()
+                                                .flex_shrink()
                                                 .text_color(text_color),
                                         )
                                     },
