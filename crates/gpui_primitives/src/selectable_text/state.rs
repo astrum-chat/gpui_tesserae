@@ -132,11 +132,22 @@ impl SelectableTextState {
         }
     }
 
-    /// Sets the text content, clearing selection and triggering recomputation.
+    /// Sets the text content, preserving selection if valid, and triggering recomputation.
     pub fn text(&mut self, text: impl Into<SharedString>) {
         self.text = text.into();
-        self.selected_range = 0..0;
-        self.selection_reversed = false;
+        let text_len = self.text.len();
+
+        // Clamp selection to valid range within new text
+        let start = self.selected_range.start.min(text_len);
+        let end = self.selected_range.end.min(text_len);
+        self.selected_range = start..end;
+
+        // If selection is now invalid, reset it
+        if self.selected_range.start > self.selected_range.end {
+            self.selected_range = 0..0;
+            self.selection_reversed = false;
+        }
+
         self.precomputed_visual_lines.clear();
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
