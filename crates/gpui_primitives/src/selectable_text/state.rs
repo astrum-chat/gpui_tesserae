@@ -81,6 +81,10 @@ pub struct SelectableTextState {
     pub(crate) is_constrained: bool,
     /// Tracks previous focus state to detect blur events.
     was_focused: bool,
+    /// Cached render params for use in paint phase
+    pub(crate) last_font: Option<Font>,
+    pub(crate) last_font_size: Option<Pixels>,
+    pub(crate) last_text_color: Option<Hsla>,
 }
 
 impl SelectableTextState {
@@ -109,6 +113,9 @@ impl SelectableTextState {
             measured_max_line_width: None,
             is_constrained: false,
             was_focused: false,
+            last_font: None,
+            last_font_size: None,
+            last_text_color: None,
         }
     }
 

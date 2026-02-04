@@ -355,9 +355,100 @@ impl Element for WrappedLineElement {
 pub(crate) struct UniformListElement {
     pub state: Entity<SelectableTextState>,
     pub child: AnyElement,
+    pub debug_wrapping: bool,
 }
 
 impl UniformListElement {
+    fn should_recompute_wrapping(&self, bounds: Bounds<Pixels>, cx: &App) -> bool {
+        let state = self.state.read(cx);
+        state.precomputed_at_width.map_or(false, |pw| {
+            (bounds.size.width - pw).abs() > WRAP_WIDTH_EPSILON
+        })
+    }
+
+    fn recompute_wrapping_if_needed(
+        &self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if !self.should_recompute_wrapping(bounds, cx) {
+            return;
+        }
+
+        if let (Some(font), Some(font_size), Some(text_color)) = {
+            let state = self.state.read(cx);
+            (
+                state.last_font.clone(),
+                state.last_font_size,
+                state.last_text_color,
+            )
+        } {
+            self.state.update(cx, |state, cx| {
+                state.precompute_wrapped_lines(
+                    bounds.size.width,
+                    font_size,
+                    font,
+                    text_color,
+                    window,
+                );
+                cx.notify();
+            });
+        }
+    }
+
+    fn paint_debug_overlays(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        if !self.debug_wrapping {
+            return;
+        }
+
+        let precomputed_at_width = self.state.read(cx).precomputed_at_width;
+        if let Some(wrap_width) = precomputed_at_width {
+            let debug_bounds = Bounds {
+                origin: bounds.origin,
+                size: gpui::Size {
+                    width: wrap_width,
+                    height: bounds.size.height,
+                },
+            };
+            window.paint_quad(gpui::PaintQuad {
+                bounds: debug_bounds,
+                corner_radii: gpui::Corners::default(),
+                background: gpui::Hsla {
+                    h: 0.0,
+                    s: 1.0,
+                    l: 0.5,
+                    a: 0.2,
+                }
+                .into(),
+                border_widths: gpui::Edges::default(),
+                border_color: gpui::Hsla::transparent_black(),
+                border_style: gpui::BorderStyle::default(),
+            });
+        }
+
+        let actual_bounds = Bounds {
+            origin: bounds.origin,
+            size: gpui::Size {
+                width: bounds.size.width,
+                height: bounds.size.height,
+            },
+        };
+        window.paint_quad(gpui::PaintQuad {
+            bounds: actual_bounds,
+            corner_radii: gpui::Corners::default(),
+            background: gpui::Hsla::transparent_black().into(),
+            border_widths: gpui::Edges::all(Pixels::from(2.0)),
+            border_color: gpui::Hsla {
+                h: 0.33,
+                s: 1.0,
+                l: 0.5,
+                a: 0.8,
+            },
+            border_style: gpui::BorderStyle::default(),
+        });
+    }
+
     /// Checks if the container width changed and triggers a wrap recompute if needed.
     fn check_container_width_change(&self, actual_width: Pixels, cx: &mut App) {
         if actual_width <= Pixels::ZERO {
@@ -455,7 +546,10 @@ impl Element for UniformListElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        // Check and update wrap width BEFORE child prepaint so the child uses current width
         self.check_container_width_change(bounds.size.width, cx);
+        self.recompute_wrapping_if_needed(bounds, window, cx);
+
         self.child.prepaint(window, cx);
     }
 
@@ -489,6 +583,7 @@ impl Element for UniformListElement {
         });
 
         self.child.paint(window, cx);
+        self.paint_debug_overlays(bounds, window, cx);
 
         self.state.update(cx, |state, _cx| {
             state.last_bounds = Some(bounds);

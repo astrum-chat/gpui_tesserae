@@ -13,3 +13,4 @@ default = []
 test-support = ["gpui/test-support"]
 
 [dev-dependencies]
+futures-timer = "3"

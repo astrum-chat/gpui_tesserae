@@ -64,10 +64,16 @@ fn compute_wrap_width(
     max_width_px: Option<Pixels>,
     user_wants_auto_width: bool,
 ) -> Pixels {
-    // For auto-width: use measured width (container grows to fit text)
+    // For auto-width: use cached container width if available (enables wrapping),
+    // otherwise fall back to max_width or measured width
     // For fixed-width: use cached container width
     if user_wants_auto_width {
-        let width = measured_width.unwrap_or(Pixels::MAX);
+        // Prefer cached_wrap_width (actual container width) to enable wrapping
+        // Only fall back to measured_width if no container constraint exists
+        let width = cached_wrap_width
+            .or(max_width_px)
+            .or(measured_width)
+            .unwrap_or(Pixels::MAX);
         max_width_px.map_or(width, |max_w| width.min(max_w))
     } else {
         let width = cached_wrap_width.or(max_width_px).unwrap_or(Pixels::MAX);
@@ -83,6 +89,7 @@ pub struct SelectableText {
     line_clamp: usize,
     word_wrap: bool,
     selection_color: Option<Hsla>,
+    debug_wrapping: bool,
     style: StyleRefinement,
 }
 
@@ -101,6 +108,7 @@ impl SelectableText {
             line_clamp: usize::MAX,
             word_wrap: true,
             selection_color: None,
+            debug_wrapping: false,
             style: StyleRefinement::default(),
         }
     }
@@ -120,6 +128,12 @@ impl SelectableText {
     /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection_color = Some(color.into());
+        self
+    }
+
+    /// Enables debug visualization of text wrapping width.
+    pub fn debug_wrapping(mut self, enabled: bool) -> Self {
+        self.debug_wrapping = enabled;
         self
     }
 
@@ -492,6 +506,7 @@ impl SelectableText {
         container.child(UniformListElement {
             state: self.state.clone(),
             child: list.into_any_element(),
+            debug_wrapping: self.debug_wrapping,
         })
     }
 
@@ -539,6 +554,10 @@ impl SelectableText {
 
         let visual_line_count = self.state.update(cx, |state, _cx| {
             state.using_auto_width = !use_relative_width && effective_width.is_some();
+            // Cache render params for use in paint phase
+            state.last_font = Some(font.clone());
+            state.last_font_size = Some(font_size);
+            state.last_text_color = Some(text_color);
 
             if state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty() {
                 state.needs_wrap_recompute = false;
@@ -603,6 +622,7 @@ impl SelectableText {
         container.child(UniformListElement {
             state: self.state.clone(),
             child: list.into_any_element(),
+            debug_wrapping: self.debug_wrapping,
         })
     }
 }
@@ -681,15 +701,15 @@ mod tests {
     use gpui::px;
 
     #[test]
-    fn test_wrap_width_auto_uses_measured() {
-        // Auto-width uses measured width
+    fn test_wrap_width_auto_uses_cached_for_wrapping() {
+        // Auto-width uses cached container width to enable wrapping
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true);
-        assert_eq!(result, px(400.));
+        assert_eq!(result, px(200.));
     }
 
     #[test]
-    fn test_wrap_width_auto_clamped_by_max() {
-        // Auto-width clamped by max_width
+    fn test_wrap_width_auto_uses_max_when_no_cached() {
+        // Auto-width uses max_width when no cached width available
         let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true);
         assert_eq!(result, px(300.));
     }
