@@ -314,14 +314,14 @@ impl RenderOnce for Input {
                             ),
 
                             (Some(on_submit), _) => this
+                                .on_action(window.listener_for(
+                                    &self.state,
+                                    InputState::insert_newline_secondary,
+                                ))
                                 .when(!self.submit_disabled, |this| {
-                                    this.on_action(window.listener_for(
-                                        &self.state,
-                                        InputState::insert_newline_secondary,
-                                    ))
-                                })
-                                .on_action(move |_: &Submit, window, cx| {
-                                    on_submit(window, cx);
+                                    this.on_action(move |_: &Submit, window, cx| {
+                                        on_submit(window, cx);
+                                    })
                                 }),
                         }
                     })
