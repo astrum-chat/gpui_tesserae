@@ -14,7 +14,7 @@ fn styled_input(id: impl Into<ElementId>, state: Entity<InputState>) -> Input {
         .pr(px(6.))
         .pt(px(0.))
         .pb(px(0.))
-        .selection_corner_radius(px(4.))
+        .selection_rounded(px(4.))
 }
 
 struct ExampleApp {

@@ -49,7 +49,7 @@ pub struct Input {
     placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
-    selection_corner_radius: Option<gpui::Pixels>,
+    selection_rounded: Option<gpui::Pixels>,
     transform_text: Option<TransformTextFn>,
     map_text: Option<MapTextFn>,
     style: StyleRefinement,
@@ -76,7 +76,7 @@ impl Input {
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
             selection_color: None,
-            selection_corner_radius: None,
+            selection_rounded: None,
             transform_text: None,
             map_text: None,
             style: StyleRefinement::default(),
@@ -174,8 +174,8 @@ impl Input {
     /// When set to a value greater than 0, selection rectangles will have rounded
     /// corners. For multi-line selections, inner corners (where the selection wraps
     /// to a new line) will also be properly rounded based on adjacent line positions.
-    pub fn selection_corner_radius(mut self, radius: impl Into<gpui::Pixels>) -> Self {
-        self.selection_corner_radius = Some(radius.into());
+    pub fn selection_rounded(mut self, radius: impl Into<gpui::Pixels>) -> Self {
+        self.selection_rounded = Some(radius.into());
         self
     }
 
@@ -360,7 +360,7 @@ impl RenderOnce for Input {
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
                 let line_clamp = self.line_clamp;
-                let selection_corner_radius = self.selection_corner_radius;
+                let selection_rounded = self.selection_rounded;
 
                 let needs_scroll = line_count > line_clamp;
 
@@ -410,7 +410,7 @@ impl RenderOnce for Input {
                                     selected_range: selected_range.clone(),
                                     cursor_offset,
                                     placeholder: placeholder.clone(),
-                                    selection_corner_radius,
+                                    selection_rounded,
                                     prev_line_offsets,
                                     next_line_offsets,
                                 }
@@ -444,7 +444,7 @@ impl RenderOnce for Input {
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
                 let line_clamp = self.line_clamp;
-                let selection_corner_radius = self.selection_corner_radius;
+                let selection_rounded = self.selection_rounded;
 
                 let wrap_width = cached_wrap_width.unwrap_or(px(300.));
                 let visual_line_count = self.state.update(cx, |state, _cx| {
@@ -512,7 +512,7 @@ impl RenderOnce for Input {
                                     selected_range: selected_range.clone(),
                                     cursor_offset,
                                     placeholder: placeholder.clone(),
-                                    selection_corner_radius,
+                                    selection_rounded,
                                     prev_visual_line_offsets,
                                     next_visual_line_offsets,
                                 }
@@ -550,7 +550,7 @@ impl RenderOnce for Input {
                     font,
                     transform_text: self.transform_text,
                     cursor_visible,
-                    selection_corner_radius: self.selection_corner_radius,
+                    selection_rounded: self.selection_rounded,
                 })
             })
     }

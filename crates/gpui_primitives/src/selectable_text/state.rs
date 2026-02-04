@@ -142,15 +142,15 @@ impl SelectableTextState {
         let text_len = self.text.len();
 
         // Clamp selection to valid range within new text
-        //let start = self.selected_range.start.min(text_len);
-        //let end = self.selected_range.end.min(text_len);
-        //self.selected_range = start..end;
+        let start = self.selected_range.start.min(text_len);
+        let end = self.selected_range.end.min(text_len);
+        self.selected_range = start..end;
 
         // If selection is now invalid, reset it
-        //if self.selected_range.start > self.selected_range.end {
-        //    self.selected_range = 0..0;
-        //    self.selection_reversed = false;
-        //}
+        if self.selected_range.start > self.selected_range.end {
+            self.selected_range = 0..0;
+            self.selection_reversed = false;
+        }
 
         self.precomputed_visual_lines.clear();
         self.precomputed_wrapped_lines.clear();

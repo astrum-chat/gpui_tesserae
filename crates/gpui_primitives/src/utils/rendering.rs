@@ -80,17 +80,16 @@ pub fn make_selection_quad_rounded(
     }
 }
 
-/// Computes which corners should be rounded based on adjacent line selection positions.
+/// Returns whether a corner at `x` is covered by an adjacent line's selection range.
+fn is_corner_covered(x: Pixels, adjacent_line: Option<(Pixels, Pixels)>) -> bool {
+    adjacent_line.map_or(false, |(start, end)| x >= start && x <= end)
+}
+
+/// Computes which corners of a selection rectangle should be rounded.
 ///
-/// For multi-line selections, corners are rounded when they are at the outer edge
-/// of the selection shape. Inner corners (where the selection wraps to a new line)
-/// remain sharp to create a cohesive selection appearance.
-///
-/// - `this_start_x`: X-coordinate where selection starts on this line
-/// - `this_end_x`: X-coordinate where selection ends on this line
-/// - `prev_line`: Selection bounds (start_x, end_x) of the previous line, if any
-/// - `next_line`: Selection bounds (start_x, end_x) of the next line, if any
-/// - `radius`: The corner radius to apply
+/// For multi-line selections, a corner is rounded when "exposed" (not covered by
+/// the adjacent line's selection). This creates a cohesive shape where inner
+/// corners remain sharp and outer edges are rounded.
 pub fn compute_selection_corners(
     this_start_x: Pixels,
     this_end_x: Pixels,
@@ -98,79 +97,31 @@ pub fn compute_selection_corners(
     next_line: Option<(Pixels, Pixels)>,
     radius: Pixels,
 ) -> Corners<Pixels> {
-    let zero = Pixels::ZERO;
-
-    // Top-left: rounded if first line OR this line starts at/before previous line's start
-    let top_left = match prev_line {
-        None => radius,
-        Some((prev_start, _)) => {
-            if this_start_x <= prev_start {
-                radius
-            } else {
-                zero
-            }
-        }
-    };
-
-    // Top-right: rounded if first line OR this line ends at/after previous line's end
-    let top_right = match prev_line {
-        None => radius,
-        Some((_, prev_end)) => {
-            if this_end_x >= prev_end {
-                radius
-            } else {
-                zero
-            }
-        }
-    };
-
-    // Bottom-left: rounded if last line OR this line starts at/before next line's start
-    let bottom_left = match next_line {
-        None => radius,
-        Some((next_start, _)) => {
-            if this_start_x <= next_start {
-                radius
-            } else {
-                zero
-            }
-        }
-    };
-
-    // Bottom-right: rounded if last line OR this line ends at/after next line's end
-    let bottom_right = match next_line {
-        None => radius,
-        Some((_, next_end)) => {
-            if this_end_x >= next_end {
-                radius
-            } else {
-                zero
-            }
+    let round_if_exposed = |x: Pixels, adjacent: Option<(Pixels, Pixels)>| -> Pixels {
+        if is_corner_covered(x, adjacent) {
+            Pixels::ZERO
+        } else {
+            radius
         }
     };
 
     Corners {
-        top_left,
-        top_right,
-        bottom_right,
-        bottom_left,
+        top_left: round_if_exposed(this_start_x, prev_line),
+        top_right: round_if_exposed(this_end_x, prev_line),
+        bottom_left: round_if_exposed(this_start_x, next_line),
+        bottom_right: round_if_exposed(this_end_x, next_line),
     }
 }
 
 /// Determines if trailing whitespace should be shown in selection highlighting.
-/// This ensures that when a selection spans multiple lines, the newline character
-/// is visually represented by extending the selection highlight.
 ///
-/// Note: This function handles both logical lines (ending with newline) and visual
-/// lines from word wrapping (which may not end with newline). Trailing whitespace
-/// should only be shown when there's an actual newline at the end of the line.
+/// When a selection spans multiple lines, extending the highlight past the line's
+/// text visually represents the newline character. This is suppressed when the
+/// selection ends exactly at the line end (unless select-all is active).
 pub fn should_show_trailing_whitespace(
     selected_range: &Range<usize>,
     line_end_offset: usize,
     is_select_all: bool,
 ) -> bool {
-    if !is_select_all && selected_range.end == line_end_offset {
-        false
-    } else {
-        true
-    }
+    is_select_all || selected_range.end != line_end_offset
 }

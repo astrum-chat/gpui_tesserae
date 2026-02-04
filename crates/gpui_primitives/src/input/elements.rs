@@ -88,7 +88,7 @@ pub(crate) struct TextElement {
     pub font: Font,
     pub transform_text: Option<TransformTextFn>,
     pub cursor_visible: bool,
-    pub selection_corner_radius: Option<Pixels>,
+    pub selection_rounded: Option<Pixels>,
 }
 
 pub(crate) struct PrepaintState {
@@ -218,7 +218,7 @@ impl Element for TextElement {
         } else {
             let selection_start_x = line.x_for_index(selected_range.start);
             let selection_end_x = line.x_for_index(selected_range.end);
-            let selection_quad = match self.selection_corner_radius {
+            let selection_quad = match self.selection_rounded {
                 Some(radius) if radius > Pixels::ZERO => {
                     // Single-line: all 4 corners rounded
                     let corners = gpui::Corners::all(radius);
@@ -330,7 +330,7 @@ pub(crate) struct LineElement {
     pub selected_range: Range<usize>,
     pub cursor_offset: usize,
     pub placeholder: SharedString,
-    pub selection_corner_radius: Option<Pixels>,
+    pub selection_rounded: Option<Pixels>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
 }
@@ -524,7 +524,7 @@ impl Element for LineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
-            let selection_quad = match self.selection_corner_radius {
+            let selection_quad = match self.selection_rounded {
                 Some(radius) if radius > Pixels::ZERO => {
                     // Compute adjacent line selection bounds
                     let prev_line_bounds = self.prev_line_offsets.and_then(|(start, end)| {
@@ -666,7 +666,7 @@ pub(crate) struct WrappedLineElement {
     pub selected_range: Range<usize>,
     pub cursor_offset: usize,
     pub placeholder: SharedString,
-    pub selection_corner_radius: Option<Pixels>,
+    pub selection_rounded: Option<Pixels>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
 }
@@ -848,7 +848,7 @@ impl Element for WrappedLineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
-            let selection_quad = match self.selection_corner_radius {
+            let selection_quad = match self.selection_rounded {
                 Some(radius) if radius > Pixels::ZERO => {
                     // Compute adjacent line selection bounds
                     let prev_line_bounds =
