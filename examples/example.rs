@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, AppContext, Application, Bounds, Context, ElementId, FocusHandle, KeyBinding, Menu,
-    SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div, point,
-    prelude::*, px, size,
+    App, AppContext, Application, Bounds, Context, ElementId, Entity, FocusHandle, KeyBinding,
+    Menu, Rgba, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div,
+    point, prelude::*, px, size,
 };
 use gpui_transitions::{BoolLerp, TransitionState};
 
@@ -14,7 +14,10 @@ use gpui_tesserae::{
         select::{Select, SelectItemsMap, SelectState},
     },
     extensions::mouse_handleable::MouseHandleable,
-    primitives::input::InputState,
+    primitives::{
+        input::InputState,
+        selectable_text::{SelectableText, SelectableTextState},
+    },
     theme::{Theme, ThemeExt},
     views::Root,
 };
@@ -25,6 +28,7 @@ struct Main {
     checkbox_checked: bool,
     switch_checked: bool,
     select_state: Arc<SelectState<SharedString, SharedString>>,
+    selectable_text_state: Entity<SelectableTextState>,
 }
 
 actions!(window, [TabNext, TabPrev]);
@@ -67,6 +71,12 @@ impl Render for Main {
                     })),
             )
             .child(
+                Button::new("button")
+                    .w(px(200.))
+                    .text("Button")
+                    .disabled(self.checkbox_checked || self.switch_checked),
+            )
+            .child(
                 Select::new("select", self.select_state.clone())
                     .w(px(200.))
                     .disabled(self.checkbox_checked || self.switch_checked),
@@ -84,12 +94,21 @@ impl Render for Main {
                 .w(px(200.))
                 .disabled(self.checkbox_checked || self.switch_checked),
             )
-            .child(
-                Button::new("button")
-                    .w(px(200.))
-                    .text("Button")
-                    .disabled(self.checkbox_checked || self.switch_checked),
-            )
+            .child({
+                let selection_color = cx
+                    .get_theme()
+                    .variants
+                    .active(cx)
+                    .colors
+                    .accent
+                    .primary
+                    .alpha(0.3);
+
+                SelectableText::new("selectable-text", self.selectable_text_state.clone())
+                    .w(px(400.))
+                    .selection_color(selection_color)
+                    .selection_rounded(px(4.))
+            })
     }
 }
 
@@ -140,11 +159,18 @@ fn main() {
                     select_state.push_item(cx, SharedString::from("Cherry"));
                     select_state.push_item(cx, SharedString::from("Date"));
 
+                    let selectable_text_state = cx.new(|cx| {
+                        let mut state = SelectableTextState::new(cx);
+                        state.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.");
+                        state
+                    });
+
                     let main = cx.new(|cx| Main {
                         focus_handle: cx.focus_handle(),
                         checkbox_checked: false,
                         switch_checked: false,
                         select_state,
+                        selectable_text_state,
                     });
 
                     cx.new(|cx| Root::new(main, window, cx))
@@ -185,4 +211,15 @@ fn init_tab_indexing_actions(cx: &mut App) {
 
     cx.bind_keys([KeyBinding::new("tab", TabNext, None)]);
     cx.bind_keys([KeyBinding::new("shift-tab", TabPrev, None)]);
+}
+
+trait RgbaExt {
+    fn alpha(self, alpha: f32) -> Self;
+}
+
+impl RgbaExt for Rgba {
+    fn alpha(mut self, alpha: f32) -> Self {
+        self.a = alpha;
+        self
+    }
 }
