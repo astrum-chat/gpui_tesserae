@@ -263,17 +263,23 @@ impl Input {
         self
     }
 
-    /// When enabled, use shift+enter to insert newlines instead of enter.
-    /// This is useful for form inputs where enter should submit the form.
-    /// Only effective when `line_clamp > 1`.
-    pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
-        self.base = self.base.newline_on_shift_enter(enabled);
+    /// Sets a callback to invoke on `Submit` action.
+    /// Forces the `InsertNewlineSecondary` action to be used for newline.
+    pub fn on_submit(mut self, callback: impl Fn(&mut gpui::Window, &mut App) + 'static) -> Self {
+        self.base = self.base.on_submit(callback);
         self
     }
 
-    /// Sets a callback to invoke when Enter is pressed (only when newline_on_shift_enter is enabled).
-    pub fn on_enter(mut self, callback: impl Fn(&mut gpui::Window, &mut App) + 'static) -> Self {
-        self.base = self.base.on_enter(callback);
+    /// Disables the submit action when set to `true`.
+    /// When disabled, the `Submit` action will not trigger the `on_submit` callback.
+    pub fn submit_disabled(mut self, disabled: bool) -> Self {
+        self.base = self.base.submit_disabled(disabled);
+        self
+    }
+
+    /// Forces the `InsertNewlineSecondary` action to be used for newline.
+    pub fn secondary_newline(mut self) -> Self {
+        self.base = self.base.secondary_newline();
         self
     }
 

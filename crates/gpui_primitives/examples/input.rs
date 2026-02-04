@@ -119,8 +119,8 @@ impl ExampleApp {
             styled_input("chat", self.chat_input.clone())
                 .multiline()
                 .word_wrap(true)
-                .newline_on_shift_enter(true)
                 .placeholder("Type a message... (Shift+Enter for newline)")
+                .secondary_newline()
                 .min_h(px(80.)),
         )
     }

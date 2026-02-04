@@ -15,6 +15,7 @@ use gpui::{
     px, rgb, uniform_list,
 };
 
+use crate::input::state::{SecondarySubmit, Submit};
 use crate::utils::{TextNavigation, multiline_height, pixel_perfect_round, rgb_a};
 use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
 
@@ -23,10 +24,10 @@ pub(crate) use crate::utils::should_show_trailing_whitespace;
 pub use cursor_blink::CursorBlink;
 pub use state::{
     Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,
-    DeleteToPreviousWordStart, Down, End, Home, InputState, InsertNewline, InsertNewlineShift,
-    Left, MapTextFn, MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord, MoveToStart,
-    MoveToStartOfLine, Paste, Quit, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight,
-    SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart,
+    DeleteToPreviousWordStart, Down, End, Home, InputState, Left, MapTextFn, MoveToEnd,
+    MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveToStartOfLine, Paste,
+    Quit, Redo, Right, SelectAll, SelectDown, SelectLeft, SelectRight, SelectToEnd,
+    SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart,
     SelectToStartOfLine, SelectUp, ShowCharacterPalette, Undo, Up, VisibleLineInfo, VisualLineInfo,
 };
 
@@ -42,8 +43,9 @@ pub struct Input {
     disabled: bool,
     line_clamp: usize,
     word_wrap: bool,
-    newline_on_shift_enter: bool,
-    on_enter: Option<OnEnterFn>,
+    on_submit: Option<OnEnterFn>,
+    submit_disabled: bool,
+    secondary_newline: bool,
     placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
@@ -67,8 +69,9 @@ impl Input {
             disabled: false,
             line_clamp: 1,
             word_wrap: false,
-            newline_on_shift_enter: false,
-            on_enter: None,
+            on_submit: None,
+            submit_disabled: false,
+            secondary_newline: false,
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
             selection_color: None,
@@ -96,15 +99,23 @@ impl Input {
         self
     }
 
-    /// When enabled, Enter does nothing and Shift+Enter inserts a newline. Useful for chat inputs.
-    pub fn newline_on_shift_enter(mut self, enabled: bool) -> Self {
-        self.newline_on_shift_enter = enabled;
+    /// Sets a callback to invoke on `Submit` action.
+    /// Forces the `InsertNewlineSecondary` action to be used for newline.
+    pub fn on_submit(mut self, callback: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_submit = Some(Arc::new(callback));
         self
     }
 
-    /// Sets a callback to invoke when Enter is pressed (only when newline_on_shift_enter is enabled).
-    pub fn on_enter(mut self, callback: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        self.on_enter = Some(Arc::new(callback));
+    /// Disables the submit action when set to `true`.
+    /// When disabled, the `Submit` action will not trigger the `on_submit` callback.
+    pub fn submit_disabled(mut self, disabled: bool) -> Self {
+        self.submit_disabled = disabled;
+        self
+    }
+
+    /// Forces the `InsertNewlineSecondary` action to be used for newline.
+    pub fn secondary_newline(mut self) -> Self {
+        self.secondary_newline = true;
         self
     }
 
@@ -286,21 +297,33 @@ impl RenderOnce for Input {
                     .on_action(window.listener_for(&self.state, InputState::down))
                     .on_action(window.listener_for(&self.state, InputState::select_up))
                     .on_action(window.listener_for(&self.state, InputState::select_down))
-                    .when(!self.newline_on_shift_enter, |this| {
-                        this.on_action(window.listener_for(&self.state, InputState::insert_newline))
-                    })
-                    .when(self.newline_on_shift_enter, |this| {
-                        this.on_action(
-                            window.listener_for(&self.state, InputState::insert_newline_shift),
-                        )
-                        .when_some(
-                            self.on_enter.clone(),
-                            |this, on_enter| {
-                                this.on_action(move |_: &InsertNewline, window, cx| {
-                                    on_enter(window, cx);
+                    .map(|this| {
+                        let on_submit = self.on_submit.clone();
+                        let secondary_newline = self.secondary_newline;
+
+                        match (on_submit, secondary_newline) {
+                            (None, true) => {
+                                this.on_action(window.listener_for(
+                                    &self.state,
+                                    InputState::insert_newline_secondary,
+                                ))
+                            }
+
+                            (None, false) => this.on_action(
+                                window.listener_for(&self.state, InputState::insert_newline),
+                            ),
+
+                            (Some(on_submit), _) => this
+                                .when(!self.submit_disabled, |this| {
+                                    this.on_action(window.listener_for(
+                                        &self.state,
+                                        InputState::insert_newline_secondary,
+                                    ))
                                 })
-                            },
-                        )
+                                .on_action(move |_: &Submit, window, cx| {
+                                    on_submit(window, cx);
+                                }),
+                        }
                     })
             })
             .on_mouse_down(
@@ -501,8 +524,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("down", Down, None),
         KeyBinding::new("home", Home, None),
         KeyBinding::new("end", End, None),
-        KeyBinding::new("enter", InsertNewline, None),
-        KeyBinding::new("shift-enter", InsertNewlineShift, None),
+        KeyBinding::new("enter", Submit, None),
+        KeyBinding::new("shift-enter", SecondarySubmit, None),
         // Basic selection (universal)
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),

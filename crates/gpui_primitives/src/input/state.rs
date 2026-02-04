@@ -72,8 +72,8 @@ mod actions {
             Paste,
             Cut,
             Copy,
-            InsertNewline,
-            InsertNewlineShift,
+            Submit,
+            SecondarySubmit,
             Quit,
             Undo,
             Redo,
@@ -547,20 +547,15 @@ impl InputState {
         }
     }
 
-    /// Inserts a newline (Enter key in multiline mode).
-    pub fn insert_newline(
-        &mut self,
-        _: &InsertNewline,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Inserts a newline.
+    pub fn insert_newline(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
-    /// Inserts a newline (Shift+Enter, for inputs with `newline_on_shift_enter` enabled).
-    pub fn insert_newline_shift(
+    /// Inserts a newline.
+    pub fn insert_newline_secondary(
         &mut self,
-        _: &InsertNewlineShift,
+        _: &SecondarySubmit,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
