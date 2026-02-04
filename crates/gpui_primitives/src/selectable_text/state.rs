@@ -85,6 +85,9 @@ pub struct SelectableTextState {
     pub(crate) last_font: Option<Font>,
     pub(crate) last_font_size: Option<Pixels>,
     pub(crate) last_text_color: Option<Hsla>,
+    /// Pending mouse position for deferred selection processing.
+    /// Stored during mouse move events and processed after visible_lines_info is populated.
+    pub(crate) pending_selection_position: Option<gpui::Point<Pixels>>,
 }
 
 impl SelectableTextState {
@@ -116,6 +119,7 @@ impl SelectableTextState {
             last_font: None,
             last_font_size: None,
             last_text_color: None,
+            pending_selection_position: None,
         }
     }
 
@@ -138,15 +142,15 @@ impl SelectableTextState {
         let text_len = self.text.len();
 
         // Clamp selection to valid range within new text
-        let start = self.selected_range.start.min(text_len);
-        let end = self.selected_range.end.min(text_len);
-        self.selected_range = start..end;
+        //let start = self.selected_range.start.min(text_len);
+        //let end = self.selected_range.end.min(text_len);
+        //self.selected_range = start..end;
 
         // If selection is now invalid, reset it
-        if self.selected_range.start > self.selected_range.end {
-            self.selected_range = 0..0;
-            self.selection_reversed = false;
-        }
+        //if self.selected_range.start > self.selected_range.end {
+        //    self.selected_range = 0..0;
+        //    self.selection_reversed = false;
+        //}
 
         self.precomputed_visual_lines.clear();
         self.precomputed_wrapped_lines.clear();
@@ -830,9 +834,11 @@ impl SelectableTextState {
         _: &mut Context<Self>,
     ) {
         self.is_selecting = false;
+        self.pending_selection_position = None;
     }
 
-    /// Handles mouse move: extends selection while dragging.
+    /// Handles mouse move: stores position for deferred selection processing.
+    /// The actual selection update happens after visible_lines_info is populated.
     pub fn on_mouse_move(
         &mut self,
         event: &gpui::MouseMoveEvent,
@@ -840,8 +846,19 @@ impl SelectableTextState {
         cx: &mut Context<Self>,
     ) {
         if self.is_selecting {
-            if let Some(line_height) = self.line_height {
-                self.select_to_multiline(event.position, line_height, cx);
+            self.pending_selection_position = Some(event.position);
+            cx.notify();
+        }
+    }
+
+    /// Processes any pending selection update.
+    /// Called after visible_lines_info is fully populated during paint.
+    pub fn process_pending_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(position) = self.pending_selection_position.take() {
+            if self.is_selecting {
+                if let Some(line_height) = self.line_height {
+                    self.select_to_multiline(position, line_height, cx);
+                }
             }
         }
     }

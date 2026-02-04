@@ -92,6 +92,7 @@ pub struct SelectableText {
     line_clamp: usize,
     word_wrap: bool,
     selection_color: Option<Hsla>,
+    selection_corner_radius: Option<Pixels>,
     debug_wrapping: bool,
     style: StyleRefinement,
 }
@@ -111,6 +112,7 @@ impl SelectableText {
             line_clamp: usize::MAX,
             word_wrap: true,
             selection_color: None,
+            selection_corner_radius: None,
             debug_wrapping: false,
             style: StyleRefinement::default(),
         }
@@ -131,6 +133,16 @@ impl SelectableText {
     /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection_color = Some(color.into());
+        self
+    }
+
+    /// Sets the corner radius for selection highlighting.
+    ///
+    /// When set to a value greater than 0, selection rectangles will have rounded
+    /// corners. For multi-line selections, inner corners (where the selection wraps
+    /// to a new line) will also be properly rounded based on adjacent line positions.
+    pub fn selection_corner_radius(mut self, radius: impl Into<Pixels>) -> Self {
+        self.selection_corner_radius = Some(radius.into());
         self
     }
 
@@ -454,6 +466,7 @@ impl SelectableText {
         let line_height = params.line_height;
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
+        let selection_corner_radius = self.selection_corner_radius;
 
         let list = uniform_list(
             self.id.clone(),
@@ -470,6 +483,14 @@ impl SelectableText {
                         let (line_start, line_end) =
                             line_offsets.get(line_idx).copied().unwrap_or((0, 0));
 
+                        // Get adjacent line offsets for corner radius computation
+                        let prev_line_offsets = if line_idx > 0 {
+                            line_offsets.get(line_idx - 1).copied()
+                        } else {
+                            None
+                        };
+                        let next_line_offsets = line_offsets.get(line_idx + 1).copied();
+
                         LineElement {
                             state: state_entity.clone(),
                             line_index: line_idx,
@@ -483,6 +504,9 @@ impl SelectableText {
                             selected_range: selected_range.clone(),
                             is_select_all,
                             measured_width,
+                            selection_corner_radius,
+                            prev_line_offsets,
+                            next_line_offsets,
                         }
                     })
                     .collect()
@@ -539,6 +563,7 @@ impl SelectableText {
         let line_height = params.line_height;
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
+        let selection_corner_radius = self.selection_corner_radius;
 
         let wrap_width = compute_wrap_width(
             cached_wrap_width,
@@ -589,18 +614,36 @@ impl SelectableText {
                 let state = state_entity.read(cx);
                 let selected_range = state.selected_range.clone();
                 let is_select_all = state.is_select_all;
+                let visual_lines = &state.precomputed_visual_lines;
 
                 visible_range
-                    .map(|visual_idx| WrappedLineElement {
-                        state: state_entity.clone(),
-                        visual_line_index: visual_idx,
-                        text_color,
-                        highlight_text_color,
-                        line_height,
-                        font_size,
-                        font: font.clone(),
-                        selected_range: selected_range.clone(),
-                        is_select_all,
+                    .map(|visual_idx| {
+                        // Get adjacent visual line offsets for corner radius computation
+                        let prev_visual_line_offsets = if visual_idx > 0 {
+                            visual_lines
+                                .get(visual_idx - 1)
+                                .map(|info| (info.start_offset, info.end_offset))
+                        } else {
+                            None
+                        };
+                        let next_visual_line_offsets = visual_lines
+                            .get(visual_idx + 1)
+                            .map(|info| (info.start_offset, info.end_offset));
+
+                        WrappedLineElement {
+                            state: state_entity.clone(),
+                            visual_line_index: visual_idx,
+                            text_color,
+                            highlight_text_color,
+                            line_height,
+                            font_size,
+                            font: font.clone(),
+                            selected_range: selected_range.clone(),
+                            is_select_all,
+                            selection_corner_radius,
+                            prev_visual_line_offsets,
+                            next_visual_line_offsets,
+                        }
                     })
                     .collect()
             },

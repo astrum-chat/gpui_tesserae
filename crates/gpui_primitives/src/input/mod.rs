@@ -49,6 +49,7 @@ pub struct Input {
     placeholder: SharedString,
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
+    selection_corner_radius: Option<gpui::Pixels>,
     transform_text: Option<TransformTextFn>,
     map_text: Option<MapTextFn>,
     style: StyleRefinement,
@@ -75,6 +76,7 @@ impl Input {
             placeholder: "Type here...".into(),
             placeholder_text_color: None,
             selection_color: None,
+            selection_corner_radius: None,
             transform_text: None,
             map_text: None,
             style: StyleRefinement::default(),
@@ -164,6 +166,16 @@ impl Input {
     /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection_color = Some(color.into());
+        self
+    }
+
+    /// Sets the corner radius for selection highlighting.
+    ///
+    /// When set to a value greater than 0, selection rectangles will have rounded
+    /// corners. For multi-line selections, inner corners (where the selection wraps
+    /// to a new line) will also be properly rounded based on adjacent line positions.
+    pub fn selection_corner_radius(mut self, radius: impl Into<gpui::Pixels>) -> Self {
+        self.selection_corner_radius = Some(radius.into());
         self
     }
 
@@ -348,6 +360,7 @@ impl RenderOnce for Input {
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
                 let line_clamp = self.line_clamp;
+                let selection_corner_radius = self.selection_corner_radius;
 
                 let needs_scroll = line_count > line_clamp;
 
@@ -373,6 +386,14 @@ impl RenderOnce for Input {
                                 let (line_start, line_end) =
                                     line_offsets.get(line_idx).copied().unwrap_or((0, 0));
 
+                                // Get adjacent line offsets for corner radius computation
+                                let prev_line_offsets = if line_idx > 0 {
+                                    line_offsets.get(line_idx - 1).copied()
+                                } else {
+                                    None
+                                };
+                                let next_line_offsets = line_offsets.get(line_idx + 1).copied();
+
                                 LineElement {
                                     input: input_state.clone(),
                                     line_index: line_idx,
@@ -389,6 +410,9 @@ impl RenderOnce for Input {
                                     selected_range: selected_range.clone(),
                                     cursor_offset,
                                     placeholder: placeholder.clone(),
+                                    selection_corner_radius,
+                                    prev_line_offsets,
+                                    next_line_offsets,
                                 }
                             })
                             .collect()
@@ -420,6 +444,7 @@ impl RenderOnce for Input {
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
                 let line_clamp = self.line_clamp;
+                let selection_corner_radius = self.selection_corner_radius;
 
                 let wrap_width = cached_wrap_width.unwrap_or(px(300.));
                 let visual_line_count = self.state.update(cx, |state, _cx| {
@@ -457,22 +482,40 @@ impl RenderOnce for Input {
                         let state = input_state.read(cx);
                         let selected_range = state.selected_range.clone();
                         let cursor_offset = state.cursor_offset();
+                        let visual_lines = &state.precomputed_visual_lines;
 
                         visible_range
-                            .map(|visual_idx| WrappedLineElement {
-                                input: input_state.clone(),
-                                visual_line_index: visual_idx,
-                                text_color,
-                                placeholder_text_color,
-                                highlight_text_color,
-                                line_height,
-                                font_size,
-                                font: font.clone(),
-                                transform_text: transform_text.clone(),
-                                cursor_visible,
-                                selected_range: selected_range.clone(),
-                                cursor_offset,
-                                placeholder: placeholder.clone(),
+                            .map(|visual_idx| {
+                                // Get adjacent visual line offsets for corner radius computation
+                                let prev_visual_line_offsets = if visual_idx > 0 {
+                                    visual_lines
+                                        .get(visual_idx - 1)
+                                        .map(|info| (info.start_offset, info.end_offset))
+                                } else {
+                                    None
+                                };
+                                let next_visual_line_offsets = visual_lines
+                                    .get(visual_idx + 1)
+                                    .map(|info| (info.start_offset, info.end_offset));
+
+                                WrappedLineElement {
+                                    input: input_state.clone(),
+                                    visual_line_index: visual_idx,
+                                    text_color,
+                                    placeholder_text_color,
+                                    highlight_text_color,
+                                    line_height,
+                                    font_size,
+                                    font: font.clone(),
+                                    transform_text: transform_text.clone(),
+                                    cursor_visible,
+                                    selected_range: selected_range.clone(),
+                                    cursor_offset,
+                                    placeholder: placeholder.clone(),
+                                    selection_corner_radius,
+                                    prev_visual_line_offsets,
+                                    next_visual_line_offsets,
+                                }
                             })
                             .collect()
                     },
@@ -507,6 +550,7 @@ impl RenderOnce for Input {
                     font,
                     transform_text: self.transform_text,
                     cursor_visible,
+                    selection_corner_radius: self.selection_corner_radius,
                 })
             })
     }

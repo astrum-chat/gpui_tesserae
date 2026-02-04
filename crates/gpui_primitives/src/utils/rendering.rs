@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use gpui::{Bounds, Hsla, PaintQuad, Pixels, fill, point, px, size};
+use gpui::{BorderStyle, Bounds, Corners, Edges, Hsla, PaintQuad, Pixels, fill, point, px, size};
 
 /// Small epsilon used when comparing wrap widths to prevent janky text wrapping
 /// caused by floating point precision issues triggering unnecessary recomputes.
@@ -56,6 +56,104 @@ pub fn make_selection_quad(
         ),
         highlight_color,
     )
+}
+
+/// Creates a selection quad with custom corner radii for rounded selection rendering.
+pub fn make_selection_quad_rounded(
+    bounds: Bounds<Pixels>,
+    start_x: Pixels,
+    end_x: Pixels,
+    scroll_offset: Pixels,
+    highlight_color: Hsla,
+    corner_radii: Corners<Pixels>,
+) -> PaintQuad {
+    PaintQuad {
+        bounds: Bounds::from_corners(
+            point(bounds.left() + start_x - scroll_offset, bounds.top()),
+            point(bounds.left() + end_x - scroll_offset, bounds.bottom()),
+        ),
+        corner_radii,
+        background: highlight_color.into(),
+        border_widths: Edges::default(),
+        border_color: Hsla::transparent_black(),
+        border_style: BorderStyle::default(),
+    }
+}
+
+/// Computes which corners should be rounded based on adjacent line selection positions.
+///
+/// For multi-line selections, corners are rounded when they are at the outer edge
+/// of the selection shape. Inner corners (where the selection wraps to a new line)
+/// remain sharp to create a cohesive selection appearance.
+///
+/// - `this_start_x`: X-coordinate where selection starts on this line
+/// - `this_end_x`: X-coordinate where selection ends on this line
+/// - `prev_line`: Selection bounds (start_x, end_x) of the previous line, if any
+/// - `next_line`: Selection bounds (start_x, end_x) of the next line, if any
+/// - `radius`: The corner radius to apply
+pub fn compute_selection_corners(
+    this_start_x: Pixels,
+    this_end_x: Pixels,
+    prev_line: Option<(Pixels, Pixels)>,
+    next_line: Option<(Pixels, Pixels)>,
+    radius: Pixels,
+) -> Corners<Pixels> {
+    let zero = Pixels::ZERO;
+
+    // Top-left: rounded if first line OR this line starts at/before previous line's start
+    let top_left = match prev_line {
+        None => radius,
+        Some((prev_start, _)) => {
+            if this_start_x <= prev_start {
+                radius
+            } else {
+                zero
+            }
+        }
+    };
+
+    // Top-right: rounded if first line OR this line ends at/after previous line's end
+    let top_right = match prev_line {
+        None => radius,
+        Some((_, prev_end)) => {
+            if this_end_x >= prev_end {
+                radius
+            } else {
+                zero
+            }
+        }
+    };
+
+    // Bottom-left: rounded if last line OR this line starts at/before next line's start
+    let bottom_left = match next_line {
+        None => radius,
+        Some((next_start, _)) => {
+            if this_start_x <= next_start {
+                radius
+            } else {
+                zero
+            }
+        }
+    };
+
+    // Bottom-right: rounded if last line OR this line ends at/after next line's end
+    let bottom_right = match next_line {
+        None => radius,
+        Some((_, next_end)) => {
+            if this_end_x >= next_end {
+                radius
+            } else {
+                zero
+            }
+        }
+    };
+
+    Corners {
+        top_left,
+        top_right,
+        bottom_right,
+        bottom_left,
+    }
 }
 
 /// Determines if trailing whitespace should be shown in selection highlighting.

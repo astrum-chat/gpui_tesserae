@@ -8,7 +8,10 @@ use gpui::{
 
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
-use crate::utils::{WRAP_WIDTH_EPSILON, make_selection_quad, should_show_trailing_whitespace};
+use crate::utils::{
+    WRAP_WIDTH_EPSILON, compute_selection_corners, make_selection_quad,
+    make_selection_quad_rounded, should_show_trailing_whitespace,
+};
 
 fn create_text_run(font: Font, color: Hsla, len: usize) -> TextRun {
     TextRun {
@@ -21,9 +24,9 @@ fn create_text_run(font: Font, color: Hsla, len: usize) -> TextRun {
     }
 }
 
-fn compute_selection_quad(
+/// Computes the selection x-bounds (start_x, end_x) for a line if the selection intersects it.
+fn compute_selection_x_bounds(
     line: &ShapedLine,
-    bounds: Bounds<Pixels>,
     selected_range: &Range<usize>,
     line_start: usize,
     line_end: usize,
@@ -31,9 +34,8 @@ fn compute_selection_quad(
     font: &Font,
     font_size: Pixels,
     text_color: Hsla,
-    highlight_color: Hsla,
     window: &mut Window,
-) -> Option<PaintQuad> {
+) -> Option<(Pixels, Pixels)> {
     let selection_intersects = selected_range.start <= line_end && selected_range.end >= line_start;
 
     if selected_range.is_empty() || !selection_intersects {
@@ -58,13 +60,65 @@ fn compute_selection_quad(
         selection_end_x = selection_end_x + space_line.x_for_index(1);
     }
 
-    Some(make_selection_quad(
-        bounds,
-        selection_start_x,
-        selection_end_x,
-        Pixels::ZERO,
-        highlight_color,
-    ))
+    Some((selection_start_x, selection_end_x))
+}
+
+fn compute_selection_quad(
+    line: &ShapedLine,
+    bounds: Bounds<Pixels>,
+    selected_range: &Range<usize>,
+    line_start: usize,
+    line_end: usize,
+    is_select_all: bool,
+    font: &Font,
+    font_size: Pixels,
+    text_color: Hsla,
+    highlight_color: Hsla,
+    window: &mut Window,
+    corner_radius: Option<Pixels>,
+    prev_line_bounds: Option<(Pixels, Pixels)>,
+    next_line_bounds: Option<(Pixels, Pixels)>,
+) -> Option<PaintQuad> {
+    let Some((selection_start_x, selection_end_x)) = compute_selection_x_bounds(
+        line,
+        selected_range,
+        line_start,
+        line_end,
+        is_select_all,
+        font,
+        font_size,
+        text_color,
+        window,
+    ) else {
+        return None;
+    };
+
+    match corner_radius {
+        Some(radius) if radius > Pixels::ZERO => {
+            let corners = compute_selection_corners(
+                selection_start_x,
+                selection_end_x,
+                prev_line_bounds,
+                next_line_bounds,
+                radius,
+            );
+            Some(make_selection_quad_rounded(
+                bounds,
+                selection_start_x,
+                selection_end_x,
+                Pixels::ZERO,
+                highlight_color,
+                corners,
+            ))
+        }
+        _ => Some(make_selection_quad(
+            bounds,
+            selection_start_x,
+            selection_end_x,
+            Pixels::ZERO,
+            highlight_color,
+        )),
+    }
 }
 
 /// Renders one logical line in non-wrapped multiline mode.
@@ -81,6 +135,9 @@ pub(crate) struct LineElement {
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
     pub measured_width: Option<Pixels>,
+    pub selection_corner_radius: Option<Pixels>,
+    pub prev_line_offsets: Option<(usize, usize)>,
+    pub next_line_offsets: Option<(usize, usize)>,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -152,6 +209,53 @@ impl Element for LineElement {
             });
         }
 
+        // Compute adjacent line selection bounds for corner radius calculation
+        let (prev_line_bounds, next_line_bounds) = if self.selection_corner_radius.is_some() {
+            let prev_bounds = self.prev_line_offsets.and_then(|(start, end)| {
+                let content: String = full_value[start..end].to_string();
+                let run = create_text_run(self.font.clone(), self.text_color, content.len());
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(content.into(), self.font_size, &[run], None);
+                compute_selection_x_bounds(
+                    &shaped,
+                    &self.selected_range,
+                    start,
+                    end,
+                    self.is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
+
+            let next_bounds = self.next_line_offsets.and_then(|(start, end)| {
+                let content: String = full_value[start..end].to_string();
+                let run = create_text_run(self.font.clone(), self.text_color, content.len());
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(content.into(), self.font_size, &[run], None);
+                compute_selection_x_bounds(
+                    &shaped,
+                    &self.selected_range,
+                    start,
+                    end,
+                    self.is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
+
+            (prev_bounds, next_bounds)
+        } else {
+            (None, None)
+        };
+
         let selection = compute_selection_quad(
             &line,
             bounds,
@@ -164,6 +268,9 @@ impl Element for LineElement {
             self.text_color,
             self.highlight_text_color,
             window,
+            self.selection_corner_radius,
+            prev_line_bounds,
+            next_line_bounds,
         );
 
         LinePrepaintState {
@@ -222,6 +329,9 @@ pub(crate) struct WrappedLineElement {
     pub font: Font,
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
+    pub selection_corner_radius: Option<Pixels>,
+    pub prev_visual_line_offsets: Option<(usize, usize)>,
+    pub next_visual_line_offsets: Option<(usize, usize)>,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
@@ -294,6 +404,53 @@ impl Element for WrappedLineElement {
             .text_system()
             .shape_line(display_text, self.font_size, &[run], None);
 
+        // Compute adjacent line selection bounds for corner radius calculation
+        let (prev_line_bounds, next_line_bounds) = if self.selection_corner_radius.is_some() {
+            let prev_bounds = self.prev_visual_line_offsets.and_then(|(start, end)| {
+                let content: String = value[start..end].to_string();
+                let run = create_text_run(self.font.clone(), self.text_color, content.len());
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(content.into(), self.font_size, &[run], None);
+                compute_selection_x_bounds(
+                    &shaped,
+                    &self.selected_range,
+                    start,
+                    end,
+                    self.is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
+
+            let next_bounds = self.next_visual_line_offsets.and_then(|(start, end)| {
+                let content: String = value[start..end].to_string();
+                let run = create_text_run(self.font.clone(), self.text_color, content.len());
+                let shaped =
+                    window
+                        .text_system()
+                        .shape_line(content.into(), self.font_size, &[run], None);
+                compute_selection_x_bounds(
+                    &shaped,
+                    &self.selected_range,
+                    start,
+                    end,
+                    self.is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
+
+            (prev_bounds, next_bounds)
+        } else {
+            (None, None)
+        };
+
         let selection = compute_selection_quad(
             &line,
             bounds,
@@ -306,6 +463,9 @@ impl Element for WrappedLineElement {
             self.text_color,
             self.highlight_text_color,
             window,
+            self.selection_corner_radius,
+            prev_line_bounds,
+            next_line_bounds,
         );
 
         WrappedLinePrepaintState {
@@ -571,9 +731,9 @@ impl Element for UniformListElement {
 
             state.update(cx, |state, cx| {
                 if state.is_selecting {
-                    if let Some(line_height) = state.line_height {
-                        state.select_to_multiline(event.position, line_height, cx);
-                    }
+                    // Store position for deferred processing after visible_lines_info is populated
+                    state.pending_selection_position = Some(event.position);
+                    cx.notify();
                 }
             });
         });
@@ -587,6 +747,11 @@ impl Element for UniformListElement {
 
         self.state.update(cx, |state, _cx| {
             state.last_bounds = Some(bounds);
+        });
+
+        // Process pending selection after visible_lines_info is fully populated
+        self.state.update(cx, |state, cx| {
+            state.process_pending_selection(cx);
         });
     }
 }

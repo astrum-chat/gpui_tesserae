@@ -10,7 +10,71 @@ use crate::input::state::InputState;
 use crate::input::{
     TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
 };
-use crate::utils::{TextNavigation, make_cursor_quad, make_selection_quad};
+use crate::utils::{
+    TextNavigation, compute_selection_corners, make_cursor_quad, make_selection_quad,
+    make_selection_quad_rounded,
+};
+
+/// Helper function to compute selection x-bounds for a line.
+fn compute_line_selection_bounds(
+    full_value: &str,
+    line_start: usize,
+    line_end: usize,
+    selected_range: &Range<usize>,
+    is_select_all: bool,
+    font: &Font,
+    font_size: Pixels,
+    text_color: Hsla,
+    window: &mut Window,
+) -> Option<(Pixels, Pixels)> {
+    let selection_intersects = selected_range.start <= line_end && selected_range.end >= line_start;
+
+    if selected_range.is_empty() || !selection_intersects {
+        return None;
+    }
+
+    let line_content = &full_value[line_start..line_end];
+    let line_len = line_end - line_start;
+
+    let local_start = selected_range
+        .start
+        .saturating_sub(line_start)
+        .min(line_len);
+    let local_end = selected_range.end.saturating_sub(line_start).min(line_len);
+
+    let run = TextRun {
+        len: line_content.len(),
+        font: font.clone(),
+        color: text_color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line =
+        window
+            .text_system()
+            .shape_line(line_content.to_string().into(), font_size, &[run], None);
+
+    let selection_start_x = line.x_for_index(local_start);
+    let mut selection_end_x = line.x_for_index(local_end);
+
+    if should_show_trailing_whitespace(selected_range, line_end, is_select_all) {
+        let space_run = TextRun {
+            len: 1,
+            font: font.clone(),
+            color: text_color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let space_line = window
+            .text_system()
+            .shape_line(" ".into(), font_size, &[space_run], None);
+        selection_end_x = selection_end_x + space_line.x_for_index(1);
+    }
+
+    Some((selection_start_x, selection_end_x))
+}
 
 /// Handles text shaping, cursor positioning, selection rendering, and horizontal scrolling for single-line inputs.
 pub(crate) struct TextElement {
@@ -24,6 +88,7 @@ pub(crate) struct TextElement {
     pub font: Font,
     pub transform_text: Option<TransformTextFn>,
     pub cursor_visible: bool,
+    pub selection_corner_radius: Option<Pixels>,
 }
 
 pub(crate) struct PrepaintState {
@@ -153,16 +218,28 @@ impl Element for TextElement {
         } else {
             let selection_start_x = line.x_for_index(selected_range.start);
             let selection_end_x = line.x_for_index(selected_range.end);
-            (
-                Some(make_selection_quad(
+            let selection_quad = match self.selection_corner_radius {
+                Some(radius) if radius > Pixels::ZERO => {
+                    // Single-line: all 4 corners rounded
+                    let corners = gpui::Corners::all(radius);
+                    make_selection_quad_rounded(
+                        bounds,
+                        selection_start_x,
+                        selection_end_x,
+                        scroll_offset,
+                        self.highlight_text_color,
+                        corners,
+                    )
+                }
+                _ => make_selection_quad(
                     bounds,
                     selection_start_x,
                     selection_end_x,
                     scroll_offset,
                     self.highlight_text_color,
-                )),
-                None,
-            )
+                ),
+            };
+            (Some(selection_quad), None)
         };
 
         PrepaintState {
@@ -253,6 +330,9 @@ pub(crate) struct LineElement {
     pub selected_range: Range<usize>,
     pub cursor_offset: usize,
     pub placeholder: SharedString,
+    pub selection_corner_radius: Option<Pixels>,
+    pub prev_line_offsets: Option<(usize, usize)>,
+    pub next_line_offsets: Option<(usize, usize)>,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -444,16 +524,63 @@ impl Element for LineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
-            (
-                Some(make_selection_quad(
+            let selection_quad = match self.selection_corner_radius {
+                Some(radius) if radius > Pixels::ZERO => {
+                    // Compute adjacent line selection bounds
+                    let prev_line_bounds = self.prev_line_offsets.and_then(|(start, end)| {
+                        compute_line_selection_bounds(
+                            &full_value,
+                            start,
+                            end,
+                            &self.selected_range,
+                            is_select_all,
+                            &self.font,
+                            self.font_size,
+                            self.text_color,
+                            window,
+                        )
+                    });
+
+                    let next_line_bounds = self.next_line_offsets.and_then(|(start, end)| {
+                        compute_line_selection_bounds(
+                            &full_value,
+                            start,
+                            end,
+                            &self.selected_range,
+                            is_select_all,
+                            &self.font,
+                            self.font_size,
+                            self.text_color,
+                            window,
+                        )
+                    });
+
+                    let corners = compute_selection_corners(
+                        selection_start_x,
+                        selection_end_x,
+                        prev_line_bounds,
+                        next_line_bounds,
+                        radius,
+                    );
+                    make_selection_quad_rounded(
+                        bounds,
+                        selection_start_x,
+                        selection_end_x,
+                        scroll_offset,
+                        self.highlight_text_color,
+                        corners,
+                    )
+                }
+                _ => make_selection_quad(
                     bounds,
                     selection_start_x,
                     selection_end_x,
                     scroll_offset,
                     self.highlight_text_color,
-                )),
-                None,
-            )
+                ),
+            };
+
+            (Some(selection_quad), None)
         } else if let Some(local_cursor) = local_cursor {
             let cursor_pos = line.x_for_index(local_cursor);
             (
@@ -539,6 +666,9 @@ pub(crate) struct WrappedLineElement {
     pub selected_range: Range<usize>,
     pub cursor_offset: usize,
     pub placeholder: SharedString,
+    pub selection_corner_radius: Option<Pixels>,
+    pub prev_visual_line_offsets: Option<(usize, usize)>,
+    pub next_visual_line_offsets: Option<(usize, usize)>,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
@@ -685,6 +815,8 @@ impl Element for WrappedLineElement {
         let selection_intersects =
             self.selected_range.start <= line_end && self.selected_range.end >= line_start;
 
+        let is_select_all = input.is_select_all;
+
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             let local_start = self
                 .selected_range
@@ -700,8 +832,7 @@ impl Element for WrappedLineElement {
             let selection_start_x = line.x_for_index(local_start);
             let mut selection_end_x = line.x_for_index(local_end);
 
-            if should_show_trailing_whitespace(&self.selected_range, line_end, input.is_select_all)
-            {
+            if should_show_trailing_whitespace(&self.selected_range, line_end, is_select_all) {
                 let space_run = TextRun {
                     len: 1,
                     font: self.font.clone(),
@@ -717,16 +848,65 @@ impl Element for WrappedLineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
-            (
-                Some(make_selection_quad(
+            let selection_quad = match self.selection_corner_radius {
+                Some(radius) if radius > Pixels::ZERO => {
+                    // Compute adjacent line selection bounds
+                    let prev_line_bounds =
+                        self.prev_visual_line_offsets.and_then(|(start, end)| {
+                            compute_line_selection_bounds(
+                                &value,
+                                start,
+                                end,
+                                &self.selected_range,
+                                is_select_all,
+                                &self.font,
+                                self.font_size,
+                                self.text_color,
+                                window,
+                            )
+                        });
+
+                    let next_line_bounds =
+                        self.next_visual_line_offsets.and_then(|(start, end)| {
+                            compute_line_selection_bounds(
+                                &value,
+                                start,
+                                end,
+                                &self.selected_range,
+                                is_select_all,
+                                &self.font,
+                                self.font_size,
+                                self.text_color,
+                                window,
+                            )
+                        });
+
+                    let corners = compute_selection_corners(
+                        selection_start_x,
+                        selection_end_x,
+                        prev_line_bounds,
+                        next_line_bounds,
+                        radius,
+                    );
+                    make_selection_quad_rounded(
+                        bounds,
+                        selection_start_x,
+                        selection_end_x,
+                        Pixels::ZERO,
+                        self.highlight_text_color,
+                        corners,
+                    )
+                }
+                _ => make_selection_quad(
                     bounds,
                     selection_start_x,
                     selection_end_x,
                     Pixels::ZERO,
                     self.highlight_text_color,
-                )),
-                None,
-            )
+                ),
+            };
+
+            (Some(selection_quad), None)
         } else if let Some(local_cursor) = local_cursor {
             let cursor_pos = line.x_for_index(local_cursor);
             (

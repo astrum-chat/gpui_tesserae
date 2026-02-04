@@ -65,7 +65,8 @@ impl Render for ExampleApp {
                                         .text_color(rgb(0xcdd6f4))
                                         .text_size(px(16.))
                                         .line_height(px(24.))
-                                        .font_family("Geist"),
+                                        .font_family("Geist")
+                                        .selection_corner_radius(px(4.)),
                                     ),
                             ),
                         ),
