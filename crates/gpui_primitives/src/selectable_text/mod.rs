@@ -67,6 +67,7 @@ fn compute_wrap_width(
     // For auto-width: use cached container width if available (enables wrapping),
     // otherwise fall back to max_width or measured width
     // For fixed-width: use cached container width
+    // Add epsilon to avoid premature wrapping due to floating-point precision
     if user_wants_auto_width {
         // Prefer cached_wrap_width (actual container width) to enable wrapping
         // Only fall back to measured_width if no container constraint exists
@@ -74,10 +75,12 @@ fn compute_wrap_width(
             .or(max_width_px)
             .or(measured_width)
             .unwrap_or(Pixels::MAX);
-        max_width_px.map_or(width, |max_w| width.min(max_w))
+        let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
+        clamped + WRAP_WIDTH_EPSILON
     } else {
         let width = cached_wrap_width.or(max_width_px).unwrap_or(Pixels::MAX);
-        max_width_px.map_or(width, |max_w| width.min(max_w))
+        let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
+        clamped + WRAP_WIDTH_EPSILON
     }
 }
 
@@ -702,36 +705,36 @@ mod tests {
 
     #[test]
     fn test_wrap_width_auto_uses_cached_for_wrapping() {
-        // Auto-width uses cached container width to enable wrapping
+        // Auto-width uses cached container width to enable wrapping (plus epsilon)
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true);
-        assert_eq!(result, px(200.));
+        assert_eq!(result, px(200.) + WRAP_WIDTH_EPSILON);
     }
 
     #[test]
     fn test_wrap_width_auto_uses_max_when_no_cached() {
-        // Auto-width uses max_width when no cached width available
+        // Auto-width uses max_width when no cached width available (plus epsilon)
         let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true);
-        assert_eq!(result, px(300.));
+        assert_eq!(result, px(300.) + WRAP_WIDTH_EPSILON);
     }
 
     #[test]
     fn test_wrap_width_fixed_uses_cached() {
-        // Fixed-width uses cached container width
+        // Fixed-width uses cached container width (plus epsilon)
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false);
-        assert_eq!(result, px(200.));
+        assert_eq!(result, px(200.) + WRAP_WIDTH_EPSILON);
     }
 
     #[test]
     fn test_wrap_width_fixed_falls_back_to_max() {
-        // Fixed-width falls back to max_width when no cached
+        // Fixed-width falls back to max_width when no cached (plus epsilon)
         let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false);
-        assert_eq!(result, px(300.));
+        assert_eq!(result, px(300.) + WRAP_WIDTH_EPSILON);
     }
 
     #[test]
     fn test_wrap_width_defaults_to_max_when_nothing_available() {
         let result = compute_wrap_width(None, None, None, false);
-        assert_eq!(result, Pixels::MAX);
+        assert_eq!(result, Pixels::MAX + WRAP_WIDTH_EPSILON);
     }
 
     #[test]
