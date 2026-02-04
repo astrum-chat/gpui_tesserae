@@ -135,7 +135,7 @@ pub(crate) struct LineElement {
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
     pub measured_width: Option<Pixels>,
-    pub selection_corner_radius: Option<Pixels>,
+    pub selection_rounded: Option<Pixels>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
 }
@@ -210,7 +210,7 @@ impl Element for LineElement {
         }
 
         // Compute adjacent line selection bounds for corner radius calculation
-        let (prev_line_bounds, next_line_bounds) = if self.selection_corner_radius.is_some() {
+        let (prev_line_bounds, next_line_bounds) = if self.selection_rounded.is_some() {
             let prev_bounds = self.prev_line_offsets.and_then(|(start, end)| {
                 let content: String = full_value[start..end].to_string();
                 let run = create_text_run(self.font.clone(), self.text_color, content.len());
@@ -268,7 +268,7 @@ impl Element for LineElement {
             self.text_color,
             self.highlight_text_color,
             window,
-            self.selection_corner_radius,
+            self.selection_rounded,
             prev_line_bounds,
             next_line_bounds,
         );
@@ -329,7 +329,7 @@ pub(crate) struct WrappedLineElement {
     pub font: Font,
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
-    pub selection_corner_radius: Option<Pixels>,
+    pub selection_rounded: Option<Pixels>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
 }
@@ -405,7 +405,7 @@ impl Element for WrappedLineElement {
             .shape_line(display_text, self.font_size, &[run], None);
 
         // Compute adjacent line selection bounds for corner radius calculation
-        let (prev_line_bounds, next_line_bounds) = if self.selection_corner_radius.is_some() {
+        let (prev_line_bounds, next_line_bounds) = if self.selection_rounded.is_some() {
             let prev_bounds = self.prev_visual_line_offsets.and_then(|(start, end)| {
                 let content: String = value[start..end].to_string();
                 let run = create_text_run(self.font.clone(), self.text_color, content.len());
@@ -463,7 +463,7 @@ impl Element for WrappedLineElement {
             self.text_color,
             self.highlight_text_color,
             window,
-            self.selection_corner_radius,
+            self.selection_rounded,
             prev_line_bounds,
             next_line_bounds,
         );

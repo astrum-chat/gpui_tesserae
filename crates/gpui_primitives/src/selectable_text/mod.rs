@@ -92,7 +92,7 @@ pub struct SelectableText {
     line_clamp: usize,
     word_wrap: bool,
     selection_color: Option<Hsla>,
-    selection_corner_radius: Option<Pixels>,
+    selection_rounded: Option<Pixels>,
     debug_wrapping: bool,
     style: StyleRefinement,
 }
@@ -112,7 +112,7 @@ impl SelectableText {
             line_clamp: usize::MAX,
             word_wrap: true,
             selection_color: None,
-            selection_corner_radius: None,
+            selection_rounded: None,
             debug_wrapping: false,
             style: StyleRefinement::default(),
         }
@@ -141,8 +141,8 @@ impl SelectableText {
     /// When set to a value greater than 0, selection rectangles will have rounded
     /// corners. For multi-line selections, inner corners (where the selection wraps
     /// to a new line) will also be properly rounded based on adjacent line positions.
-    pub fn selection_corner_radius(mut self, radius: impl Into<Pixels>) -> Self {
-        self.selection_corner_radius = Some(radius.into());
+    pub fn selection_rounded(mut self, radius: impl Into<Pixels>) -> Self {
+        self.selection_rounded = Some(radius.into());
         self
     }
 
@@ -466,7 +466,7 @@ impl SelectableText {
         let line_height = params.line_height;
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
-        let selection_corner_radius = self.selection_corner_radius;
+        let selection_rounded = self.selection_rounded;
 
         let list = uniform_list(
             self.id.clone(),
@@ -504,7 +504,7 @@ impl SelectableText {
                             selected_range: selected_range.clone(),
                             is_select_all,
                             measured_width,
-                            selection_corner_radius,
+                            selection_rounded,
                             prev_line_offsets,
                             next_line_offsets,
                         }
@@ -563,7 +563,7 @@ impl SelectableText {
         let line_height = params.line_height;
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
-        let selection_corner_radius = self.selection_corner_radius;
+        let selection_rounded = self.selection_rounded;
 
         let wrap_width = compute_wrap_width(
             cached_wrap_width,
@@ -640,7 +640,7 @@ impl SelectableText {
                             font: font.clone(),
                             selected_range: selected_range.clone(),
                             is_select_all,
-                            selection_corner_radius,
+                            selection_rounded,
                             prev_visual_line_offsets,
                             next_visual_line_offsets,
                         }
