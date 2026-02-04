@@ -7,6 +7,8 @@ edition = "2024"
 gpui = { workspace = true }
 smallvec = { workspace = true }
 unicode-segmentation = { workspace = true }
+figma_squircle = "0.1"
+lyon = { version = "1.0.16", features = ["extra"] }
 
 [features]
 default = []

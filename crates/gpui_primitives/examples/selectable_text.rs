@@ -66,7 +66,8 @@ impl Render for ExampleApp {
                                         .text_size(px(16.))
                                         .line_height(px(24.))
                                         .font_family("Geist")
-                                        .selection_rounded(px(4.)),
+                                        .selection_rounded(px(4.))
+                                        .selection_rounded_smoothing(0.6),
                                     ),
                             ),
                         ),

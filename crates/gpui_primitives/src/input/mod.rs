@@ -50,6 +50,7 @@ pub struct Input {
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
     selection_rounded: Option<gpui::Pixels>,
+    selection_rounded_smoothing: Option<f32>,
     transform_text: Option<TransformTextFn>,
     map_text: Option<MapTextFn>,
     style: StyleRefinement,
@@ -77,6 +78,7 @@ impl Input {
             placeholder_text_color: None,
             selection_color: None,
             selection_rounded: None,
+            selection_rounded_smoothing: None,
             transform_text: None,
             map_text: None,
             style: StyleRefinement::default(),
@@ -176,6 +178,19 @@ impl Input {
     /// to a new line) will also be properly rounded based on adjacent line positions.
     pub fn selection_rounded(mut self, radius: impl Into<gpui::Pixels>) -> Self {
         self.selection_rounded = Some(radius.into());
+        self
+    }
+
+    /// Sets the corner smoothing for selection highlighting (squircle effect).
+    ///
+    /// A value of 0.0 uses standard rounded corners (fast path).
+    /// A value of 1.0 uses full Figma-style squircle smoothing.
+    /// Values in between provide intermediate smoothing.
+    ///
+    /// This only has an effect when `selection_rounded` is also set to a value > 0.
+    /// When smoothing is 0 or unset, the faster PaintQuad rendering path is used.
+    pub fn selection_rounded_smoothing(mut self, smoothing: f32) -> Self {
+        self.selection_rounded_smoothing = Some(smoothing.clamp(0.0, 1.0));
         self
     }
 
@@ -361,6 +376,7 @@ impl RenderOnce for Input {
                 let placeholder = self.placeholder.clone();
                 let line_clamp = self.line_clamp;
                 let selection_rounded = self.selection_rounded;
+                let selection_rounded_smoothing = self.selection_rounded_smoothing;
 
                 let needs_scroll = line_count > line_clamp;
 
@@ -411,6 +427,7 @@ impl RenderOnce for Input {
                                     cursor_offset,
                                     placeholder: placeholder.clone(),
                                     selection_rounded,
+                                    selection_rounded_smoothing,
                                     prev_line_offsets,
                                     next_line_offsets,
                                 }
@@ -445,6 +462,7 @@ impl RenderOnce for Input {
                 let placeholder = self.placeholder.clone();
                 let line_clamp = self.line_clamp;
                 let selection_rounded = self.selection_rounded;
+                let selection_rounded_smoothing = self.selection_rounded_smoothing;
 
                 let wrap_width = cached_wrap_width.unwrap_or(px(300.));
                 let visual_line_count = self.state.update(cx, |state, _cx| {
@@ -513,6 +531,7 @@ impl RenderOnce for Input {
                                     cursor_offset,
                                     placeholder: placeholder.clone(),
                                     selection_rounded,
+                                    selection_rounded_smoothing,
                                     prev_visual_line_offsets,
                                     next_visual_line_offsets,
                                 }
@@ -551,6 +570,7 @@ impl RenderOnce for Input {
                     transform_text: self.transform_text,
                     cursor_visible,
                     selection_rounded: self.selection_rounded,
+                    selection_rounded_smoothing: self.selection_rounded_smoothing,
                 })
             })
     }

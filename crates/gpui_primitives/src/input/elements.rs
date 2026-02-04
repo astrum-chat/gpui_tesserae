@@ -11,8 +11,8 @@ use crate::input::{
     TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
 };
 use crate::utils::{
-    TextNavigation, compute_selection_corners, make_cursor_quad, make_selection_quad,
-    make_selection_quad_rounded,
+    SelectionShape, TextNavigation, build_selection_shape, compute_selection_corners,
+    make_cursor_quad, selection_config_from_options,
 };
 
 /// Helper function to compute selection x-bounds for a line.
@@ -89,12 +89,13 @@ pub(crate) struct TextElement {
     pub transform_text: Option<TransformTextFn>,
     pub cursor_visible: bool,
     pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
 }
 
 pub(crate) struct PrepaintState {
     pub line: Option<ShapedLine>,
     pub cursor: Option<PaintQuad>,
-    pub selection: Option<PaintQuad>,
+    pub selection: Option<SelectionShape>,
     pub scroll_offset: Pixels,
 }
 
@@ -218,28 +219,23 @@ impl Element for TextElement {
         } else {
             let selection_start_x = line.x_for_index(selected_range.start);
             let selection_end_x = line.x_for_index(selected_range.end);
-            let selection_quad = match self.selection_rounded {
-                Some(radius) if radius > Pixels::ZERO => {
-                    // Single-line: all 4 corners rounded
-                    let corners = gpui::Corners::all(radius);
-                    make_selection_quad_rounded(
-                        bounds,
-                        selection_start_x,
-                        selection_end_x,
-                        scroll_offset,
-                        self.highlight_text_color,
-                        corners,
-                    )
-                }
-                _ => make_selection_quad(
-                    bounds,
-                    selection_start_x,
-                    selection_end_x,
-                    scroll_offset,
-                    self.highlight_text_color,
-                ),
-            };
-            (Some(selection_quad), None)
+
+            let config = selection_config_from_options(
+                self.selection_rounded,
+                self.selection_rounded_smoothing,
+            );
+            let corners = gpui::Corners::all(config.corner_radius);
+
+            let selection_shape = build_selection_shape(
+                bounds,
+                selection_start_x,
+                selection_end_x,
+                scroll_offset,
+                self.highlight_text_color,
+                &config,
+                corners,
+            );
+            (Some(selection_shape), None)
         };
 
         PrepaintState {
@@ -283,7 +279,7 @@ impl Element for TextElement {
 
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             if let Some(selection) = prepaint.selection.take() {
-                window.paint_quad(selection)
+                selection.paint(window);
             }
 
             let line = prepaint.line.take().unwrap();
@@ -331,6 +327,7 @@ pub(crate) struct LineElement {
     pub cursor_offset: usize,
     pub placeholder: SharedString,
     pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
 }
@@ -338,7 +335,7 @@ pub(crate) struct LineElement {
 pub(crate) struct LinePrepaintState {
     pub line: Option<ShapedLine>,
     pub cursor: Option<PaintQuad>,
-    pub selection: Option<PaintQuad>,
+    pub selection: Option<SelectionShape>,
     pub scroll_offset: Pixels,
 }
 
@@ -524,63 +521,59 @@ impl Element for LineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
-            let selection_quad = match self.selection_rounded {
-                Some(radius) if radius > Pixels::ZERO => {
-                    // Compute adjacent line selection bounds
-                    let prev_line_bounds = self.prev_line_offsets.and_then(|(start, end)| {
-                        compute_line_selection_bounds(
-                            &full_value,
-                            start,
-                            end,
-                            &self.selected_range,
-                            is_select_all,
-                            &self.font,
-                            self.font_size,
-                            self.text_color,
-                            window,
-                        )
-                    });
+            let config = selection_config_from_options(
+                self.selection_rounded,
+                self.selection_rounded_smoothing,
+            );
 
-                    let next_line_bounds = self.next_line_offsets.and_then(|(start, end)| {
-                        compute_line_selection_bounds(
-                            &full_value,
-                            start,
-                            end,
-                            &self.selected_range,
-                            is_select_all,
-                            &self.font,
-                            self.font_size,
-                            self.text_color,
-                            window,
-                        )
-                    });
+            // Compute adjacent line selection bounds for corner radius
+            let prev_line_bounds = self.prev_line_offsets.and_then(|(start, end)| {
+                compute_line_selection_bounds(
+                    &full_value,
+                    start,
+                    end,
+                    &self.selected_range,
+                    is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
 
-                    let corners = compute_selection_corners(
-                        selection_start_x,
-                        selection_end_x,
-                        prev_line_bounds,
-                        next_line_bounds,
-                        radius,
-                    );
-                    make_selection_quad_rounded(
-                        bounds,
-                        selection_start_x,
-                        selection_end_x,
-                        scroll_offset,
-                        self.highlight_text_color,
-                        corners,
-                    )
-                }
-                _ => make_selection_quad(
-                    bounds,
-                    selection_start_x,
-                    selection_end_x,
-                    scroll_offset,
-                    self.highlight_text_color,
-                ),
-            };
+            let next_line_bounds = self.next_line_offsets.and_then(|(start, end)| {
+                compute_line_selection_bounds(
+                    &full_value,
+                    start,
+                    end,
+                    &self.selected_range,
+                    is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
 
-            (Some(selection_quad), None)
+            let corners = compute_selection_corners(
+                selection_start_x,
+                selection_end_x,
+                prev_line_bounds,
+                next_line_bounds,
+                config.corner_radius,
+            );
+
+            let selection_shape = build_selection_shape(
+                bounds,
+                selection_start_x,
+                selection_end_x,
+                scroll_offset,
+                self.highlight_text_color,
+                &config,
+                corners,
+            );
+
+            (Some(selection_shape), None)
         } else if let Some(local_cursor) = local_cursor {
             let cursor_pos = line.x_for_index(local_cursor);
             (
@@ -627,7 +620,7 @@ impl Element for LineElement {
 
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             if let Some(selection) = prepaint.selection.take() {
-                window.paint_quad(selection)
+                selection.paint(window);
             }
 
             let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
@@ -667,6 +660,7 @@ pub(crate) struct WrappedLineElement {
     pub cursor_offset: usize,
     pub placeholder: SharedString,
     pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
 }
@@ -674,7 +668,7 @@ pub(crate) struct WrappedLineElement {
 pub(crate) struct WrappedLinePrepaintState {
     pub line: Option<ShapedLine>,
     pub cursor: Option<PaintQuad>,
-    pub selection: Option<PaintQuad>,
+    pub selection: Option<SelectionShape>,
 }
 
 impl IntoElement for WrappedLineElement {
@@ -848,65 +842,59 @@ impl Element for WrappedLineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
-            let selection_quad = match self.selection_rounded {
-                Some(radius) if radius > Pixels::ZERO => {
-                    // Compute adjacent line selection bounds
-                    let prev_line_bounds =
-                        self.prev_visual_line_offsets.and_then(|(start, end)| {
-                            compute_line_selection_bounds(
-                                &value,
-                                start,
-                                end,
-                                &self.selected_range,
-                                is_select_all,
-                                &self.font,
-                                self.font_size,
-                                self.text_color,
-                                window,
-                            )
-                        });
+            let config = selection_config_from_options(
+                self.selection_rounded,
+                self.selection_rounded_smoothing,
+            );
 
-                    let next_line_bounds =
-                        self.next_visual_line_offsets.and_then(|(start, end)| {
-                            compute_line_selection_bounds(
-                                &value,
-                                start,
-                                end,
-                                &self.selected_range,
-                                is_select_all,
-                                &self.font,
-                                self.font_size,
-                                self.text_color,
-                                window,
-                            )
-                        });
+            // Compute adjacent line selection bounds for corner radius
+            let prev_line_bounds = self.prev_visual_line_offsets.and_then(|(start, end)| {
+                compute_line_selection_bounds(
+                    &value,
+                    start,
+                    end,
+                    &self.selected_range,
+                    is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
 
-                    let corners = compute_selection_corners(
-                        selection_start_x,
-                        selection_end_x,
-                        prev_line_bounds,
-                        next_line_bounds,
-                        radius,
-                    );
-                    make_selection_quad_rounded(
-                        bounds,
-                        selection_start_x,
-                        selection_end_x,
-                        Pixels::ZERO,
-                        self.highlight_text_color,
-                        corners,
-                    )
-                }
-                _ => make_selection_quad(
-                    bounds,
-                    selection_start_x,
-                    selection_end_x,
-                    Pixels::ZERO,
-                    self.highlight_text_color,
-                ),
-            };
+            let next_line_bounds = self.next_visual_line_offsets.and_then(|(start, end)| {
+                compute_line_selection_bounds(
+                    &value,
+                    start,
+                    end,
+                    &self.selected_range,
+                    is_select_all,
+                    &self.font,
+                    self.font_size,
+                    self.text_color,
+                    window,
+                )
+            });
 
-            (Some(selection_quad), None)
+            let corners = compute_selection_corners(
+                selection_start_x,
+                selection_end_x,
+                prev_line_bounds,
+                next_line_bounds,
+                config.corner_radius,
+            );
+
+            let selection_shape = build_selection_shape(
+                bounds,
+                selection_start_x,
+                selection_end_x,
+                Pixels::ZERO,
+                self.highlight_text_color,
+                &config,
+                corners,
+            );
+
+            (Some(selection_shape), None)
         } else if let Some(local_cursor) = local_cursor {
             let cursor_pos = line.x_for_index(local_cursor);
             (
@@ -942,7 +930,7 @@ impl Element for WrappedLineElement {
         let focus_handle = self.input.read(cx).focus_handle.clone();
 
         if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
+            selection.paint(window);
         }
 
         let Some(line) = prepaint.line.take() else {

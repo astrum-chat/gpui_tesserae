@@ -93,6 +93,7 @@ pub struct SelectableText {
     word_wrap: bool,
     selection_color: Option<Hsla>,
     selection_rounded: Option<Pixels>,
+    selection_rounded_smoothing: Option<f32>,
     debug_wrapping: bool,
     style: StyleRefinement,
 }
@@ -113,6 +114,7 @@ impl SelectableText {
             word_wrap: true,
             selection_color: None,
             selection_rounded: None,
+            selection_rounded_smoothing: None,
             debug_wrapping: false,
             style: StyleRefinement::default(),
         }
@@ -143,6 +145,19 @@ impl SelectableText {
     /// to a new line) will also be properly rounded based on adjacent line positions.
     pub fn selection_rounded(mut self, radius: impl Into<Pixels>) -> Self {
         self.selection_rounded = Some(radius.into());
+        self
+    }
+
+    /// Sets the corner smoothing for selection highlighting (squircle effect).
+    ///
+    /// A value of 0.0 uses standard rounded corners (fast path).
+    /// A value of 1.0 uses full Figma-style squircle smoothing.
+    /// Values in between provide intermediate smoothing.
+    ///
+    /// This only has an effect when `selection_rounded` is also set to a value > 0.
+    /// When smoothing is 0 or unset, the faster PaintQuad rendering path is used.
+    pub fn selection_rounded_smoothing(mut self, smoothing: f32) -> Self {
+        self.selection_rounded_smoothing = Some(smoothing.clamp(0.0, 1.0));
         self
     }
 
@@ -467,6 +482,7 @@ impl SelectableText {
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
         let selection_rounded = self.selection_rounded;
+        let selection_rounded_smoothing = self.selection_rounded_smoothing;
 
         let list = uniform_list(
             self.id.clone(),
@@ -505,6 +521,7 @@ impl SelectableText {
                             is_select_all,
                             measured_width,
                             selection_rounded,
+                            selection_rounded_smoothing,
                             prev_line_offsets,
                             next_line_offsets,
                         }
@@ -564,6 +581,7 @@ impl SelectableText {
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
         let selection_rounded = self.selection_rounded;
+        let selection_rounded_smoothing = self.selection_rounded_smoothing;
 
         let wrap_width = compute_wrap_width(
             cached_wrap_width,
@@ -641,6 +659,7 @@ impl SelectableText {
                             selected_range: selected_range.clone(),
                             is_select_all,
                             selection_rounded,
+                            selection_rounded_smoothing,
                             prev_visual_line_offsets,
                             next_visual_line_offsets,
                         }

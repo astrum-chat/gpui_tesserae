@@ -2,15 +2,15 @@ use std::ops::Range;
 
 use gpui::{
     AnyElement, App, Bounds, DispatchPhase, Element, ElementId, Entity, Font, GlobalElementId,
-    Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine,
+    Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, Pixels, ShapedLine,
     SharedString, Style, TextRun, Window, point, relative,
 };
 
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
-    WRAP_WIDTH_EPSILON, compute_selection_corners, make_selection_quad,
-    make_selection_quad_rounded, should_show_trailing_whitespace,
+    SelectionShape, WRAP_WIDTH_EPSILON, build_selection_shape, compute_selection_corners,
+    selection_config_from_options, should_show_trailing_whitespace,
 };
 
 fn create_text_run(font: Font, color: Hsla, len: usize) -> TextRun {
@@ -63,7 +63,7 @@ fn compute_selection_x_bounds(
     Some((selection_start_x, selection_end_x))
 }
 
-fn compute_selection_quad(
+fn compute_selection_shape(
     line: &ShapedLine,
     bounds: Bounds<Pixels>,
     selected_range: &Range<usize>,
@@ -76,10 +76,11 @@ fn compute_selection_quad(
     highlight_color: Hsla,
     window: &mut Window,
     corner_radius: Option<Pixels>,
+    corner_smoothing: Option<f32>,
     prev_line_bounds: Option<(Pixels, Pixels)>,
     next_line_bounds: Option<(Pixels, Pixels)>,
-) -> Option<PaintQuad> {
-    let Some((selection_start_x, selection_end_x)) = compute_selection_x_bounds(
+) -> Option<SelectionShape> {
+    let (selection_start_x, selection_end_x) = compute_selection_x_bounds(
         line,
         selected_range,
         line_start,
@@ -89,36 +90,26 @@ fn compute_selection_quad(
         font_size,
         text_color,
         window,
-    ) else {
-        return None;
-    };
+    )?;
 
-    match corner_radius {
-        Some(radius) if radius > Pixels::ZERO => {
-            let corners = compute_selection_corners(
-                selection_start_x,
-                selection_end_x,
-                prev_line_bounds,
-                next_line_bounds,
-                radius,
-            );
-            Some(make_selection_quad_rounded(
-                bounds,
-                selection_start_x,
-                selection_end_x,
-                Pixels::ZERO,
-                highlight_color,
-                corners,
-            ))
-        }
-        _ => Some(make_selection_quad(
-            bounds,
-            selection_start_x,
-            selection_end_x,
-            Pixels::ZERO,
-            highlight_color,
-        )),
-    }
+    let config = selection_config_from_options(corner_radius, corner_smoothing);
+    let corners = compute_selection_corners(
+        selection_start_x,
+        selection_end_x,
+        prev_line_bounds,
+        next_line_bounds,
+        config.corner_radius,
+    );
+
+    Some(build_selection_shape(
+        bounds,
+        selection_start_x,
+        selection_end_x,
+        Pixels::ZERO,
+        highlight_color,
+        &config,
+        corners,
+    ))
 }
 
 /// Renders one logical line in non-wrapped multiline mode.
@@ -136,13 +127,14 @@ pub(crate) struct LineElement {
     pub is_select_all: bool,
     pub measured_width: Option<Pixels>,
     pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
 }
 
 pub(crate) struct LinePrepaintState {
     pub line: Option<ShapedLine>,
-    pub selection: Option<PaintQuad>,
+    pub selection: Option<SelectionShape>,
 }
 
 impl IntoElement for LineElement {
@@ -256,7 +248,7 @@ impl Element for LineElement {
             (None, None)
         };
 
-        let selection = compute_selection_quad(
+        let selection = compute_selection_shape(
             &line,
             bounds,
             &self.selected_range,
@@ -269,6 +261,7 @@ impl Element for LineElement {
             self.highlight_text_color,
             window,
             self.selection_rounded,
+            self.selection_rounded_smoothing,
             prev_line_bounds,
             next_line_bounds,
         );
@@ -301,7 +294,7 @@ impl Element for LineElement {
 
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             if let Some(selection) = prepaint.selection.take() {
-                window.paint_quad(selection)
+                selection.paint(window);
             }
 
             let text_origin = point(bounds.origin.x, bounds.origin.y);
@@ -330,13 +323,14 @@ pub(crate) struct WrappedLineElement {
     pub selected_range: Range<usize>,
     pub is_select_all: bool,
     pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
     pub line: Option<ShapedLine>,
-    pub selection: Option<PaintQuad>,
+    pub selection: Option<SelectionShape>,
 }
 
 impl IntoElement for WrappedLineElement {
@@ -451,7 +445,7 @@ impl Element for WrappedLineElement {
             (None, None)
         };
 
-        let selection = compute_selection_quad(
+        let selection = compute_selection_shape(
             &line,
             bounds,
             &self.selected_range,
@@ -464,6 +458,7 @@ impl Element for WrappedLineElement {
             self.highlight_text_color,
             window,
             self.selection_rounded,
+            self.selection_rounded_smoothing,
             prev_line_bounds,
             next_line_bounds,
         );
@@ -485,7 +480,7 @@ impl Element for WrappedLineElement {
         cx: &mut App,
     ) {
         if let Some(selection) = prepaint.selection.take() {
-            window.paint_quad(selection)
+            selection.paint(window);
         }
 
         let Some(line) = prepaint.line.take() else {

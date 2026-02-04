@@ -561,6 +561,7 @@ impl RenderOnce for Input {
                             .placeholder_text_color(secondary_text_color)
                             .selection_color(primary_accent_color.alpha(0.3))
                             .selection_rounded(px(4.))
+                            .selection_rounded_smoothing(1.)
                             .line_height(line_height)
                             .disabled(is_disabled),
                     )
