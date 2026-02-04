@@ -109,7 +109,7 @@ fn main() {
                     };
 
                     // Stream text in chunks of 4-8 characters with delay between chunks
-                    cx.spawn(async move |this, mut cx| {
+                    cx.spawn(async move |this, cx| {
                         let chars: Vec<char> = WRAPPED_TEXT.chars().collect();
                         let mut i = 0;
                         while i < chars.len() {
