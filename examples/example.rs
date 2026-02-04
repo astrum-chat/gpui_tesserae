@@ -107,7 +107,8 @@ impl Render for Main {
                 SelectableText::new("selectable-text", self.selectable_text_state.clone())
                     .w(px(400.))
                     .selection_color(selection_color)
-                    .selection_rounded(px(4.))
+                    .selection_rounded(px(6.))
+                    .selection_rounded_smoothing(1.)
             })
     }
 }
