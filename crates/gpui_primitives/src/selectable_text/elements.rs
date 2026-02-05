@@ -60,6 +60,12 @@ fn compute_selection_x_bounds(
         selection_end_x = selection_end_x + space_line.x_for_index(1);
     }
 
+    // A zero-width selection (e.g. selection ends exactly at the start of this line)
+    // has no visual presence and should not affect adjacent line corner rounding.
+    if selection_start_x == selection_end_x {
+        return None;
+    }
+
     Some((selection_start_x, selection_end_x))
 }
 
