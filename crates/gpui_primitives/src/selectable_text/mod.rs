@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use crate::extensions::WindowExt;
-use crate::utils::{TextNavigation, WIDTH_WRAP_BASE_MARGIN, multiline_height, rgb_a};
+use crate::utils::{TextNavigation, compute_margin, multiline_height, rgb_a};
 use elements::{LineElement, UniformListElement, WrappedLineElement};
 
 pub use state::{
@@ -28,8 +28,9 @@ fn compute_effective_width(
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
     whitespace_width: Pixels,
+    text_fits_single_line: bool,
 ) -> (Option<Pixels>, bool) {
-    let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+    let margin = compute_margin(whitespace_width, text_fits_single_line);
 
     if !user_wants_auto_width {
         return (None, false);
@@ -66,8 +67,9 @@ fn compute_wrap_width(
     max_width_px: Option<Pixels>,
     user_wants_auto_width: bool,
     whitespace_width: Pixels,
+    text_fits_single_line: bool,
 ) -> Pixels {
-    let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+    let margin = compute_margin(whitespace_width, text_fits_single_line);
 
     // When we have the actual container width from a previous prepaint (cached_wrap_width),
     // use it directly — it's already the precise available width. Adding margin would make
@@ -264,7 +266,7 @@ impl SelectableText {
             return;
         };
 
-        let margin = params.whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+        let margin = compute_margin(params.whitespace_width, params.text_fits_single_line);
         let auto_width = measured + margin;
 
         if params.is_wrapped && params.has_max_width_constraint {
@@ -285,6 +287,7 @@ struct WidthParams {
     max_width_px: Option<Pixels>,
     is_wrapped: bool,
     whitespace_width: Pixels,
+    text_fits_single_line: bool,
 }
 
 struct RenderParams {
@@ -387,13 +390,22 @@ impl RenderOnce for SelectableText {
             cx,
         );
 
-        let (container_width, cached_wrap_width, whitespace_width, focus_handle) = {
+        let (
+            container_width,
+            cached_wrap_width,
+            whitespace_width,
+            focus_handle,
+            line_count,
+            prev_visual_line_count,
+        ) = {
             let state = self.state.read(cx);
             (
                 state.measured_max_line_width,
                 state.cached_wrap_width,
                 state.whitespace_width.unwrap_or(gpui::px(0.)),
                 state.focus_handle.clone(),
+                state.line_count(),
+                state.precomputed_visual_lines.len(),
             )
         };
 
@@ -409,7 +421,20 @@ impl RenderOnce for SelectableText {
 
         let has_max_width_constraint = self.style.max_size.width.is_some();
 
-        let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+        // Text fits on a single line when there's only one logical line AND
+        // either word-wrap is off, or the previous frame rendered exactly 1
+        // visual line. Using the previous frame's visual line count is safe
+        // because reducing the margin (full → base) only shrinks the outer
+        // div by `whitespace_width`, and the wrap width comes from
+        // `cached_wrap_width` which shrinks proportionally — the text that
+        // fit before will still fit (measured < cached - whitespace, and
+        // cached ≈ measured + whitespace + base, so measured < measured + base).
+        // On the first render (prev_visual_line_count == 0), we conservatively
+        // use the full margin to avoid any first-frame issues.
+        let text_fits_single_line =
+            line_count <= 1 && (!self.word_wrap || prev_visual_line_count == 1);
+
+        let margin = compute_margin(whitespace_width, text_fits_single_line);
         let is_constrained = matches!(
             (cached_wrap_width, container_width),
             (Some(cached), Some(measured)) if measured + margin > cached
@@ -426,6 +451,7 @@ impl RenderOnce for SelectableText {
             max_width_px,
             is_wrapped: self.word_wrap,
             whitespace_width,
+            text_fits_single_line,
         };
 
         let base = div()
@@ -453,6 +479,7 @@ impl RenderOnce for SelectableText {
                 user_wants_auto_width,
                 has_max_width_constraint,
                 max_width_px,
+                text_fits_single_line,
                 window,
                 cx,
             )
@@ -587,7 +614,7 @@ impl SelectableText {
                 list.style().overflow.y = Some(Overflow::Hidden);
             }
             if let Some(width) = measured_width {
-                let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+                let margin = compute_margin(whitespace_width, line_count <= 1);
                 let auto_width = width + margin;
                 let clamped = max_width_px.map_or(auto_width, |max_w| auto_width.min(max_w));
                 list.style().size.width = Some(clamped.into());
@@ -614,6 +641,7 @@ impl SelectableText {
         user_wants_auto_width: bool,
         has_max_width_constraint: bool,
         max_width_px: Option<Pixels>,
+        text_fits_single_line: bool,
         window: &mut Window,
         cx: &mut App,
     ) -> gpui::Stateful<gpui::Div> {
@@ -643,6 +671,7 @@ impl SelectableText {
             max_width_px,
             user_wants_auto_width,
             whitespace_width,
+            text_fits_single_line,
         );
 
         let (effective_width, use_relative_width) = compute_effective_width(
@@ -652,6 +681,7 @@ impl SelectableText {
             measured_max_line_width,
             max_width_px,
             whitespace_width,
+            text_fits_single_line,
         );
 
         let visual_line_count = self.state.update(cx, |state, _cx| {
@@ -817,69 +847,84 @@ impl Focusable for SelectableText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::WIDTH_WRAP_BASE_MARGIN;
     use gpui::px;
 
     #[test]
     fn test_wrap_width_auto_uses_cached_directly() {
         // Auto-width uses cached container width directly (no margin — it's already precise)
-        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(0.));
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(0.), false);
         assert_eq!(result, px(200.));
     }
 
     #[test]
     fn test_wrap_width_auto_uses_max_when_no_cached() {
         // Auto-width uses max_width when no cached width available (plus margin for estimates)
-        let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true, px(0.));
+        let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true, px(0.), false);
         assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_fixed_uses_cached_directly() {
         // Fixed-width uses cached container width directly (no margin — it's already precise)
-        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false, px(0.));
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false, px(0.), false);
         assert_eq!(result, px(200.));
     }
 
     #[test]
     fn test_wrap_width_fixed_falls_back_to_max() {
         // Fixed-width falls back to max_width when no cached (plus margin for estimates)
-        let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false, px(0.));
+        let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false, px(0.), false);
         assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_defaults_to_max_when_nothing_available() {
-        let result = compute_wrap_width(None, None, None, false, px(0.));
+        let result = compute_wrap_width(None, None, None, false, px(0.), false);
         assert_eq!(result, Pixels::MAX + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_cached_ignores_whitespace_margin() {
         // When cached_wrap_width is available, whitespace margin is not added
-        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(8.));
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(8.), false);
         assert_eq!(result, px(200.));
     }
 
     #[test]
     fn test_effective_width_uses_relative_on_first_render_with_max_constraint() {
         let (width, use_relative) =
-            compute_effective_width(true, true, None, Some(px(400.)), None, px(0.));
+            compute_effective_width(true, true, None, Some(px(400.)), None, px(0.), false);
         assert_eq!(width, None);
         assert!(use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_auto_when_text_fits() {
-        let (width, use_relative) =
-            compute_effective_width(true, true, Some(px(500.)), Some(px(400.)), None, px(0.));
+        let (width, use_relative) = compute_effective_width(
+            true,
+            true,
+            Some(px(500.)),
+            Some(px(400.)),
+            None,
+            px(0.),
+            false,
+        );
         assert_eq!(width, Some(px(400.) + WIDTH_WRAP_BASE_MARGIN));
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_relative_when_text_exceeds_available() {
-        let (width, use_relative) =
-            compute_effective_width(true, true, Some(px(300.)), Some(px(400.)), None, px(0.));
+        let (width, use_relative) = compute_effective_width(
+            true,
+            true,
+            Some(px(300.)),
+            Some(px(400.)),
+            None,
+            px(0.),
+            false,
+        );
         assert_eq!(width, None);
         assert!(use_relative);
     }
@@ -887,14 +932,15 @@ mod tests {
     #[test]
     fn test_effective_width_uses_cached_when_no_measured() {
         let (width, use_relative) =
-            compute_effective_width(true, true, Some(px(300.)), None, None, px(0.));
+            compute_effective_width(true, true, Some(px(300.)), None, None, px(0.), false);
         assert_eq!(width, Some(px(300.)));
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_relative_when_nothing_available() {
-        let (width, use_relative) = compute_effective_width(true, true, None, None, None, px(0.));
+        let (width, use_relative) =
+            compute_effective_width(true, true, None, None, None, px(0.), false);
         assert_eq!(width, None);
         assert!(use_relative);
     }
@@ -902,15 +948,22 @@ mod tests {
     #[test]
     fn test_effective_width_uses_measured_when_no_max_constraint() {
         let (width, use_relative) =
-            compute_effective_width(true, false, None, Some(px(400.)), None, px(0.));
+            compute_effective_width(true, false, None, Some(px(400.)), None, px(0.), false);
         assert_eq!(width, Some(px(400.) + WIDTH_WRAP_BASE_MARGIN));
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_clamped_by_absolute_max_when_no_relative_constraint() {
-        let (width, use_relative) =
-            compute_effective_width(true, false, None, Some(px(400.)), Some(px(300.)), px(0.));
+        let (width, use_relative) = compute_effective_width(
+            true,
+            false,
+            None,
+            Some(px(400.)),
+            Some(px(300.)),
+            px(0.),
+            false,
+        );
         assert_eq!(width, Some(px(300.)));
         assert!(!use_relative);
     }
@@ -918,15 +971,62 @@ mod tests {
     #[test]
     fn test_effective_width_none_when_not_auto_width() {
         let (width, use_relative) =
-            compute_effective_width(false, false, None, Some(px(400.)), None, px(0.));
+            compute_effective_width(false, false, None, Some(px(400.)), None, px(0.), false);
         assert_eq!(width, None);
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_none_when_not_measured_yet_no_max_constraint() {
-        let (width, use_relative) = compute_effective_width(true, false, None, None, None, px(0.));
+        let (width, use_relative) =
+            compute_effective_width(true, false, None, None, None, px(0.), false);
         assert_eq!(width, None);
         assert!(!use_relative);
+    }
+
+    #[test]
+    fn test_compute_margin_multi_line_returns_full() {
+        // Multi-line text uses full whitespace + base margin
+        let result = compute_margin(px(8.), false);
+        assert_eq!(result, px(8.) + WIDTH_WRAP_BASE_MARGIN);
+    }
+
+    #[test]
+    fn test_compute_margin_single_line_returns_base_only() {
+        // Single-line text uses just the base margin (not whitespace + base)
+        let result = compute_margin(px(8.), true);
+        assert_eq!(result, WIDTH_WRAP_BASE_MARGIN);
+    }
+
+    #[test]
+    fn test_compute_margin_zero_whitespace_returns_base() {
+        // With zero whitespace, both paths return base margin
+        let result = compute_margin(px(0.), false);
+        assert_eq!(result, WIDTH_WRAP_BASE_MARGIN);
+    }
+
+    #[test]
+    fn test_wrap_width_single_line_uses_base_margin_only() {
+        // Single-line text: fallback estimate uses only base margin (not whitespace + base)
+        let result = compute_wrap_width(None, Some(px(200.)), Some(px(300.)), true, px(8.), true);
+        assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
+    }
+
+    #[test]
+    fn test_effective_width_single_line_uses_base_margin() {
+        // Single-line text with auto-width uses just base margin
+        let (width, use_relative) =
+            compute_effective_width(true, false, None, Some(px(400.)), None, px(8.), true);
+        assert_eq!(width, Some(px(400.) + WIDTH_WRAP_BASE_MARGIN));
+        assert!(!use_relative);
+    }
+
+    #[test]
+    fn test_effective_width_single_line_no_available_uses_base_margin() {
+        // Single-line with max constraint, no cached width — uses base margin in calculation
+        let (width, use_relative) =
+            compute_effective_width(true, true, None, Some(px(400.)), None, px(8.), true);
+        assert_eq!(width, None);
+        assert!(use_relative);
     }
 }
