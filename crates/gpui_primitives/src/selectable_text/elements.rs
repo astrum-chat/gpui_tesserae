@@ -3,121 +3,15 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, Bounds, DispatchPhase, Element, ElementId, Entity, Font, GlobalElementId,
     Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, Pixels, ShapedLine,
-    SharedString, Style, TextRun, Window, point, relative,
+    SharedString, Style, Window, point, relative,
 };
 
-use crate::extensions::WindowExt;
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
-    SelectionShape, WIDTH_WRAP_BASE_MARGIN, build_selection_shape, compute_selection_corners,
-    selection_config_from_options, should_show_trailing_whitespace,
+    SelectionShape, WIDTH_WRAP_BASE_MARGIN, compute_selection_shape, compute_selection_x_bounds,
+    create_text_run,
 };
-
-fn create_text_run(font: Font, color: Hsla, len: usize) -> TextRun {
-    TextRun {
-        len,
-        font,
-        color,
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    }
-}
-
-/// Computes the selection x-bounds (start_x, end_x) for a line if the selection intersects it.
-fn compute_selection_x_bounds(
-    line: &ShapedLine,
-    selected_range: &Range<usize>,
-    line_start: usize,
-    line_end: usize,
-    font: &Font,
-    font_size: Pixels,
-    text_color: Hsla,
-    window: &mut Window,
-) -> Option<(Pixels, Pixels)> {
-    let selection_intersects = selected_range.start <= line_end && selected_range.end >= line_start;
-
-    if selected_range.is_empty() || !selection_intersects {
-        return None;
-    }
-
-    let line_len = line_end - line_start;
-    let local_start = selected_range
-        .start
-        .saturating_sub(line_start)
-        .min(line_len);
-    let local_end = selected_range.end.saturating_sub(line_start).min(line_len);
-
-    let mut selection_start_x = line.x_for_index(local_start);
-    let mut selection_end_x = line.x_for_index(local_end);
-
-    if should_show_trailing_whitespace(selected_range, line_end) {
-        let space_run = create_text_run(font.clone(), text_color, 1);
-        let space_line = window
-            .text_system()
-            .shape_line(" ".into(), font_size, &[space_run], None);
-        selection_end_x = selection_end_x + space_line.x_for_index(1);
-    }
-
-    selection_start_x = window.round(selection_start_x);
-    selection_end_x = window.round(selection_end_x);
-
-    // A zero-width selection (e.g. selection ends exactly at the start of this line)
-    // has no visual presence and should not affect adjacent line corner rounding.
-    if selection_start_x == selection_end_x {
-        return None;
-    }
-
-    Some((selection_start_x, selection_end_x))
-}
-
-fn compute_selection_shape(
-    line: &ShapedLine,
-    bounds: Bounds<Pixels>,
-    selected_range: &Range<usize>,
-    line_start: usize,
-    line_end: usize,
-    font: &Font,
-    font_size: Pixels,
-    text_color: Hsla,
-    highlight_color: Hsla,
-    window: &mut Window,
-    corner_radius: Option<Pixels>,
-    corner_smoothing: Option<f32>,
-    prev_line_bounds: Option<(Pixels, Pixels)>,
-    next_line_bounds: Option<(Pixels, Pixels)>,
-) -> Option<SelectionShape> {
-    let (selection_start_x, selection_end_x) = compute_selection_x_bounds(
-        line,
-        selected_range,
-        line_start,
-        line_end,
-        font,
-        font_size,
-        text_color,
-        window,
-    )?;
-
-    let config = selection_config_from_options(corner_radius, corner_smoothing);
-    let corners = compute_selection_corners(
-        selection_start_x,
-        selection_end_x,
-        prev_line_bounds,
-        next_line_bounds,
-        config.corner_radius,
-    );
-
-    Some(build_selection_shape(
-        bounds,
-        selection_start_x,
-        selection_end_x,
-        Pixels::ZERO,
-        highlight_color,
-        &config,
-        corners,
-    ))
-}
 
 /// Renders one logical line in non-wrapped multiline mode.
 pub(crate) struct LineElement {
@@ -262,6 +156,7 @@ impl Element for LineElement {
             self.font_size,
             self.text_color,
             self.highlight_text_color,
+            Pixels::ZERO,
             window,
             self.selection_rounded,
             self.selection_rounded_smoothing,
@@ -455,6 +350,7 @@ impl Element for WrappedLineElement {
             self.font_size,
             self.text_color,
             self.highlight_text_color,
+            Pixels::ZERO,
             window,
             self.selection_rounded,
             self.selection_rounded_smoothing,

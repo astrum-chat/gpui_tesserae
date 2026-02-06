@@ -8,16 +8,14 @@ use gpui::{
 
 use crate::extensions::WindowExt;
 use crate::input::state::InputState;
-use crate::input::{
-    TransformTextFn, VisibleLineInfo, WIDTH_WRAP_BASE_MARGIN, should_show_trailing_whitespace,
-};
+use crate::input::{TransformTextFn, VisibleLineInfo, WIDTH_WRAP_BASE_MARGIN};
 use crate::utils::{
-    SelectionShape, TextNavigation, build_selection_shape, compute_selection_corners,
-    make_cursor_quad, selection_config_from_options,
+    SelectionShape, TextNavigation, build_selection_shape, compute_selection_shape,
+    compute_selection_x_bounds, create_text_run, make_cursor_quad, selection_config_from_options,
 };
 
-/// Helper function to compute selection x-bounds for a line.
-fn compute_line_selection_bounds(
+/// Helper: shapes a line from text slice, then computes selection x-bounds via shared util.
+fn shape_and_compute_selection_bounds(
     full_value: &str,
     line_start: usize,
     line_end: usize,
@@ -27,56 +25,22 @@ fn compute_line_selection_bounds(
     text_color: Hsla,
     window: &mut Window,
 ) -> Option<(Pixels, Pixels)> {
-    let selection_intersects = selected_range.start <= line_end && selected_range.end >= line_start;
-
-    if selected_range.is_empty() || !selection_intersects {
-        return None;
-    }
-
     let line_content = &full_value[line_start..line_end];
-    let line_len = line_end - line_start;
-
-    let local_start = selected_range
-        .start
-        .saturating_sub(line_start)
-        .min(line_len);
-    let local_end = selected_range.end.saturating_sub(line_start).min(line_len);
-
-    let run = TextRun {
-        len: line_content.len(),
-        font: font.clone(),
-        color: text_color,
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    };
-    let line =
+    let run = create_text_run(font.clone(), text_color, line_content.len());
+    let shaped =
         window
             .text_system()
             .shape_line(line_content.to_string().into(), font_size, &[run], None);
-
-    let mut selection_start_x = line.x_for_index(local_start);
-    let mut selection_end_x = line.x_for_index(local_end);
-
-    if should_show_trailing_whitespace(selected_range, line_end) {
-        let space_run = TextRun {
-            len: 1,
-            font: font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let space_line = window
-            .text_system()
-            .shape_line(" ".into(), font_size, &[space_run], None);
-        selection_end_x = selection_end_x + space_line.x_for_index(1);
-    }
-
-    selection_start_x = window.round(selection_start_x);
-    selection_end_x = window.round(selection_end_x);
-
-    Some((selection_start_x, selection_end_x))
+    compute_selection_x_bounds(
+        &shaped,
+        selected_range,
+        line_start,
+        line_end,
+        font,
+        font_size,
+        text_color,
+        window,
+    )
 }
 
 /// Handles text shaping, cursor positioning, selection rendering, and horizontal scrolling for single-line inputs.
@@ -159,14 +123,7 @@ impl Element for TextElement {
             (content, self.text_color)
         };
 
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        let run = create_text_run(self.font.clone(), text_color, display_text.len());
 
         let runs = if let Some(marked_range) = marked_range.as_ref() {
             vec![
@@ -418,14 +375,7 @@ impl Element for LineElement {
                 (line_content.clone().into(), self.text_color)
             };
 
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        let run = create_text_run(self.font.clone(), text_color, display_text.len());
 
         let line = window
             .text_system()
@@ -460,14 +410,11 @@ impl Element for LineElement {
                     let cursor_line_content: String =
                         input.value()[cursor_line_start..cursor_line_end].to_string();
 
-                    let cursor_run = TextRun {
-                        len: cursor_line_content.len(),
-                        font: self.font.clone(),
-                        color: self.text_color,
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    };
+                    let cursor_run = create_text_run(
+                        self.font.clone(),
+                        self.text_color,
+                        cursor_line_content.len(),
+                    );
                     let cursor_line_shaped = window.text_system().shape_line(
                         cursor_line_content.into(),
                         self.font_size,
@@ -489,47 +436,9 @@ impl Element for LineElement {
         };
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            let local_start = self
-                .selected_range
-                .start
-                .saturating_sub(self.line_start_offset)
-                .min(line_content.len());
-            let local_end = self
-                .selected_range
-                .end
-                .saturating_sub(self.line_start_offset)
-                .min(line_content.len());
-
-            let mut selection_start_x = line.x_for_index(local_start);
-            let mut selection_end_x = line.x_for_index(local_end);
-
-            if should_show_trailing_whitespace(&self.selected_range, self.line_end_offset) {
-                let space_run = TextRun {
-                    len: 1,
-                    font: self.font.clone(),
-                    color: self.text_color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let space_line =
-                    window
-                        .text_system()
-                        .shape_line(" ".into(), self.font_size, &[space_run], None);
-                selection_end_x = selection_end_x + space_line.x_for_index(1);
-            }
-
-            selection_start_x = window.round(selection_start_x);
-            selection_end_x = window.round(selection_end_x);
-
-            let config = selection_config_from_options(
-                self.selection_rounded,
-                self.selection_rounded_smoothing,
-            );
-
             // Compute adjacent line selection bounds for corner radius
             let prev_line_bounds = self.prev_line_offsets.and_then(|(start, end)| {
-                compute_line_selection_bounds(
+                shape_and_compute_selection_bounds(
                     &full_value,
                     start,
                     end,
@@ -542,7 +451,7 @@ impl Element for LineElement {
             });
 
             let next_line_bounds = self.next_line_offsets.and_then(|(start, end)| {
-                compute_line_selection_bounds(
+                shape_and_compute_selection_bounds(
                     &full_value,
                     start,
                     end,
@@ -554,25 +463,25 @@ impl Element for LineElement {
                 )
             });
 
-            let corners = compute_selection_corners(
-                selection_start_x,
-                selection_end_x,
+            let selection_shape = compute_selection_shape(
+                &line,
+                bounds,
+                &self.selected_range,
+                self.line_start_offset,
+                self.line_end_offset,
+                &self.font,
+                self.font_size,
+                self.text_color,
+                self.highlight_text_color,
+                scroll_offset,
+                window,
+                self.selection_rounded,
+                self.selection_rounded_smoothing,
                 prev_line_bounds,
                 next_line_bounds,
-                config.corner_radius,
             );
 
-            let selection_shape = build_selection_shape(
-                bounds,
-                selection_start_x,
-                selection_end_x,
-                scroll_offset,
-                self.highlight_text_color,
-                &config,
-                corners,
-            );
-
-            (Some(selection_shape), None)
+            (selection_shape, None)
         } else if let Some(local_cursor) = local_cursor {
             let cursor_pos = line.x_for_index(local_cursor);
             (
@@ -779,14 +688,7 @@ impl Element for WrappedLineElement {
                 (text, self.text_color)
             };
 
-        let run = TextRun {
-            len: display_text.len(),
-            font: self.font.clone(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        let run = create_text_run(self.font.clone(), text_color, display_text.len());
 
         let line = window
             .text_system()
@@ -794,8 +696,6 @@ impl Element for WrappedLineElement {
 
         let line_start = info.start_offset;
         let line_end = info.end_offset;
-        let line_len = line_end - line_start;
-
         let cursor_on_this_line =
             self.cursor_offset >= line_start && self.cursor_offset <= line_end;
 
@@ -809,47 +709,9 @@ impl Element for WrappedLineElement {
             self.selected_range.start <= line_end && self.selected_range.end >= line_start;
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            let local_start = self
-                .selected_range
-                .start
-                .saturating_sub(line_start)
-                .min(line_len);
-            let local_end = self
-                .selected_range
-                .end
-                .saturating_sub(line_start)
-                .min(line_len);
-
-            let mut selection_start_x = line.x_for_index(local_start);
-            let mut selection_end_x = line.x_for_index(local_end);
-
-            if should_show_trailing_whitespace(&self.selected_range, line_end) {
-                let space_run = TextRun {
-                    len: 1,
-                    font: self.font.clone(),
-                    color: self.text_color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                };
-                let space_line =
-                    window
-                        .text_system()
-                        .shape_line(" ".into(), self.font_size, &[space_run], None);
-                selection_end_x = selection_end_x + space_line.x_for_index(1);
-            }
-
-            selection_start_x = window.round(selection_start_x);
-            selection_end_x = window.round(selection_end_x);
-
-            let config = selection_config_from_options(
-                self.selection_rounded,
-                self.selection_rounded_smoothing,
-            );
-
             // Compute adjacent line selection bounds for corner radius
             let prev_line_bounds = self.prev_visual_line_offsets.and_then(|(start, end)| {
-                compute_line_selection_bounds(
+                shape_and_compute_selection_bounds(
                     &value,
                     start,
                     end,
@@ -862,7 +724,7 @@ impl Element for WrappedLineElement {
             });
 
             let next_line_bounds = self.next_visual_line_offsets.and_then(|(start, end)| {
-                compute_line_selection_bounds(
+                shape_and_compute_selection_bounds(
                     &value,
                     start,
                     end,
@@ -874,25 +736,25 @@ impl Element for WrappedLineElement {
                 )
             });
 
-            let corners = compute_selection_corners(
-                selection_start_x,
-                selection_end_x,
+            let selection_shape = compute_selection_shape(
+                &line,
+                bounds,
+                &self.selected_range,
+                line_start,
+                line_end,
+                &self.font,
+                self.font_size,
+                self.text_color,
+                self.highlight_text_color,
+                Pixels::ZERO,
+                window,
+                self.selection_rounded,
+                self.selection_rounded_smoothing,
                 prev_line_bounds,
                 next_line_bounds,
-                config.corner_radius,
             );
 
-            let selection_shape = build_selection_shape(
-                bounds,
-                selection_start_x,
-                selection_end_x,
-                Pixels::ZERO,
-                self.highlight_text_color,
-                &config,
-                corners,
-            );
-
-            (Some(selection_shape), None)
+            (selection_shape, None)
         } else if let Some(local_cursor) = local_cursor {
             let cursor_pos = line.x_for_index(local_cursor);
             (

@@ -21,7 +21,6 @@ use crate::utils::{TextNavigation, multiline_height, rgb_a};
 use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
 
 pub(crate) use crate::utils::WIDTH_WRAP_BASE_MARGIN;
-pub(crate) use crate::utils::should_show_trailing_whitespace;
 pub use cursor_blink::CursorBlink;
 pub use state::{
     Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,

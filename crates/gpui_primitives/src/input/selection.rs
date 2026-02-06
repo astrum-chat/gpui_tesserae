@@ -33,16 +33,11 @@ impl InputState {
     }
 
     fn select_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
-        if self.selection_reversed {
-            self.selected_range.start = offset
-        } else {
-            self.selected_range.end = offset
-        };
-
-        if self.selected_range.end < self.selected_range.start {
-            self.selection_reversed = !self.selection_reversed;
-            self.selected_range = self.selected_range.end..self.selected_range.start;
-        }
+        crate::utils::apply_selection_change(
+            &mut self.selected_range,
+            &mut self.selection_reversed,
+            offset,
+        );
 
         if scroll {
             // Ensure cursor remains visible when selecting
@@ -131,140 +126,21 @@ impl InputState {
         position: Point<Pixels>,
         line_height: Pixels,
     ) -> usize {
-        let value = self.value();
-        if value.is_empty() {
+        if self.value().is_empty() {
             return 0;
         }
-
-        if !self.visible_lines_info.is_empty() {
-            for info in &self.visible_lines_info {
-                if info.bounds.contains(&position) {
-                    let local_x = if self.is_wrapped {
-                        position.x - info.bounds.left()
-                    } else {
-                        position.x - info.bounds.left() + self.horizontal_scroll_offset
-                    };
-                    let local_index = info.shaped_line.closest_index_for_x(local_x);
-
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(info.line_index)
-                        {
-                            return visual_info.start_offset + local_index;
-                        }
-                    }
-                    let line_start = self.line_start_offset(info.line_index);
-                    return line_start + local_index;
-                }
-            }
-
-            if let Some(first) = self.visible_lines_info.first() {
-                if position.y < first.bounds.top() {
-                    let local_x = if self.is_wrapped {
-                        position.x - first.bounds.left()
-                    } else {
-                        position.x - first.bounds.left() + self.horizontal_scroll_offset
-                    };
-                    let local_index = first.shaped_line.closest_index_for_x(local_x);
-
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(first.line_index)
-                        {
-                            if position.x < first.bounds.left() {
-                                return visual_info.start_offset;
-                            }
-                            return visual_info.start_offset + local_index;
-                        }
-                    }
-                    let line_start = self.line_start_offset(first.line_index);
-                    if position.x < first.bounds.left() {
-                        return line_start;
-                    }
-                    return line_start + local_index;
-                }
-            }
-
-            if let Some(last) = self.visible_lines_info.last() {
-                if position.y >= last.bounds.bottom() {
-                    let local_x = if self.is_wrapped {
-                        position.x - last.bounds.left()
-                    } else {
-                        position.x - last.bounds.left() + self.horizontal_scroll_offset
-                    };
-                    let local_index = last.shaped_line.closest_index_for_x(local_x);
-
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(last.line_index)
-                        {
-                            if position.x > last.bounds.right() {
-                                return visual_info.end_offset;
-                            }
-                            return visual_info.start_offset + local_index;
-                        }
-                    }
-                    let line_start = self.line_start_offset(last.line_index);
-                    let line_end = self.line_end_offset(last.line_index);
-                    if position.x > last.bounds.right() {
-                        return line_end;
-                    }
-                    return line_start + local_index;
-                }
-            }
-
-            for info in &self.visible_lines_info {
-                if position.y >= info.bounds.top() && position.y < info.bounds.bottom() {
-                    if self.is_wrapped {
-                        if let Some(visual_info) =
-                            self.precomputed_visual_lines.get(info.line_index)
-                        {
-                            if position.x < info.bounds.left() {
-                                return visual_info.start_offset;
-                            }
-                            if position.x > info.bounds.right() {
-                                return visual_info.end_offset;
-                            }
-                        }
-                    } else {
-                        let line_start = self.line_start_offset(info.line_index);
-                        let line_end = self.line_end_offset(info.line_index);
-                        if position.x < info.bounds.left() {
-                            return line_start;
-                        }
-                        if position.x > info.bounds.right() {
-                            return line_end;
-                        }
-                    }
-                }
-            }
-        }
-
-        let Some(bounds) = self.last_bounds.as_ref() else {
-            return 0;
-        };
-
-        let relative_y = position.y - bounds.top();
-        let visible_line_index = if relative_y < gpui::px(0.) {
-            0
-        } else {
-            (relative_y / line_height).floor() as usize
-        };
-
-        let line_index = visible_line_index;
-
-        if self.is_wrapped {
-            let visual_line_count = self.precomputed_visual_lines.len();
-            let clamped_visual_line = line_index.min(visual_line_count.saturating_sub(1));
-            if let Some(visual_info) = self.precomputed_visual_lines.get(clamped_visual_line) {
-                return visual_info.start_offset;
-            }
-        }
-
-        let line_count = self.line_count();
-        let clamped_line = line_index.min(line_count.saturating_sub(1));
-
-        self.line_start_offset(clamped_line)
+        crate::utils::index_for_multiline_position(
+            position,
+            line_height,
+            self.is_wrapped,
+            self.horizontal_scroll_offset,
+            &self.visible_lines_info,
+            &self.precomputed_visual_lines,
+            self.last_bounds.as_ref(),
+            |idx| self.line_start_offset(idx),
+            |idx| self.line_end_offset(idx),
+            || self.line_count(),
+        )
     }
 
     /// Handles mouse down: starts selection, supports click/double-click/triple-click and shift-extend.

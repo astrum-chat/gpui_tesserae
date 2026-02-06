@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use gpui::{
     App, AppContext as _, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
-    Focusable, Font, Hsla, IntoElement, Pixels, Render, ScrollStrategy, ScrollWheelEvent,
-    ShapedLine, SharedString, TextRun, UTF16Selection, UniformListScrollHandle, Window,
-    WrappedLine, div, point, px,
+    Focusable, Font, Hsla, IntoElement, Pixels, Render, ScrollWheelEvent, ShapedLine, SharedString,
+    UTF16Selection, UniformListScrollHandle, Window, WrappedLine, div, point, px,
 };
 
 use crate::input::CursorBlink;
@@ -243,91 +242,17 @@ impl InputState {
     ) -> usize {
         let text = self.value();
 
-        // Update cache and track width used for this computation
+        // Input-specific: update cached wrap width
         self.cached_wrap_width = Some(width);
         self.precomputed_at_width = Some(width);
 
-        // Clear previous data
-        self.precomputed_visual_lines.clear();
-        self.precomputed_wrapped_lines.clear();
+        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+            &text, width, font_size, font, text_color, window,
+        );
 
-        if text.is_empty() {
-            // For empty text, create one visual line for placeholder
-            self.precomputed_visual_lines.push(VisualLineInfo {
-                start_offset: 0,
-                end_offset: 0,
-                wrapped_line_index: 0,
-                visual_index_in_wrapped: 0,
-            });
-            return 1;
-        }
+        self.precomputed_visual_lines = visual_lines;
+        self.precomputed_wrapped_lines = wrapped_lines;
 
-        // Shape text with wrapping using the passed font_size and font
-        let run = TextRun {
-            len: text.len(),
-            font,
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-
-        let wrapped_lines = window
-            .text_system()
-            .shape_text(text.clone(), font_size, &[run], Some(width), None)
-            .unwrap_or_default();
-
-        // Build visual line info from wrap boundaries
-        let mut text_offset = 0;
-
-        for (wrapped_idx, wrapped_line) in wrapped_lines.iter().enumerate() {
-            let line_len = wrapped_line.len();
-            let wrap_boundaries = &wrapped_line.wrap_boundaries;
-
-            if wrap_boundaries.is_empty() {
-                // No wrapping within this line
-                self.precomputed_visual_lines.push(VisualLineInfo {
-                    start_offset: text_offset,
-                    end_offset: text_offset + line_len,
-                    wrapped_line_index: wrapped_idx,
-                    visual_index_in_wrapped: 0,
-                });
-            } else {
-                // Line has wrap boundaries - create visual line for each segment
-                // Note: boundary.glyph_ix is the glyph index, not byte offset.
-                // We need to get the actual byte offset from glyph.index
-                let mut segment_start = 0;
-                for (visual_idx, boundary) in wrap_boundaries.iter().enumerate() {
-                    // Get the actual byte offset from the glyph structure
-                    let run = &wrapped_line.unwrapped_layout.runs[boundary.run_ix];
-                    let glyph = &run.glyphs[boundary.glyph_ix];
-                    let segment_end = glyph.index;
-
-                    self.precomputed_visual_lines.push(VisualLineInfo {
-                        start_offset: text_offset + segment_start,
-                        end_offset: text_offset + segment_end,
-                        wrapped_line_index: wrapped_idx,
-                        visual_index_in_wrapped: visual_idx,
-                    });
-                    segment_start = segment_end;
-                }
-                // Add final segment after last wrap boundary
-                self.precomputed_visual_lines.push(VisualLineInfo {
-                    start_offset: text_offset + segment_start,
-                    end_offset: text_offset + line_len,
-                    wrapped_line_index: wrapped_idx,
-                    visual_index_in_wrapped: wrap_boundaries.len(),
-                });
-            }
-
-            // Account for newline character between logical lines
-            text_offset += line_len + 1;
-        }
-
-        // Store the wrapped lines for rendering
-        self.precomputed_wrapped_lines = wrapped_lines.into_vec();
-
-        // Handle deferred scroll now that visual lines are computed
         if self.scroll_to_cursor_on_next_render {
             self.scroll_to_cursor_on_next_render = false;
             self.ensure_cursor_visible();
@@ -337,33 +262,16 @@ impl InputState {
     }
 
     /// Ensure the cursor is visible by scrolling if necessary.
-    /// Uses uniform_list scroll handle for both wrapped and non-wrapped modes.
     pub fn ensure_cursor_visible(&mut self) {
-        let cursor_offset = self.cursor_offset();
-
-        let (target_line, total_lines) = if self.is_wrapped {
-            // For wrapped mode, find which visual line the cursor is on
-            let visual_line = self
-                .precomputed_visual_lines
-                .iter()
-                .position(|info| {
-                    cursor_offset >= info.start_offset && cursor_offset <= info.end_offset
-                })
-                .unwrap_or(0);
-            (visual_line, self.precomputed_visual_lines.len())
-        } else {
-            // For non-wrapped mode, use logical line
-            let cursor_line = self.offset_to_line_col(cursor_offset).0;
-            (cursor_line, self.line_count())
-        };
-
-        // Only scroll if there's actually content that could need scrolling
-        // (more lines than line_clamp). Otherwise, scrolling can cause
-        // unnecessary visual shifts.
-        if total_lines > self.line_clamp {
-            self.scroll_handle
-                .scroll_to_item(target_line, ScrollStrategy::Center);
-        }
+        crate::utils::ensure_cursor_visible_in_scroll(
+            self.cursor_offset(),
+            self.is_wrapped,
+            &self.precomputed_visual_lines,
+            self.line_clamp,
+            &self.scroll_handle,
+            |offset| self.offset_to_line_col(offset).0,
+            || self.line_count(),
+        );
     }
 
     /// Ensure the cursor is horizontally visible in single-line or non-wrapped multiline mode.
