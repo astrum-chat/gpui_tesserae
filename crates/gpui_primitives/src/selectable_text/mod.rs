@@ -10,9 +10,8 @@ use gpui::{
     prelude::FluentBuilder, rgb, uniform_list,
 };
 
-use crate::utils::{
-    TextNavigation, WRAP_WIDTH_EPSILON, multiline_height, pixel_perfect_round, rgb_a,
-};
+use crate::extensions::WindowExt;
+use crate::utils::{TextNavigation, WIDTH_WRAP_BASE_MARGIN, multiline_height, rgb_a};
 use elements::{LineElement, UniformListElement, WrappedLineElement};
 
 pub use state::{
@@ -28,7 +27,10 @@ fn compute_effective_width(
     cached_wrap_width: Option<Pixels>,
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
+    whitespace_width: Pixels,
 ) -> (Option<Pixels>, bool) {
+    let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+
     if !user_wants_auto_width {
         return (None, false);
     }
@@ -36,7 +38,7 @@ fn compute_effective_width(
     if has_max_width_constraint {
         match (cached_wrap_width, measured_width) {
             (Some(cached), Some(measured)) => {
-                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                let auto_width = measured + margin;
                 if auto_width <= cached {
                     (Some(auto_width), false)
                 } else {
@@ -49,7 +51,7 @@ fn compute_effective_width(
     } else {
         match measured_width {
             Some(measured) => {
-                let auto_width = measured + WRAP_WIDTH_EPSILON;
+                let auto_width = measured + margin;
                 let clamped = max_width_px.map_or(auto_width, |max_w| auto_width.min(max_w));
                 (Some(clamped), false)
             }
@@ -63,11 +65,14 @@ fn compute_wrap_width(
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
     user_wants_auto_width: bool,
+    whitespace_width: Pixels,
 ) -> Pixels {
+    let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+
     // For auto-width: use cached container width if available (enables wrapping),
     // otherwise fall back to max_width or measured width
     // For fixed-width: use cached container width
-    // Add epsilon to avoid premature wrapping due to floating-point precision
+    // Add margin to avoid premature wrapping
     if user_wants_auto_width {
         // Prefer cached_wrap_width (actual container width) to enable wrapping
         // Only fall back to measured_width if no container constraint exists
@@ -76,11 +81,11 @@ fn compute_wrap_width(
             .or(measured_width)
             .unwrap_or(Pixels::MAX);
         let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
-        clamped + WRAP_WIDTH_EPSILON
+        clamped + margin
     } else {
         let width = cached_wrap_width.or(max_width_px).unwrap_or(Pixels::MAX);
         let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
-        clamped + WRAP_WIDTH_EPSILON
+        clamped + margin
     }
 }
 
@@ -215,6 +220,36 @@ impl SelectableText {
         });
     }
 
+    fn measure_whitespace_width(
+        &self,
+        font: &Font,
+        font_size: Pixels,
+        text_color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if self.state.read(cx).whitespace_width.is_some() {
+            return;
+        }
+
+        let run = gpui::TextRun {
+            len: 1,
+            font: font.clone(),
+            color: text_color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let shaped = window
+            .text_system()
+            .shape_line(" ".into(), font_size, &[run], None);
+        let width = shaped.x_for_index(1);
+
+        self.state.update(cx, |state, _cx| {
+            state.whitespace_width = Some(width);
+        });
+    }
+
     fn apply_auto_width(&self, style: &mut StyleRefinement, params: &WidthParams) {
         if !params.user_wants_auto_width {
             return;
@@ -224,7 +259,8 @@ impl SelectableText {
             return;
         };
 
-        let auto_width = measured + WRAP_WIDTH_EPSILON;
+        let margin = params.whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+        let auto_width = measured + margin;
 
         if params.is_wrapped && params.has_max_width_constraint {
             style.size.width = Some(auto_width.into());
@@ -243,6 +279,7 @@ struct WidthParams {
     container_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
     is_wrapped: bool,
+    whitespace_width: Pixels,
 }
 
 struct RenderParams {
@@ -337,11 +374,20 @@ impl RenderOnce for SelectableText {
             cx,
         );
 
-        let (container_width, cached_wrap_width, focus_handle) = {
+        self.measure_whitespace_width(
+            &params.font,
+            params.font_size,
+            params.text_color,
+            window,
+            cx,
+        );
+
+        let (container_width, cached_wrap_width, whitespace_width, focus_handle) = {
             let state = self.state.read(cx);
             (
                 state.measured_max_line_width,
                 state.cached_wrap_width,
+                state.whitespace_width.unwrap_or(gpui::px(0.)),
                 state.focus_handle.clone(),
             )
         };
@@ -358,9 +404,10 @@ impl RenderOnce for SelectableText {
 
         let has_max_width_constraint = self.style.max_size.width.is_some();
 
+        let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
         let is_constrained = matches!(
             (cached_wrap_width, container_width),
-            (Some(cached), Some(measured)) if measured + WRAP_WIDTH_EPSILON > cached
+            (Some(cached), Some(measured)) if measured + margin > cached
         );
 
         self.state.update(cx, |state, _cx| {
@@ -373,6 +420,7 @@ impl RenderOnce for SelectableText {
             container_width,
             max_width_px,
             is_wrapped: self.word_wrap,
+            whitespace_width,
         };
 
         let base = div()
@@ -421,8 +469,8 @@ impl SelectableText {
             .line_height
             .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
             .unwrap_or_else(|| window.line_height());
+        let line_height = window.round(line_height);
         let scale_factor = window.scale_factor();
-        let line_height = pixel_perfect_round(line_height, scale_factor);
         let font = Font {
             family: text_style
                 .font_family
@@ -461,7 +509,7 @@ impl SelectableText {
         cx: &mut App,
     ) -> gpui::Stateful<gpui::Div> {
         let font = params.font.clone();
-        let (line_count, scroll_handle, measured_width) = {
+        let (line_count, scroll_handle, measured_width, whitespace_width) = {
             let state = self.state.read(cx);
             (
                 state.line_count().max(1),
@@ -471,6 +519,7 @@ impl SelectableText {
                 } else {
                     None
                 },
+                state.whitespace_width.unwrap_or(gpui::px(0.)),
             )
         };
         let state_entity = self.state.clone();
@@ -491,7 +540,6 @@ impl SelectableText {
                 let state = state_entity.read(cx);
                 let value = state.get_text();
                 let selected_range = state.selected_range.clone();
-                let is_select_all = state.is_select_all;
                 let line_offsets = compute_line_offsets(&value);
 
                 visible_range
@@ -518,7 +566,6 @@ impl SelectableText {
                             font_size,
                             font: font.clone(),
                             selected_range: selected_range.clone(),
-                            is_select_all,
                             measured_width,
                             selection_rounded,
                             selection_rounded_smoothing,
@@ -535,7 +582,8 @@ impl SelectableText {
                 list.style().overflow.y = Some(Overflow::Hidden);
             }
             if let Some(width) = measured_width {
-                let auto_width = width + WRAP_WIDTH_EPSILON;
+                let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
+                let auto_width = width + margin;
                 let clamped = max_width_px.map_or(auto_width, |max_w| auto_width.min(max_w));
                 list.style().size.width = Some(clamped.into());
             }
@@ -565,12 +613,13 @@ impl SelectableText {
         cx: &mut App,
     ) -> gpui::Stateful<gpui::Div> {
         let font = params.font.clone();
-        let (scroll_handle, cached_wrap_width, measured_max_line_width) = {
+        let (scroll_handle, cached_wrap_width, measured_max_line_width, whitespace_width) = {
             let state = self.state.read(cx);
             (
                 state.scroll_handle.clone(),
                 state.cached_wrap_width,
                 state.measured_max_line_width,
+                state.whitespace_width.unwrap_or(gpui::px(0.)),
             )
         };
         let state_entity = self.state.clone();
@@ -588,6 +637,7 @@ impl SelectableText {
             measured_max_line_width,
             max_width_px,
             user_wants_auto_width,
+            whitespace_width,
         );
 
         let (effective_width, use_relative_width) = compute_effective_width(
@@ -596,6 +646,7 @@ impl SelectableText {
             cached_wrap_width,
             measured_max_line_width,
             max_width_px,
+            whitespace_width,
         );
 
         let visual_line_count = self.state.update(cx, |state, _cx| {
@@ -631,7 +682,6 @@ impl SelectableText {
             move |visible_range, _window, cx| {
                 let state = state_entity.read(cx);
                 let selected_range = state.selected_range.clone();
-                let is_select_all = state.is_select_all;
                 let visual_lines = &state.precomputed_visual_lines;
 
                 visible_range
@@ -657,7 +707,6 @@ impl SelectableText {
                             font_size,
                             font: font.clone(),
                             selected_range: selected_range.clone(),
-                            is_select_all,
                             selection_rounded,
                             selection_rounded_smoothing,
                             prev_visual_line_offsets,
@@ -767,41 +816,48 @@ mod tests {
 
     #[test]
     fn test_wrap_width_auto_uses_cached_for_wrapping() {
-        // Auto-width uses cached container width to enable wrapping (plus epsilon)
-        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true);
-        assert_eq!(result, px(200.) + WRAP_WIDTH_EPSILON);
+        // Auto-width uses cached container width to enable wrapping (plus margin)
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(0.));
+        assert_eq!(result, px(200.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_auto_uses_max_when_no_cached() {
-        // Auto-width uses max_width when no cached width available (plus epsilon)
-        let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true);
-        assert_eq!(result, px(300.) + WRAP_WIDTH_EPSILON);
+        // Auto-width uses max_width when no cached width available (plus margin)
+        let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true, px(0.));
+        assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_fixed_uses_cached() {
-        // Fixed-width uses cached container width (plus epsilon)
-        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false);
-        assert_eq!(result, px(200.) + WRAP_WIDTH_EPSILON);
+        // Fixed-width uses cached container width (plus margin)
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false, px(0.));
+        assert_eq!(result, px(200.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_fixed_falls_back_to_max() {
-        // Fixed-width falls back to max_width when no cached (plus epsilon)
-        let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false);
-        assert_eq!(result, px(300.) + WRAP_WIDTH_EPSILON);
+        // Fixed-width falls back to max_width when no cached (plus margin)
+        let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false, px(0.));
+        assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_wrap_width_defaults_to_max_when_nothing_available() {
-        let result = compute_wrap_width(None, None, None, false);
-        assert_eq!(result, Pixels::MAX + WRAP_WIDTH_EPSILON);
+        let result = compute_wrap_width(None, None, None, false, px(0.));
+        assert_eq!(result, Pixels::MAX + WIDTH_WRAP_BASE_MARGIN);
+    }
+
+    #[test]
+    fn test_wrap_width_includes_whitespace_width() {
+        let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(8.));
+        assert_eq!(result, px(200.) + px(8.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
     fn test_effective_width_uses_relative_on_first_render_with_max_constraint() {
-        let (width, use_relative) = compute_effective_width(true, true, None, Some(px(400.)), None);
+        let (width, use_relative) =
+            compute_effective_width(true, true, None, Some(px(400.)), None, px(0.));
         assert_eq!(width, None);
         assert!(use_relative);
     }
@@ -809,29 +865,30 @@ mod tests {
     #[test]
     fn test_effective_width_uses_auto_when_text_fits() {
         let (width, use_relative) =
-            compute_effective_width(true, true, Some(px(500.)), Some(px(400.)), None);
-        assert_eq!(width, Some(px(400.) + WRAP_WIDTH_EPSILON));
+            compute_effective_width(true, true, Some(px(500.)), Some(px(400.)), None, px(0.));
+        assert_eq!(width, Some(px(400.) + WIDTH_WRAP_BASE_MARGIN));
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_relative_when_text_exceeds_available() {
         let (width, use_relative) =
-            compute_effective_width(true, true, Some(px(300.)), Some(px(400.)), None);
+            compute_effective_width(true, true, Some(px(300.)), Some(px(400.)), None, px(0.));
         assert_eq!(width, None);
         assert!(use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_cached_when_no_measured() {
-        let (width, use_relative) = compute_effective_width(true, true, Some(px(300.)), None, None);
+        let (width, use_relative) =
+            compute_effective_width(true, true, Some(px(300.)), None, None, px(0.));
         assert_eq!(width, Some(px(300.)));
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_uses_relative_when_nothing_available() {
-        let (width, use_relative) = compute_effective_width(true, true, None, None, None);
+        let (width, use_relative) = compute_effective_width(true, true, None, None, None, px(0.));
         assert_eq!(width, None);
         assert!(use_relative);
     }
@@ -839,15 +896,15 @@ mod tests {
     #[test]
     fn test_effective_width_uses_measured_when_no_max_constraint() {
         let (width, use_relative) =
-            compute_effective_width(true, false, None, Some(px(400.)), None);
-        assert_eq!(width, Some(px(400.) + WRAP_WIDTH_EPSILON));
+            compute_effective_width(true, false, None, Some(px(400.)), None, px(0.));
+        assert_eq!(width, Some(px(400.) + WIDTH_WRAP_BASE_MARGIN));
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_clamped_by_absolute_max_when_no_relative_constraint() {
         let (width, use_relative) =
-            compute_effective_width(true, false, None, Some(px(400.)), Some(px(300.)));
+            compute_effective_width(true, false, None, Some(px(400.)), Some(px(300.)), px(0.));
         assert_eq!(width, Some(px(300.)));
         assert!(!use_relative);
     }
@@ -855,14 +912,14 @@ mod tests {
     #[test]
     fn test_effective_width_none_when_not_auto_width() {
         let (width, use_relative) =
-            compute_effective_width(false, false, None, Some(px(400.)), None);
+            compute_effective_width(false, false, None, Some(px(400.)), None, px(0.));
         assert_eq!(width, None);
         assert!(!use_relative);
     }
 
     #[test]
     fn test_effective_width_none_when_not_measured_yet_no_max_constraint() {
-        let (width, use_relative) = compute_effective_width(true, false, None, None, None);
+        let (width, use_relative) = compute_effective_width(true, false, None, None, None, px(0.));
         assert_eq!(width, None);
         assert!(!use_relative);
     }

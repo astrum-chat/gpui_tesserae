@@ -15,11 +15,12 @@ use gpui::{
     px, rgb, uniform_list,
 };
 
+use crate::extensions::WindowExt;
 use crate::input::state::{SecondarySubmit, Submit};
-use crate::utils::{TextNavigation, multiline_height, pixel_perfect_round, rgb_a};
+use crate::utils::{TextNavigation, multiline_height, rgb_a};
 use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
 
-pub(crate) use crate::utils::WRAP_WIDTH_EPSILON;
+pub(crate) use crate::utils::WIDTH_WRAP_BASE_MARGIN;
 pub(crate) use crate::utils::should_show_trailing_whitespace;
 pub use cursor_blink::CursorBlink;
 pub use state::{
@@ -227,8 +228,8 @@ impl RenderOnce for Input {
             .line_height
             .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
             .unwrap_or_else(|| window.line_height());
+        let line_height = window.round(line_height);
         let scale_factor = window.scale_factor();
-        let line_height = pixel_perfect_round(line_height, scale_factor);
 
         let font = Font {
             family: text_style

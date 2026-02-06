@@ -6,9 +6,10 @@ use gpui::{
     Pixels, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window, point, px, relative,
 };
 
+use crate::extensions::WindowExt;
 use crate::input::state::InputState;
 use crate::input::{
-    TransformTextFn, VisibleLineInfo, WRAP_WIDTH_EPSILON, should_show_trailing_whitespace,
+    TransformTextFn, VisibleLineInfo, WIDTH_WRAP_BASE_MARGIN, should_show_trailing_whitespace,
 };
 use crate::utils::{
     SelectionShape, TextNavigation, build_selection_shape, compute_selection_corners,
@@ -21,7 +22,6 @@ fn compute_line_selection_bounds(
     line_start: usize,
     line_end: usize,
     selected_range: &Range<usize>,
-    is_select_all: bool,
     font: &Font,
     font_size: Pixels,
     text_color: Hsla,
@@ -55,10 +55,10 @@ fn compute_line_selection_bounds(
             .text_system()
             .shape_line(line_content.to_string().into(), font_size, &[run], None);
 
-    let selection_start_x = line.x_for_index(local_start);
+    let mut selection_start_x = line.x_for_index(local_start);
     let mut selection_end_x = line.x_for_index(local_end);
 
-    if should_show_trailing_whitespace(selected_range, line_end, is_select_all) {
+    if should_show_trailing_whitespace(selected_range, line_end) {
         let space_run = TextRun {
             len: 1,
             font: font.clone(),
@@ -72,6 +72,9 @@ fn compute_line_selection_bounds(
             .shape_line(" ".into(), font_size, &[space_run], None);
         selection_end_x = selection_end_x + space_line.x_for_index(1);
     }
+
+    selection_start_x = window.round(selection_start_x);
+    selection_end_x = window.round(selection_end_x);
 
     Some((selection_start_x, selection_end_x))
 }
@@ -217,8 +220,8 @@ impl Element for TextElement {
                 )),
             )
         } else {
-            let selection_start_x = line.x_for_index(selected_range.start);
-            let selection_end_x = line.x_for_index(selected_range.end);
+            let selection_start_x = window.round(line.x_for_index(selected_range.start));
+            let selection_end_x = window.round(line.x_for_index(selected_range.end));
 
             let config = selection_config_from_options(
                 self.selection_rounded,
@@ -384,7 +387,6 @@ impl Element for LineElement {
     ) -> Self::PrepaintState {
         let input = self.input.read(cx);
         let full_value = input.value();
-        let is_select_all = input.is_select_all;
         let is_actually_empty = full_value.is_empty();
 
         // Check bounds before slicing
@@ -498,14 +500,10 @@ impl Element for LineElement {
                 .saturating_sub(self.line_start_offset)
                 .min(line_content.len());
 
-            let selection_start_x = line.x_for_index(local_start);
+            let mut selection_start_x = line.x_for_index(local_start);
             let mut selection_end_x = line.x_for_index(local_end);
 
-            if should_show_trailing_whitespace(
-                &self.selected_range,
-                self.line_end_offset,
-                is_select_all,
-            ) {
+            if should_show_trailing_whitespace(&self.selected_range, self.line_end_offset) {
                 let space_run = TextRun {
                     len: 1,
                     font: self.font.clone(),
@@ -521,6 +519,9 @@ impl Element for LineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
+            selection_start_x = window.round(selection_start_x);
+            selection_end_x = window.round(selection_end_x);
+
             let config = selection_config_from_options(
                 self.selection_rounded,
                 self.selection_rounded_smoothing,
@@ -533,7 +534,6 @@ impl Element for LineElement {
                     start,
                     end,
                     &self.selected_range,
-                    is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -547,7 +547,6 @@ impl Element for LineElement {
                     start,
                     end,
                     &self.selected_range,
-                    is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -718,7 +717,7 @@ impl Element for WrappedLineElement {
         {
             let input = self.input.read(cx);
             if let Some(precomputed_width) = input.precomputed_at_width {
-                if (precomputed_width - actual_line_width).abs() > WRAP_WIDTH_EPSILON
+                if (precomputed_width - actual_line_width).abs() > WIDTH_WRAP_BASE_MARGIN
                     && !input.needs_wrap_recompute
                 {
                     let _ = input;
@@ -809,8 +808,6 @@ impl Element for WrappedLineElement {
         let selection_intersects =
             self.selected_range.start <= line_end && self.selected_range.end >= line_start;
 
-        let is_select_all = input.is_select_all;
-
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             let local_start = self
                 .selected_range
@@ -823,10 +820,10 @@ impl Element for WrappedLineElement {
                 .saturating_sub(line_start)
                 .min(line_len);
 
-            let selection_start_x = line.x_for_index(local_start);
+            let mut selection_start_x = line.x_for_index(local_start);
             let mut selection_end_x = line.x_for_index(local_end);
 
-            if should_show_trailing_whitespace(&self.selected_range, line_end, is_select_all) {
+            if should_show_trailing_whitespace(&self.selected_range, line_end) {
                 let space_run = TextRun {
                     len: 1,
                     font: self.font.clone(),
@@ -842,6 +839,9 @@ impl Element for WrappedLineElement {
                 selection_end_x = selection_end_x + space_line.x_for_index(1);
             }
 
+            selection_start_x = window.round(selection_start_x);
+            selection_end_x = window.round(selection_end_x);
+
             let config = selection_config_from_options(
                 self.selection_rounded,
                 self.selection_rounded_smoothing,
@@ -854,7 +854,6 @@ impl Element for WrappedLineElement {
                     start,
                     end,
                     &self.selected_range,
-                    is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -868,7 +867,6 @@ impl Element for WrappedLineElement {
                     start,
                     end,
                     &self.selected_range,
-                    is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,

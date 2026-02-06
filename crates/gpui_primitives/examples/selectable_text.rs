@@ -61,7 +61,7 @@ impl Render for ExampleApp {
                                         .min_w_auto()
                                         .w_auto()
                                         .word_wrap(true)
-                                        .debug_wrapping(true)
+                                        //.debug_wrapping(true)
                                         .text_color(rgb(0xcdd6f4))
                                         .text_size(px(16.))
                                         .line_height(px(24.))
@@ -79,7 +79,7 @@ impl Render for ExampleApp {
 const WRAPPED_TEXT: &str = r#"Here's an essay about cabbages:
 
 Cabbages: A Humble yet Remarkable Vegetable
-
+ 
 Cabbages are a versatile and nutritious vegetable that have played a significant role in human nutrition and agriculture for thousands of years. From ancient civilizations to modern kitchens, this leafy green has remained a staple food across cultures worldwide.
 
 The origins of cabbage can be traced back to Europe and the Mediterranean region, where wild varieties first grew along coastal cliffs. Ancient Greeks and Romans cultivated cabbage not only for food but also for its perceived medicinal properties.

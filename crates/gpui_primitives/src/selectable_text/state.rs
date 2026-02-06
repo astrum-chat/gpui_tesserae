@@ -78,6 +78,7 @@ pub struct SelectableTextState {
     /// Whether the current selection is a "select all" (cmd+a).
     pub is_select_all: bool,
     pub(crate) measured_max_line_width: Option<Pixels>,
+    pub(crate) whitespace_width: Option<Pixels>,
     pub(crate) is_constrained: bool,
     /// Tracks previous focus state to detect blur events.
     was_focused: bool,
@@ -114,6 +115,7 @@ impl SelectableTextState {
             last_bounds: None,
             is_select_all: false,
             measured_max_line_width: None,
+            whitespace_width: None,
             is_constrained: false,
             was_focused: false,
             last_font: None,
@@ -156,6 +158,7 @@ impl SelectableTextState {
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
         self.measured_max_line_width = None;
+        self.whitespace_width = None;
         self.precomputed_at_width = None;
     }
 

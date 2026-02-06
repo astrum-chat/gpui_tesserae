@@ -6,10 +6,11 @@ use gpui::{
     SharedString, Style, TextRun, Window, point, relative,
 };
 
+use crate::extensions::WindowExt;
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
-    SelectionShape, WRAP_WIDTH_EPSILON, build_selection_shape, compute_selection_corners,
+    SelectionShape, WIDTH_WRAP_BASE_MARGIN, build_selection_shape, compute_selection_corners,
     selection_config_from_options, should_show_trailing_whitespace,
 };
 
@@ -30,7 +31,6 @@ fn compute_selection_x_bounds(
     selected_range: &Range<usize>,
     line_start: usize,
     line_end: usize,
-    is_select_all: bool,
     font: &Font,
     font_size: Pixels,
     text_color: Hsla,
@@ -49,16 +49,19 @@ fn compute_selection_x_bounds(
         .min(line_len);
     let local_end = selected_range.end.saturating_sub(line_start).min(line_len);
 
-    let selection_start_x = line.x_for_index(local_start);
+    let mut selection_start_x = line.x_for_index(local_start);
     let mut selection_end_x = line.x_for_index(local_end);
 
-    if should_show_trailing_whitespace(selected_range, line_end, is_select_all) {
+    if should_show_trailing_whitespace(selected_range, line_end) {
         let space_run = create_text_run(font.clone(), text_color, 1);
         let space_line = window
             .text_system()
             .shape_line(" ".into(), font_size, &[space_run], None);
         selection_end_x = selection_end_x + space_line.x_for_index(1);
     }
+
+    selection_start_x = window.round(selection_start_x);
+    selection_end_x = window.round(selection_end_x);
 
     // A zero-width selection (e.g. selection ends exactly at the start of this line)
     // has no visual presence and should not affect adjacent line corner rounding.
@@ -75,7 +78,6 @@ fn compute_selection_shape(
     selected_range: &Range<usize>,
     line_start: usize,
     line_end: usize,
-    is_select_all: bool,
     font: &Font,
     font_size: Pixels,
     text_color: Hsla,
@@ -91,7 +93,6 @@ fn compute_selection_shape(
         selected_range,
         line_start,
         line_end,
-        is_select_all,
         font,
         font_size,
         text_color,
@@ -130,7 +131,6 @@ pub(crate) struct LineElement {
     pub font_size: Pixels,
     pub font: Font,
     pub selected_range: Range<usize>,
-    pub is_select_all: bool,
     pub measured_width: Option<Pixels>,
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
@@ -221,7 +221,6 @@ impl Element for LineElement {
                     &self.selected_range,
                     start,
                     end,
-                    self.is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -241,7 +240,6 @@ impl Element for LineElement {
                     &self.selected_range,
                     start,
                     end,
-                    self.is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -260,7 +258,6 @@ impl Element for LineElement {
             &self.selected_range,
             self.line_start_offset,
             self.line_end_offset,
-            self.is_select_all,
             &self.font,
             self.font_size,
             self.text_color,
@@ -327,7 +324,6 @@ pub(crate) struct WrappedLineElement {
     pub font_size: Pixels,
     pub font: Font,
     pub selected_range: Range<usize>,
-    pub is_select_all: bool,
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
@@ -418,7 +414,6 @@ impl Element for WrappedLineElement {
                     &self.selected_range,
                     start,
                     end,
-                    self.is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -438,7 +433,6 @@ impl Element for WrappedLineElement {
                     &self.selected_range,
                     start,
                     end,
-                    self.is_select_all,
                     &self.font,
                     self.font_size,
                     self.text_color,
@@ -457,7 +451,6 @@ impl Element for WrappedLineElement {
             &self.selected_range,
             info.start_offset,
             info.end_offset,
-            self.is_select_all,
             &self.font,
             self.font_size,
             self.text_color,
@@ -523,7 +516,7 @@ impl UniformListElement {
     fn should_recompute_wrapping(&self, bounds: Bounds<Pixels>, cx: &App) -> bool {
         let state = self.state.read(cx);
         state.precomputed_at_width.map_or(false, |pw| {
-            (bounds.size.width - pw).abs() > WRAP_WIDTH_EPSILON
+            (bounds.size.width - pw).abs() > WIDTH_WRAP_BASE_MARGIN
         })
     }
 
@@ -635,7 +628,7 @@ impl UniformListElement {
         }
 
         if let Some(precomputed_width) = precomputed_at_width {
-            if (actual_width - precomputed_width).abs() > WRAP_WIDTH_EPSILON {
+            if (actual_width - precomputed_width).abs() > WIDTH_WRAP_BASE_MARGIN {
                 self.trigger_wrap_recompute(actual_width, cx);
             }
         }
@@ -650,7 +643,7 @@ impl UniformListElement {
         self.state.update(cx, |state, cx| {
             state.cached_wrap_width = Some(actual_width);
             let needs_recompute = precomputed_at_width
-                .map(|pw| (actual_width - pw).abs() > WRAP_WIDTH_EPSILON)
+                .map(|pw| (actual_width - pw).abs() > WIDTH_WRAP_BASE_MARGIN)
                 .unwrap_or(true);
             if needs_recompute {
                 state.needs_wrap_recompute = true;
