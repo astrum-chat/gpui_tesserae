@@ -513,44 +513,6 @@ pub(crate) struct UniformListElement {
 }
 
 impl UniformListElement {
-    fn should_recompute_wrapping(&self, bounds: Bounds<Pixels>, cx: &App) -> bool {
-        let state = self.state.read(cx);
-        state.precomputed_at_width.map_or(false, |pw| {
-            (bounds.size.width - pw).abs() > WIDTH_WRAP_BASE_MARGIN
-        })
-    }
-
-    fn recompute_wrapping_if_needed(
-        &self,
-        bounds: Bounds<Pixels>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        if !self.should_recompute_wrapping(bounds, cx) {
-            return;
-        }
-
-        if let (Some(font), Some(font_size), Some(text_color)) = {
-            let state = self.state.read(cx);
-            (
-                state.last_font.clone(),
-                state.last_font_size,
-                state.last_text_color,
-            )
-        } {
-            self.state.update(cx, |state, cx| {
-                state.precompute_wrapped_lines(
-                    bounds.size.width,
-                    font_size,
-                    font,
-                    text_color,
-                    window,
-                );
-                cx.notify();
-            });
-        }
-    }
-
     fn paint_debug_overlays(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         if !self.debug_wrapping {
             return;
@@ -700,9 +662,13 @@ impl Element for UniformListElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        // Check and update wrap width BEFORE child prepaint so the child uses current width
+        // Update cached_wrap_width and flag recompute if the container width changed.
+        // Do NOT immediately recompute here — the uniform_list was already created with
+        // a fixed item count during render. Reshaping at a narrower width mid-frame could
+        // produce more visual lines than the list has slots for, causing words to disappear.
+        // Instead, let check_container_width_change set needs_wrap_recompute + cx.notify()
+        // so the next frame's render reshapes with the correct cached_wrap_width.
         self.check_container_width_change(bounds.size.width, cx);
-        self.recompute_wrapping_if_needed(bounds, window, cx);
 
         self.child.prepaint(window, cx);
     }

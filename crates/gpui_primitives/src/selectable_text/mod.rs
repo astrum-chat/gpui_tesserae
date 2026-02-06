@@ -69,21 +69,26 @@ fn compute_wrap_width(
 ) -> Pixels {
     let margin = whitespace_width + WIDTH_WRAP_BASE_MARGIN;
 
-    // For auto-width: use cached container width if available (enables wrapping),
-    // otherwise fall back to max_width or measured width
-    // For fixed-width: use cached container width
-    // Add margin to avoid premature wrapping
+    // When we have the actual container width from a previous prepaint (cached_wrap_width),
+    // use it directly — it's already the precise available width. Adding margin would make
+    // the wrap width wider than the container, causing text overflow/clipping.
+    //
+    // Only add margin when falling back to estimates (measured_width, max_width_px) to
+    // avoid premature wrapping from imprecise values.
     if user_wants_auto_width {
-        // Prefer cached_wrap_width (actual container width) to enable wrapping
-        // Only fall back to measured_width if no container constraint exists
-        let width = cached_wrap_width
-            .or(max_width_px)
-            .or(measured_width)
-            .unwrap_or(Pixels::MAX);
+        if let Some(cached) = cached_wrap_width {
+            let clamped = max_width_px.map_or(cached, |max_w| cached.min(max_w));
+            return clamped;
+        }
+        let width = max_width_px.or(measured_width).unwrap_or(Pixels::MAX);
         let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
         clamped + margin
     } else {
-        let width = cached_wrap_width.or(max_width_px).unwrap_or(Pixels::MAX);
+        if let Some(cached) = cached_wrap_width {
+            let clamped = max_width_px.map_or(cached, |max_w| cached.min(max_w));
+            return clamped;
+        }
+        let width = max_width_px.unwrap_or(Pixels::MAX);
         let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
         clamped + margin
     }
@@ -815,29 +820,29 @@ mod tests {
     use gpui::px;
 
     #[test]
-    fn test_wrap_width_auto_uses_cached_for_wrapping() {
-        // Auto-width uses cached container width to enable wrapping (plus margin)
+    fn test_wrap_width_auto_uses_cached_directly() {
+        // Auto-width uses cached container width directly (no margin — it's already precise)
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(0.));
-        assert_eq!(result, px(200.) + WIDTH_WRAP_BASE_MARGIN);
+        assert_eq!(result, px(200.));
     }
 
     #[test]
     fn test_wrap_width_auto_uses_max_when_no_cached() {
-        // Auto-width uses max_width when no cached width available (plus margin)
+        // Auto-width uses max_width when no cached width available (plus margin for estimates)
         let result = compute_wrap_width(None, Some(px(500.)), Some(px(300.)), true, px(0.));
         assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
-    fn test_wrap_width_fixed_uses_cached() {
-        // Fixed-width uses cached container width (plus margin)
+    fn test_wrap_width_fixed_uses_cached_directly() {
+        // Fixed-width uses cached container width directly (no margin — it's already precise)
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false, px(0.));
-        assert_eq!(result, px(200.) + WIDTH_WRAP_BASE_MARGIN);
+        assert_eq!(result, px(200.));
     }
 
     #[test]
     fn test_wrap_width_fixed_falls_back_to_max() {
-        // Fixed-width falls back to max_width when no cached (plus margin)
+        // Fixed-width falls back to max_width when no cached (plus margin for estimates)
         let result = compute_wrap_width(None, Some(px(400.)), Some(px(300.)), false, px(0.));
         assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
@@ -849,9 +854,10 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_width_includes_whitespace_width() {
+    fn test_wrap_width_cached_ignores_whitespace_margin() {
+        // When cached_wrap_width is available, whitespace margin is not added
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true, px(8.));
-        assert_eq!(result, px(200.) + px(8.) + WIDTH_WRAP_BASE_MARGIN);
+        assert_eq!(result, px(200.));
     }
 
     #[test]
