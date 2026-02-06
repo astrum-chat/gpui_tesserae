@@ -13,7 +13,7 @@ use crate::extensions::WindowExt;
 /// When text fits on one line, just this base margin is used.
 /// When text is close to wrapping, the full `whitespace_width + WIDTH_WRAP_BASE_MARGIN` is used.
 /// Also used as a threshold when comparing wrap widths for change detection.
-pub const WIDTH_WRAP_BASE_MARGIN: Pixels = px(1.25);
+pub const WIDTH_WRAP_BASE_MARGIN: Pixels = px(0.65);
 
 /// Computes the margin for width calculations.
 /// Returns just `WIDTH_WRAP_BASE_MARGIN` when text fits on a single line —
