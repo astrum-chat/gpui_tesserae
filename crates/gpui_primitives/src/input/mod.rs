@@ -464,7 +464,9 @@ impl RenderOnce for Input {
                 let selection_rounded = self.selection_rounded;
                 let selection_rounded_smoothing = self.selection_rounded_smoothing;
 
-                let wrap_width = cached_wrap_width.unwrap_or(px(300.));
+                let wrap_width = cached_wrap_width
+                    .map(|w| w + WIDTH_WRAP_BASE_MARGIN)
+                    .unwrap_or(px(300.));
                 let visual_line_count = self.state.update(cx, |state, _cx| {
                     let should_recompute =
                         state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty();

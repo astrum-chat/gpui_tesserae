@@ -69,21 +69,22 @@ fn compute_wrap_width(
     max_width_px: Option<Pixels>,
     user_wants_auto_width: bool,
 ) -> Pixels {
-    // When we have the actual container width from a previous prepaint (cached_wrap_width),
-    // use it directly — it's already the precise available width.
-    //
-    // Only add base margin when falling back to estimates (measured_width, max_width_px) to
-    // avoid premature wrapping from imprecise values.
+    // Always add WIDTH_WRAP_BASE_MARGIN to the wrap width, regardless of whether we're
+    // using the cached container width or a fallback estimate. This ensures consistent
+    // wrapping across frames (prevents two-frame jitter where frame 1 wraps wider than
+    // frame 2) and provides a safety buffer against subpixel rounding.
     if user_wants_auto_width {
         if let Some(cached) = cached_wrap_width {
-            return max_width_px.map_or(cached, |max_w| cached.min(max_w));
+            let w = max_width_px.map_or(cached, |max_w| cached.min(max_w));
+            return w + WIDTH_WRAP_BASE_MARGIN;
         }
         let width = max_width_px.or(measured_width).unwrap_or(Pixels::MAX);
         let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
         clamped + WIDTH_WRAP_BASE_MARGIN
     } else {
         if let Some(cached) = cached_wrap_width {
-            return max_width_px.map_or(cached, |max_w| cached.min(max_w));
+            let w = max_width_px.map_or(cached, |max_w| cached.min(max_w));
+            return w + WIDTH_WRAP_BASE_MARGIN;
         }
         let width = max_width_px.unwrap_or(Pixels::MAX);
         let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
@@ -785,9 +786,9 @@ mod tests {
     use gpui::px;
 
     #[test]
-    fn test_wrap_width_auto_uses_cached_directly() {
+    fn test_wrap_width_auto_uses_cached_with_margin() {
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, true);
-        assert_eq!(result, px(200.));
+        assert_eq!(result, px(200.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
@@ -797,9 +798,9 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_width_fixed_uses_cached_directly() {
+    fn test_wrap_width_fixed_uses_cached_with_margin() {
         let result = compute_wrap_width(Some(px(200.)), Some(px(400.)), None, false);
-        assert_eq!(result, px(200.));
+        assert_eq!(result, px(200.) + WIDTH_WRAP_BASE_MARGIN);
     }
 
     #[test]
