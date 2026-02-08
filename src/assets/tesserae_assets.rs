@@ -12,6 +12,9 @@ cfg_if::cfg_if!(
         /// Embedded assets bundled with the tesserae crate.
         #[derive(RustEmbed)]
         #[folder = "assets/"]
+        #[include = "fonts/**/*.ttf"]
+        #[include = "icons/**/*.svg"]
+        #[exclude = "*.DS_Store"]
         pub struct TesseraeAssets;
 
         impl AssetProvider for TesseraeAssets {
