@@ -10,29 +10,9 @@ use crate::input::VisualLineInfo;
 use crate::extensions::WindowExt;
 
 /// Base margin added to wrap widths to prevent janky text wrapping.
-/// When text fits on one line, just this base margin is used.
-/// When text is close to wrapping, the full `whitespace_width + WIDTH_WRAP_BASE_MARGIN` is used.
-/// Also used as a threshold when comparing wrap widths for change detection.
-pub const WIDTH_WRAP_BASE_MARGIN: Pixels = px(0.65);
-
-/// Computes the margin for width calculations.
-/// Returns just `WIDTH_WRAP_BASE_MARGIN` when text fits on a single line —
-/// enough to prevent layout rounding from clipping the last character,
-/// but not the full whitespace margin.
-/// Otherwise uses `whitespace_width + WIDTH_WRAP_BASE_MARGIN` to prevent
-/// janky wrapping at boundaries.
-///
-/// `text_fits_single_line`: when true, the text is known to render entirely
-/// on one line. Only the base margin is used (not the whitespace margin).
-/// We can't use zero because `cached_wrap_width` derives from the outer div
-/// width — with zero margin, layout rounding can make it smaller than
-/// `measured_max_line_width`, causing wrapping and oscillation.
-pub fn compute_margin(whitespace_width: Pixels, text_fits_single_line: bool) -> Pixels {
-    if text_fits_single_line {
-        return WIDTH_WRAP_BASE_MARGIN;
-    }
-    whitespace_width + WIDTH_WRAP_BASE_MARGIN
-}
+/// Added to fallback width estimates (when no cached container width is available)
+/// and used as a threshold when comparing wrap widths for change detection.
+pub const WIDTH_WRAP_BASE_MARGIN: Pixels = px(1.25);
 
 /// Calculates the height for a multiline text area based on line height and count.
 pub fn multiline_height(line_height: Pixels, line_count: usize, scale_factor: f32) -> Pixels {
@@ -141,7 +121,7 @@ pub fn compute_selection_shape(
     prev_line_bounds: Option<(Pixels, Pixels)>,
     next_line_bounds: Option<(Pixels, Pixels)>,
 ) -> Option<super::SelectionShape> {
-    let (selection_start_x, selection_end_x) = compute_selection_x_bounds(
+    let (selection_start_x, mut selection_end_x) = compute_selection_x_bounds(
         line,
         selected_range,
         line_start,
@@ -151,6 +131,13 @@ pub fn compute_selection_shape(
         text_color,
         window,
     )?;
+
+    // Clamp selection to the available container width so the trailing-whitespace
+    // indicator fills to the edge rather than painting beyond the clip boundary.
+    let max_x = bounds.size.width - scroll_offset;
+    if selection_end_x > max_x {
+        selection_end_x = max_x;
+    }
 
     let config = super::selection_config_from_options(corner_radius, corner_smoothing);
     let corners = super::compute_selection_corners(

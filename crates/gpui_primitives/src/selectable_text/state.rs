@@ -5,6 +5,7 @@ use gpui::{
     Render, ScrollStrategy, SharedString, UniformListScrollHandle, Window, WrappedLine, div,
 };
 
+use crate::extensions::WindowExt;
 use crate::utils::TextNavigation;
 
 // Re-export VisualLineInfo and VisibleLineInfo from input module since they're the same structure
@@ -77,7 +78,6 @@ pub struct SelectableTextState {
     /// Whether the current selection is a "select all" (cmd+a).
     pub is_select_all: bool,
     pub(crate) measured_max_line_width: Option<Pixels>,
-    pub(crate) whitespace_width: Option<Pixels>,
     pub(crate) is_constrained: bool,
     /// Tracks previous focus state to detect blur events.
     was_focused: bool,
@@ -114,7 +114,6 @@ impl SelectableTextState {
             last_bounds: None,
             is_select_all: false,
             measured_max_line_width: None,
-            whitespace_width: None,
             is_constrained: false,
             was_focused: false,
             last_font: None,
@@ -157,7 +156,6 @@ impl SelectableTextState {
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
         self.measured_max_line_width = None;
-        self.whitespace_width = None;
         self.precomputed_at_width = None;
     }
 
@@ -199,13 +197,13 @@ impl SelectableTextState {
             &text, width, font_size, font, text_color, window,
         );
 
-        // SelectableText-specific: track max line width for auto-width sizing
-        self.measured_max_line_width = Some(
-            wrapped_lines
-                .iter()
-                .map(|line| line.unwrapped_layout.width)
-                .fold(Pixels::ZERO, |a, b| if b > a { b } else { a }),
-        );
+        // SelectableText-specific: track max line width for auto-width sizing.
+        // Round to pixel grid so div width aligns with GPUI's layout rounding.
+        let max_line_width = wrapped_lines
+            .iter()
+            .map(|line| line.unwrapped_layout.width)
+            .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+        self.measured_max_line_width = Some(window.round(max_line_width));
 
         self.precomputed_visual_lines = visual_lines;
         self.precomputed_wrapped_lines = wrapped_lines;

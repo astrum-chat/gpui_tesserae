@@ -72,16 +72,23 @@ impl SelectionShape {
     }
 }
 
-/// Returns whether a corner at `x` is covered by an adjacent line's selection range.
-fn is_corner_covered(x: Pixels, adjacent_line: Option<(Pixels, Pixels)>) -> bool {
-    adjacent_line.map_or(false, |(start, end)| x >= start && x <= end)
+/// Returns whether a corner at `x` is sufficiently covered by an adjacent line's
+/// selection range. A corner is only "covered" (and thus kept sharp) if the adjacent
+/// line extends past it by more than the corner radius. When the adjacent edge is
+/// within `radius` of this corner, the rounding visually smooths over the small gap
+/// that proportional fonts create between nearly-aligned selection edges.
+fn is_corner_covered(x: Pixels, adjacent_line: Option<(Pixels, Pixels)>, radius: Pixels) -> bool {
+    adjacent_line.map_or(false, |(start, end)| {
+        x >= start + radius && x <= end - radius
+    })
 }
 
 /// Computes which corners of a selection rectangle should be rounded.
 ///
-/// For multi-line selections, a corner is rounded when "exposed" (not covered by
-/// the adjacent line's selection). This creates a cohesive shape where inner
-/// corners remain sharp and outer edges are rounded.
+/// For multi-line selections, a corner is rounded when "exposed" (not sufficiently
+/// covered by the adjacent line's selection). The tolerance is based on the corner
+/// radius so that nearly-aligned edges in proportional fonts get smooth rounding
+/// instead of sharp jagged corners.
 pub fn compute_selection_corners(
     this_start_x: Pixels,
     this_end_x: Pixels,
@@ -90,7 +97,7 @@ pub fn compute_selection_corners(
     radius: Pixels,
 ) -> Corners<Pixels> {
     let round_if_exposed = |x: Pixels, adjacent: Option<(Pixels, Pixels)>| -> Pixels {
-        if is_corner_covered(x, adjacent) {
+        if is_corner_covered(x, adjacent, radius) {
             Pixels::ZERO
         } else {
             radius

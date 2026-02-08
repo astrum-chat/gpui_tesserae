@@ -2,16 +2,65 @@ use std::ops::Range;
 
 use gpui::{
     AnyElement, App, Bounds, DispatchPhase, Element, ElementId, Entity, Font, GlobalElementId,
-    Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, Pixels, ShapedLine,
-    SharedString, Style, Window, point, relative,
+    Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine,
+    SharedString, Style, Window, point, px, relative, size,
 };
 
+use crate::extensions::WindowExt;
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
     SelectionShape, WIDTH_WRAP_BASE_MARGIN, compute_selection_shape, compute_selection_x_bounds,
     create_text_run,
 };
+
+/// Paints alternating colored rectangles for each character's measured bounds.
+fn paint_character_bounds(
+    line: &ShapedLine,
+    bounds: Bounds<Pixels>,
+    char_count: usize,
+    window: &mut Window,
+) {
+    let colors = [
+        Hsla {
+            h: 0.0,
+            s: 1.0,
+            l: 0.5,
+            a: 0.15,
+        }, // red
+        Hsla {
+            h: 0.6,
+            s: 1.0,
+            l: 0.5,
+            a: 0.15,
+        }, // blue
+    ];
+    let border_color = Hsla {
+        h: 0.0,
+        s: 0.0,
+        l: 1.0,
+        a: 0.3,
+    };
+
+    for i in 0..char_count {
+        let x_start = line.x_for_index(i);
+        let x_end = line.x_for_index(i + 1);
+
+        let char_bounds = Bounds::new(
+            point(bounds.origin.x + x_start, bounds.origin.y),
+            size(x_end - x_start, bounds.size.height),
+        );
+
+        window.paint_quad(PaintQuad {
+            bounds: char_bounds,
+            corner_radii: gpui::Corners::default(),
+            background: colors[i % 2].into(),
+            border_widths: gpui::Edges::all(px(0.5)),
+            border_color,
+            border_style: gpui::BorderStyle::default(),
+        });
+    }
+}
 
 /// Renders one logical line in non-wrapped multiline mode.
 pub(crate) struct LineElement {
@@ -30,6 +79,7 @@ pub(crate) struct LineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
+    pub debug_character_bounds: bool,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -91,7 +141,7 @@ impl Element for LineElement {
             .shape_line(display_text, self.font_size, &[run], None);
 
         if self.measured_width.is_none() {
-            let line_width = line.width;
+            let line_width = window.round(line.width);
             self.state.update(cx, |state, cx| {
                 let current_max = state.measured_max_line_width.unwrap_or(Pixels::ZERO);
                 if line_width > current_max {
@@ -190,7 +240,14 @@ impl Element for LineElement {
             });
         });
 
+        let debug_chars = self.debug_character_bounds;
+        let char_count = self.line_end_offset - self.line_start_offset;
+
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+            if debug_chars {
+                paint_character_bounds(&line, bounds, char_count, window);
+            }
+
             if let Some(selection) = prepaint.selection.take() {
                 selection.paint(window);
             }
@@ -223,6 +280,7 @@ pub(crate) struct WrappedLineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
+    pub debug_character_bounds: bool,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
@@ -374,13 +432,24 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        if let Some(selection) = prepaint.selection.take() {
-            selection.paint(window);
-        }
-
         let Some(line) = prepaint.line.take() else {
             return;
         };
+
+        if self.debug_character_bounds {
+            let char_count = self
+                .state
+                .read(cx)
+                .precomputed_visual_lines
+                .get(self.visual_line_index)
+                .map(|info| info.end_offset - info.start_offset)
+                .unwrap_or(0);
+            paint_character_bounds(&line, bounds, char_count, window);
+        }
+
+        if let Some(selection) = prepaint.selection.take() {
+            selection.paint(window);
+        }
 
         self.state.update(cx, |state, _cx| {
             state.visible_lines_info.push(VisibleLineInfo {
