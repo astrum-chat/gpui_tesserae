@@ -524,7 +524,6 @@ impl RenderOnce for Input {
             .map(|this| {
                 apply_padding!(this, padding_override, vertical_padding, horizontal_padding)
             })
-            .gap(self.style.gap.unwrap_or(horizontal_padding.into()))
             .flex()
             .flex_col()
             .opacity(*disabled_transition.evaluate(window, cx))
@@ -542,32 +541,45 @@ impl RenderOnce for Input {
                     .border_inside()
                     .border_color(*border_color_transition.evaluate(window, cx)),
             )
-            .children(self.children.top)
             .child(
+                // We need to nest all of the main children to prevent layout
+                // issues where the input primitive vanishes in certain conditions.
                 div()
-                    .w_full()
+                    .w_auto()
+                    .h_auto()
                     .flex()
-                    .min_h_auto()
-                    .gap(horizontal_padding)
-                    .items_center()
-                    .map(|this| apply_padding!(this, inner_padding_override, px(0.), px(0.)))
-                    .children(self.children.left)
+                    .flex_col()
+                    .gap(self.style.gap.unwrap_or(horizontal_padding.into()))
+                    .children(self.children.top)
                     .child(
-                        self.base
+                        div()
                             .w_full()
-                            .text_size(text_size)
-                            .font_family(font_family)
-                            .text_color(primary_text_color)
-                            .placeholder_text_color(secondary_text_color)
-                            .selection_color(primary_accent_color.alpha(0.3))
-                            .selection_rounded(px(6.))
-                            .selection_rounded_smoothing(1.)
-                            .line_height(line_height)
-                            .disabled(is_disabled),
+                            .min_w_full()
+                            .flex()
+                            .min_h_auto()
+                            .gap(horizontal_padding)
+                            .items_center()
+                            .map(|this| {
+                                apply_padding!(this, inner_padding_override, px(0.), px(0.))
+                            })
+                            .children(self.children.left)
+                            .child(
+                                self.base
+                                    .w_full()
+                                    .text_size(text_size)
+                                    .font_family(font_family)
+                                    .text_color(primary_text_color)
+                                    .placeholder_text_color(secondary_text_color)
+                                    .selection_color(primary_accent_color.alpha(0.3))
+                                    .selection_rounded(px(6.))
+                                    .selection_rounded_smoothing(1.)
+                                    .line_height(line_height)
+                                    .disabled(is_disabled),
+                            )
+                            .children(self.children.right),
                     )
-                    .children(self.children.right),
+                    .children(self.children.bottom),
             )
-            .children(self.children.bottom)
             .when(!is_disabled, |this| {
                 this.on_hover(move |hover, window, cx| {
                     is_hover_state.update(cx, |this, cx| {

@@ -527,7 +527,7 @@ impl RenderOnce for Button {
                     .w_full()
                     .max_w_full()
                     .flex()
-                    .flex_shrink()
+                    .flex_grow()
                     .gap(horizontal_padding)
                     .map(|mut this| {
                         this.style().justify_content = Some(self.style.justify_content);
@@ -541,7 +541,7 @@ impl RenderOnce for Button {
                             .max_w_full()
                             .min_w_0()
                             .flex()
-                            .flex_shrink()
+                            .flex_grow()
                             .items_center()
                             .gap(horizontal_padding)
                             .map(|this| {

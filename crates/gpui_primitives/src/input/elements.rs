@@ -622,23 +622,6 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let actual_line_width = bounds.size.width;
-        {
-            let input = self.input.read(cx);
-            if let Some(precomputed_width) = input.precomputed_at_width {
-                if (precomputed_width - actual_line_width).abs() > WIDTH_WRAP_BASE_MARGIN
-                    && !input.needs_wrap_recompute
-                {
-                    let _ = input;
-                    self.input.update(cx, |input, cx| {
-                        input.cached_wrap_width = Some(actual_line_width);
-                        input.needs_wrap_recompute = true;
-                        cx.notify();
-                    });
-                }
-            }
-        }
-
         let input = self.input.read(cx);
 
         let visual_info = input
@@ -865,11 +848,51 @@ impl Element for UniformListInputElement {
         &mut self,
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        // Detect container width changes and defer wrap recompute to next frame.
+        // This must happen here (not in WrappedLineElement::prepaint) because the
+        // uniform_list was already built with a fixed item count during render.
+        // Reshaping mid-frame could produce more/fewer visual lines than slots,
+        // causing text to flash in/out of existence.
+        let actual_width = bounds.size.width;
+        if actual_width > Pixels::ZERO {
+            let (precomputed_at_width, cached_wrap_width, needs_wrap_recompute) = {
+                let input = self.input.read(cx);
+                (
+                    input.precomputed_at_width,
+                    input.cached_wrap_width,
+                    input.needs_wrap_recompute,
+                )
+            };
+
+            if cached_wrap_width.is_none() {
+                self.input.update(cx, |input, cx| {
+                    input.cached_wrap_width = Some(actual_width);
+                    let needs_recompute = precomputed_at_width
+                        .map(|pw| (actual_width - pw).abs() > WIDTH_WRAP_BASE_MARGIN)
+                        .unwrap_or(true);
+                    if needs_recompute {
+                        input.needs_wrap_recompute = true;
+                        cx.notify();
+                    }
+                });
+            } else if !needs_wrap_recompute {
+                if let Some(precomputed_width) = precomputed_at_width {
+                    if (actual_width - precomputed_width).abs() > WIDTH_WRAP_BASE_MARGIN {
+                        self.input.update(cx, |input, cx| {
+                            input.cached_wrap_width = Some(actual_width);
+                            input.needs_wrap_recompute = true;
+                            cx.notify();
+                        });
+                    }
+                }
+            }
+        }
+
         self.child.prepaint(window, cx);
     }
 
@@ -912,9 +935,8 @@ impl Element for UniformListInputElement {
 
         self.child.paint(window, cx);
 
-        self.input.update(cx, |input, cx| {
+        self.input.update(cx, |input, _cx| {
             input.last_bounds = Some(bounds);
-            cx.notify();
         });
     }
 }
