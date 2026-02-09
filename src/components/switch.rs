@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use gpui::{
     App, CursorStyle, ElementId, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
-    prelude::FluentBuilder, px,
+    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, bounce, div,
+    ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;

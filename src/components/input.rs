@@ -566,6 +566,7 @@ impl RenderOnce for Input {
                             .child(
                                 self.base
                                     .w_full()
+                                    .h_auto()
                                     .text_size(text_size)
                                     .font_family(font_family)
                                     .text_color(primary_text_color)

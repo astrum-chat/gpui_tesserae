@@ -1,4 +1,6 @@
-use gpui::{Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollStrategy};
+use gpui::{
+    Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollStrategy, px,
+};
 
 use crate::input::state::InputState;
 use crate::utils::TextNavigation;
@@ -96,8 +98,12 @@ impl InputState {
         }
     }
 
-    pub(crate) fn scroll_up_one_line(&self) {
-        if let Some(first) = self.visible_lines_info.first() {
+    pub(crate) fn scroll_up_one_line(&mut self) {
+        if self.is_wrapped {
+            let line_height = self.line_height.unwrap_or(px(16.0));
+            self.vertical_scroll_offset =
+                (self.vertical_scroll_offset - line_height).max(Pixels::ZERO);
+        } else if let Some(first) = self.visible_lines_info.first() {
             if first.line_index > 0 {
                 self.scroll_handle
                     .scroll_to_item(first.line_index - 1, ScrollStrategy::Top);
@@ -105,17 +111,18 @@ impl InputState {
         }
     }
 
-    pub(crate) fn scroll_down_one_line(&self) {
-        let line_count = if self.is_wrapped {
-            self.precomputed_visual_lines.len()
+    pub(crate) fn scroll_down_one_line(&mut self) {
+        if self.is_wrapped {
+            let line_height = self.line_height.unwrap_or(px(16.0));
+            self.vertical_scroll_offset = self.vertical_scroll_offset + line_height;
+            self.clamp_vertical_scroll();
         } else {
-            self.line_count()
-        };
-
-        if let Some(last) = self.visible_lines_info.last() {
-            if last.line_index + 1 < line_count {
-                self.scroll_handle
-                    .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
+            let line_count = self.line_count();
+            if let Some(last) = self.visible_lines_info.last() {
+                if last.line_index + 1 < line_count {
+                    self.scroll_handle
+                        .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
+                }
             }
         }
     }

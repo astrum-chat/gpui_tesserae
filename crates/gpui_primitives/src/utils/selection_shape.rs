@@ -72,43 +72,66 @@ impl SelectionShape {
     }
 }
 
-/// Returns whether a corner at `x` is sufficiently covered by an adjacent line's
-/// selection range. A corner is only "covered" (and thus kept sharp) if the adjacent
-/// line extends past it by more than the corner radius. When the adjacent edge is
-/// within `radius` of this corner, the rounding visually smooths over the small gap
-/// that proportional fonts create between nearly-aligned selection edges.
-fn is_corner_covered(x: Pixels, adjacent_line: Option<(Pixels, Pixels)>, radius: Pixels) -> bool {
-    adjacent_line.map_or(false, |(start, end)| {
-        x >= start + radius && x <= end - radius
+/// Returns whether a left (start) corner is covered by an adjacent line's selection.
+/// Covered when: edges are aligned (within subpixel tolerance), or the adjacent line
+/// extends past this edge by at least `radius` (so its rounding doesn't create a gap).
+fn is_left_corner_covered(
+    this_start: Pixels,
+    adjacent_line: Option<(Pixels, Pixels)>,
+    subpixel_tolerance: Pixels,
+    radius: Pixels,
+) -> bool {
+    adjacent_line.map_or(false, |(adj_start, adj_end)| {
+        // Adjacent selection must reach this corner (overlap check)
+        if adj_end < this_start - subpixel_tolerance {
+            return false;
+        }
+        let diff = this_start - adj_start;
+        diff.abs() <= subpixel_tolerance || diff >= radius
+    })
+}
+
+/// Returns whether a right (end) corner is covered by an adjacent line's selection.
+/// Covered when: edges are aligned (within subpixel tolerance), or the adjacent line
+/// extends past this edge by at least `radius` (so its rounding doesn't create a gap).
+fn is_right_corner_covered(
+    this_end: Pixels,
+    adjacent_line: Option<(Pixels, Pixels)>,
+    subpixel_tolerance: Pixels,
+    radius: Pixels,
+) -> bool {
+    adjacent_line.map_or(false, |(adj_start, adj_end)| {
+        // Adjacent selection must reach this corner (overlap check)
+        if adj_start > this_end + subpixel_tolerance {
+            return false;
+        }
+        let diff = adj_end - this_end;
+        diff.abs() <= subpixel_tolerance || diff >= radius
     })
 }
 
 /// Computes which corners of a selection rectangle should be rounded.
 ///
-/// For multi-line selections, a corner is rounded when "exposed" (not sufficiently
-/// covered by the adjacent line's selection). The tolerance is based on the corner
-/// radius so that nearly-aligned edges in proportional fonts get smooth rounding
-/// instead of sharp jagged corners.
+/// A corner is sharp (not rounded) when:
+/// - The adjacent line's edge aligns with this line's edge (within subpixel tolerance), OR
+/// - The adjacent line extends past this line by at least `radius` (fully covering the corner).
+/// Otherwise the corner is rounded.
 pub fn compute_selection_corners(
     this_start_x: Pixels,
     this_end_x: Pixels,
     prev_line: Option<(Pixels, Pixels)>,
     next_line: Option<(Pixels, Pixels)>,
     radius: Pixels,
+    scale_factor: f32,
 ) -> Corners<Pixels> {
-    let round_if_exposed = |x: Pixels, adjacent: Option<(Pixels, Pixels)>| -> Pixels {
-        if is_corner_covered(x, adjacent, radius) {
-            Pixels::ZERO
-        } else {
-            radius
-        }
-    };
+    let sp = px(scale_factor / 2.0);
+    let round = |covered: bool| -> Pixels { if covered { Pixels::ZERO } else { radius } };
 
     Corners {
-        top_left: round_if_exposed(this_start_x, prev_line),
-        top_right: round_if_exposed(this_end_x, prev_line),
-        bottom_left: round_if_exposed(this_start_x, next_line),
-        bottom_right: round_if_exposed(this_end_x, next_line),
+        top_left: round(is_left_corner_covered(this_start_x, prev_line, sp, radius)),
+        top_right: round(is_right_corner_covered(this_end_x, prev_line, sp, radius)),
+        bottom_left: round(is_left_corner_covered(this_start_x, next_line, sp, radius)),
+        bottom_right: round(is_right_corner_covered(this_end_x, next_line, sp, radius)),
     }
 }
 

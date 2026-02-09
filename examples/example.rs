@@ -51,7 +51,7 @@ impl Render for Main {
             .items_center()
             .absolute()
             .gap(px(20.))
-            .p(px(100.))
+            .p(px(20.))
             .child(
                 Checkbox::new("checkbox")
                     .checked(self.checkbox_checked)
@@ -72,7 +72,8 @@ impl Render for Main {
             )
             .child(
                 Button::new("button")
-                    .w(px(200.))
+                    .w(px(300.))
+                    .max_w_full()
                     .text("Button")
                     .disabled(self.checkbox_checked || self.switch_checked),
             )
@@ -87,11 +88,12 @@ impl Render for Main {
                     window.use_keyed_state(
                         ElementId::from("input").with_suffix("state"),
                         cx,
-                        |_window, cx| InputState::new(cx),
+                        |_window, cx| InputState::new(cx).initial_value("This is a long text that should wrap when the container is narrower than the text width, demonstrating the wrapping behavior"),
                     ),
                 )
                 .word_wrap(true)
-                .w(px(200.))
+                .w(px(300.))
+                .max_w_full()
                 .disabled(self.checkbox_checked || self.switch_checked),
             )
             .child({
@@ -105,7 +107,8 @@ impl Render for Main {
                     .alpha(0.3);
 
                 SelectableText::new("selectable-text", self.selectable_text_state.clone())
-                    .w(px(400.))
+                    .w(px(300.))
+                    .max_w_full()
                     .selection_color(selection_color)
                     .selection_rounded(px(6.))
                     .selection_rounded_smoothing(1.)

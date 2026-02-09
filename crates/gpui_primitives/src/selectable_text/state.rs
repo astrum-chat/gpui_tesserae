@@ -69,6 +69,7 @@ pub struct SelectableTextState {
     pub(crate) precomputed_visual_lines: Vec<VisualLineInfo>,
     pub(crate) precomputed_wrapped_lines: Vec<WrappedLine>,
     pub(crate) precomputed_at_width: Option<Pixels>,
+    #[allow(dead_code)]
     pub(crate) using_auto_width: bool,
     pub(crate) needs_wrap_recompute: bool,
     pub(crate) scroll_to_cursor_on_next_render: bool,
@@ -180,8 +181,8 @@ impl SelectableTextState {
         self.is_wrapped = wrapped;
     }
 
-    /// Pre-computes visual line info for wrapped text. Called during render to prepare
-    /// data for uniform_list. Returns the number of visual lines.
+    /// Pre-computes visual line info for wrapped text. Returns the number of visual lines.
+    #[allow(dead_code)]
     pub(crate) fn precompute_wrapped_lines(
         &mut self,
         width: Pixels,
@@ -214,6 +215,38 @@ impl SelectableTextState {
         }
 
         self.precomputed_visual_lines.len().max(1)
+    }
+
+    /// Re-wraps text at the given width during prepaint when the container has shrunk.
+    /// Uses cached render params from the last render() call.
+    /// Only updates precomputed_visual_lines — does NOT change the uniform_list item count.
+    pub(crate) fn rewrap_at_width(&mut self, width: Pixels, window: &Window) {
+        let Some(font) = self.last_font.clone() else {
+            return;
+        };
+        let Some(font_size) = self.last_font_size else {
+            return;
+        };
+        let Some(text_color) = self.last_text_color else {
+            return;
+        };
+
+        let wrap_width = width + crate::utils::WIDTH_WRAP_BASE_MARGIN;
+        let text = self.get_text();
+
+        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+            &text, wrap_width, font_size, font, text_color, window,
+        );
+
+        let max_line_width = wrapped_lines
+            .iter()
+            .map(|line| line.unwrapped_layout.width)
+            .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+        self.measured_max_line_width = Some(window.round(max_line_width));
+
+        self.precomputed_at_width = Some(wrap_width);
+        self.precomputed_visual_lines = visual_lines;
+        self.precomputed_wrapped_lines = wrapped_lines;
     }
 
     /// Ensure the cursor is visible by scrolling if necessary.

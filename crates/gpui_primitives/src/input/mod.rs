@@ -11,17 +11,15 @@ use std::sync::Arc;
 use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable,
-    RenderOnce, SharedString, StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder,
-    px, rgb, uniform_list,
+    RenderOnce, SharedString, Style, StyleRefinement, Styled, Window, div, hsla,
+    prelude::FluentBuilder, relative, rgb, uniform_list,
 };
 
 use crate::extensions::WindowExt;
 use crate::input::state::{SecondarySubmit, Submit};
 use crate::utils::{TextNavigation, multiline_height, rgb_a};
-use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
-
-pub(crate) use crate::utils::WIDTH_WRAP_BASE_MARGIN;
 pub use cursor_blink::CursorBlink;
+use elements::{LineElement, TextElement, UniformListInputElement, WrappedTextInputElement};
 pub use state::{
     Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,
     DeleteToPreviousWordStart, Down, End, Home, InputState, Left, MapTextFn, MoveToEnd,
@@ -98,8 +96,13 @@ impl Input {
     }
 
     /// Enables or disables word wrapping.
+    /// When enabling word wrap and `line_clamp` is still at the default (1),
+    /// automatically sets unlimited line growth so wrapped lines are visible.
     pub fn word_wrap(mut self, enabled: bool) -> Self {
         self.word_wrap = enabled;
+        if enabled && self.line_clamp == 1 {
+            self.line_clamp = usize::MAX;
+        }
         self
     }
 
@@ -213,7 +216,7 @@ impl Input {
 
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let is_multiline = self.line_clamp > 1;
+        let is_multiline = self.line_clamp > 1 || self.word_wrap;
 
         let text_style = &self.style.text;
         let font_size = match text_style
@@ -266,6 +269,7 @@ impl RenderOnce for Input {
 
         div()
             .id(self.id.clone())
+            .min_w_0()
             .map(|mut this| {
                 this.style().refine(&self.style);
                 this
@@ -455,108 +459,41 @@ impl RenderOnce for Input {
             })
             .when(is_multiline && self.word_wrap, |this| {
                 let font = font.clone();
-                let scroll_handle = self.state.read(cx).scroll_handle.clone();
-                let cached_wrap_width = self.state.read(cx).cached_wrap_width;
-                let input_state = self.state.clone();
-                let transform_text = self.transform_text.clone();
-                let placeholder = self.placeholder.clone();
-                let line_clamp = self.line_clamp;
-                let selection_rounded = self.selection_rounded;
-                let selection_rounded_smoothing = self.selection_rounded_smoothing;
 
-                let wrap_width = cached_wrap_width
-                    .map(|w| w + WIDTH_WRAP_BASE_MARGIN)
-                    .unwrap_or(px(300.));
-                let visual_line_count = self.state.update(cx, |state, _cx| {
-                    let should_recompute =
-                        state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty();
-
-                    if should_recompute {
-                        state.needs_wrap_recompute = false;
-                        let count = state.precompute_wrapped_lines(
-                            wrap_width,
-                            font_size,
-                            font.clone(),
-                            text_color,
-                            window,
-                        );
-                        state.is_wrapped = true;
-                        count
-                    } else {
-                        state.is_wrapped = true;
-                        // Handle deferred scroll even when not recomputing wrapped lines
-                        if state.scroll_to_cursor_on_next_render {
-                            state.scroll_to_cursor_on_next_render = false;
-                            state.ensure_cursor_visible();
-                        }
-                        state.precomputed_visual_lines.len()
-                    }
+                // Cache render params on state (needed for UniformListInputElement's
+                // rewrap_at_width fallback). The measure callback handles wrapping
+                // with the actual width.
+                self.state.update(cx, |state, _cx| {
+                    state.last_font = Some(font.clone());
+                    state.last_font_size = Some(font_size);
+                    state.last_text_color = Some(text_color);
+                    state.is_wrapped = true;
+                    state.needs_wrap_recompute = false;
                 });
 
-                let needs_scroll = visual_line_count > line_clamp;
+                // The parent div keeps the user's sizing (w, max_w, etc.).
+                // The WrappedTextInputElement fills the parent at 100% width
+                // so it gets the parent's resolved width in its measure callback.
+                let mut element_style = Style::default();
+                element_style.size.width = relative(1.).into();
 
-                let list = uniform_list(
-                    self.id.clone(),
-                    visual_line_count,
-                    move |visible_range, _window, cx| {
-                        let state = input_state.read(cx);
-                        let selected_range = state.selected_range.clone();
-                        let cursor_offset = state.cursor_offset();
-                        let visual_lines = &state.precomputed_visual_lines;
-
-                        visible_range
-                            .map(|visual_idx| {
-                                // Get adjacent visual line offsets for corner radius computation
-                                let prev_visual_line_offsets = if visual_idx > 0 {
-                                    visual_lines
-                                        .get(visual_idx - 1)
-                                        .map(|info| (info.start_offset, info.end_offset))
-                                } else {
-                                    None
-                                };
-                                let next_visual_line_offsets = visual_lines
-                                    .get(visual_idx + 1)
-                                    .map(|info| (info.start_offset, info.end_offset));
-
-                                WrappedLineElement {
-                                    input: input_state.clone(),
-                                    visual_line_index: visual_idx,
-                                    text_color,
-                                    placeholder_text_color,
-                                    highlight_text_color,
-                                    line_height,
-                                    font_size,
-                                    font: font.clone(),
-                                    transform_text: transform_text.clone(),
-                                    cursor_visible,
-                                    selected_range: selected_range.clone(),
-                                    cursor_offset,
-                                    placeholder: placeholder.clone(),
-                                    selection_rounded,
-                                    selection_rounded_smoothing,
-                                    prev_visual_line_offsets,
-                                    next_visual_line_offsets,
-                                }
-                            })
-                            .collect()
-                    },
-                )
-                .track_scroll(&scroll_handle)
-                .map(|mut list| {
-                    if !needs_scroll {
-                        list.style().overflow.y = Some(Overflow::Hidden);
-                    }
-                    list
-                })
-                .h(multiline_height(
-                    line_height,
-                    line_clamp.min(visual_line_count).max(1),
-                    scale_factor,
-                ));
-
-                this.child(UniformListInputElement {
+                this.child(WrappedTextInputElement {
                     input: self.state.clone(),
-                    child: list.into_any_element(),
+                    text_color,
+                    placeholder_text_color,
+                    highlight_text_color,
+                    line_height,
+                    font_size,
+                    font: font.clone(),
+                    transform_text: self.transform_text.clone(),
+                    cursor_visible,
+                    placeholder: self.placeholder.clone(),
+                    selection_rounded: self.selection_rounded,
+                    selection_rounded_smoothing: self.selection_rounded_smoothing,
+                    line_clamp: self.line_clamp,
+                    scale_factor,
+                    style: element_style,
+                    children: Vec::new(),
                 })
             })
             .when(!is_multiline, |this| {

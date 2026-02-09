@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, Bounds, DispatchPhase, Element, ElementId, Entity, Font, GlobalElementId,
-    Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine,
-    SharedString, Style, Window, point, px, relative, size,
+    AnyElement, App, AvailableSpace, Bounds, DispatchPhase, Element, ElementId, Entity, Font,
+    GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad,
+    Pixels, ShapedLine, SharedString, Style, Window, point, px, relative, size,
 };
 
 use crate::extensions::WindowExt;
@@ -11,7 +11,7 @@ use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
     SelectionShape, WIDTH_WRAP_BASE_MARGIN, compute_selection_shape, compute_selection_x_bounds,
-    create_text_run,
+    create_text_run, multiline_height,
 };
 
 /// Paints alternating colored rectangles for each character's measured bounds.
@@ -471,6 +471,349 @@ impl Element for WrappedLineElement {
     }
 }
 
+/// Custom element that uses `request_measured_layout` with the user's actual style
+/// (width, max-width, etc.) to be the Taffy leaf node directly. This eliminates the
+/// parent-child height mismatch: since this element IS the container, Taffy's
+/// measurement directly determines the container's height.
+///
+/// The measure callback wraps text at the actual available width and returns the
+/// correct height, which Taffy uses for this node's bounds. No parent div needed.
+///
+/// Children (WrappedLineElements) are created in prepaint and painted in paint,
+/// similar to how GPUI's uniform_list manages its items.
+pub(crate) struct WrappedTextElement {
+    pub state: Entity<SelectableTextState>,
+    pub text_color: Hsla,
+    pub highlight_text_color: Hsla,
+    pub line_height: Pixels,
+    pub font_size: Pixels,
+    pub font: Font,
+    pub selected_range: Range<usize>,
+    pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
+    pub debug_character_bounds: bool,
+    pub debug_wrapping: bool,
+    pub line_clamp: usize,
+    pub scale_factor: f32,
+    pub style: Style,
+    /// Created during prepaint, painted during paint.
+    pub children: Vec<WrappedLineElement>,
+}
+
+pub(crate) struct WrappedTextPrepaintState {
+    child_prepaints: Vec<WrappedLinePrepaintState>,
+}
+
+impl WrappedTextElement {
+    fn paint_debug_overlays(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        if !self.debug_wrapping {
+            return;
+        }
+
+        let precomputed_at_width = self.state.read(cx).precomputed_at_width;
+        if let Some(wrap_width) = precomputed_at_width {
+            let debug_bounds = Bounds {
+                origin: bounds.origin,
+                size: gpui::Size {
+                    width: wrap_width,
+                    height: bounds.size.height,
+                },
+            };
+            window.paint_quad(gpui::PaintQuad {
+                bounds: debug_bounds,
+                corner_radii: gpui::Corners::default(),
+                background: gpui::Hsla {
+                    h: 0.0,
+                    s: 1.0,
+                    l: 0.5,
+                    a: 0.2,
+                }
+                .into(),
+                border_widths: gpui::Edges::default(),
+                border_color: gpui::Hsla::transparent_black(),
+                border_style: gpui::BorderStyle::default(),
+            });
+        }
+
+        let actual_bounds = Bounds {
+            origin: bounds.origin,
+            size: gpui::Size {
+                width: bounds.size.width,
+                height: bounds.size.height,
+            },
+        };
+        window.paint_quad(gpui::PaintQuad {
+            bounds: actual_bounds,
+            corner_radii: gpui::Corners::default(),
+            background: gpui::Hsla::transparent_black().into(),
+            border_widths: gpui::Edges::all(Pixels::from(2.0)),
+            border_color: gpui::Hsla {
+                h: 0.33,
+                s: 1.0,
+                l: 0.5,
+                a: 0.8,
+            },
+            border_style: gpui::BorderStyle::default(),
+        });
+    }
+}
+
+impl IntoElement for WrappedTextElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for WrappedTextElement {
+    type RequestLayoutState = ();
+    type PrepaintState = WrappedTextPrepaintState;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let state = self.state.clone();
+        let line_height = self.line_height;
+        let line_clamp = self.line_clamp;
+        let scale_factor = self.scale_factor;
+        let font = self.font.clone();
+        let font_size = self.font_size;
+        let text_color = self.text_color;
+
+        // Pass the user's actual style (w, max_w, etc.) to request_measured_layout.
+        // This makes THIS element the Taffy leaf node with the user's constraints,
+        // so Taffy resolves the correct available width and our measure callback
+        // returns the correct height directly on this node — no parent needed.
+        let style = self.style.clone();
+
+        let layout_id = window.request_measured_layout(style, {
+            move |known_dimensions, available_space, window, cx| {
+                let width = known_dimensions.width.or(match available_space.width {
+                    AvailableSpace::Definite(x) => Some(x),
+                    _ => None,
+                });
+
+                let Some(width) = width else {
+                    // No definite width available — use existing visual lines as fallback
+                    let count = state.read(cx).precomputed_visual_lines.len().max(1);
+                    let visible = line_clamp.min(count).max(1);
+                    let height = multiline_height(line_height, visible, scale_factor);
+                    return size(Pixels::ZERO, height);
+                };
+
+                let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
+                let text = state.read(cx).get_text();
+
+                let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+                    &text,
+                    wrap_width,
+                    font_size,
+                    font.clone(),
+                    text_color,
+                    window,
+                );
+
+                let visual_line_count = visual_lines.len().max(1);
+
+                let max_line_width = wrapped_lines
+                    .iter()
+                    .map(|line| line.unwrapped_layout.width)
+                    .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+
+                state.update(cx, |state, _cx| {
+                    state.measured_max_line_width = Some(window.round(max_line_width));
+                    state.precomputed_at_width = Some(wrap_width);
+                    state.precomputed_visual_lines = visual_lines;
+                    state.precomputed_wrapped_lines = wrapped_lines;
+                    state.cached_wrap_width = Some(width);
+
+                    if state.scroll_to_cursor_on_next_render {
+                        state.scroll_to_cursor_on_next_render = false;
+                        state.ensure_cursor_visible();
+                    }
+                });
+
+                let visible_lines = line_clamp.min(visual_line_count).max(1);
+                let height = multiline_height(line_height, visible_lines, scale_factor);
+
+                // If Taffy gave us a known width (user set explicit w()), use it.
+                // Otherwise return intrinsic content width clamped to available space.
+                let result_width = if known_dimensions.width.is_some() {
+                    width
+                } else {
+                    let content_width = window.round(max_line_width) + WIDTH_WRAP_BASE_MARGIN;
+                    content_width.min(width)
+                };
+                size(result_width, height)
+            }
+        });
+
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        // Wrapping was already computed in the measure callback with the correct width.
+        // Create children with the exact count needed.
+        let actual_line_count = self.state.read(cx).precomputed_visual_lines.len().max(1);
+        let visual_lines = self.state.read(cx).precomputed_visual_lines.clone();
+
+        self.children.clear();
+        self.children.reserve(actual_line_count);
+
+        for visual_idx in 0..actual_line_count {
+            let prev_visual_line_offsets = if visual_idx > 0 {
+                visual_lines
+                    .get(visual_idx - 1)
+                    .map(|info| (info.start_offset, info.end_offset))
+            } else {
+                None
+            };
+            let next_visual_line_offsets = visual_lines
+                .get(visual_idx + 1)
+                .map(|info| (info.start_offset, info.end_offset));
+
+            self.children.push(WrappedLineElement {
+                state: self.state.clone(),
+                visual_line_index: visual_idx,
+                text_color: self.text_color,
+                highlight_text_color: self.highlight_text_color,
+                line_height: self.line_height,
+                font_size: self.font_size,
+                font: self.font.clone(),
+                selected_range: self.selected_range.clone(),
+                selection_rounded: self.selection_rounded,
+                selection_rounded_smoothing: self.selection_rounded_smoothing,
+                prev_visual_line_offsets,
+                next_visual_line_offsets,
+                debug_character_bounds: self.debug_character_bounds,
+            });
+        }
+
+        // Prepaint children, positioning them manually at line_height intervals.
+        let mut child_prepaints = Vec::with_capacity(actual_line_count);
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let child_bounds = Bounds {
+                origin: point(
+                    bounds.origin.x,
+                    bounds.origin.y + self.line_height * idx as f32,
+                ),
+                size: gpui::Size {
+                    width: bounds.size.width,
+                    height: self.line_height,
+                },
+            };
+
+            let prepaint_state = child.prepaint(None, None, child_bounds, &mut (), window, cx);
+            child_prepaints.push(prepaint_state);
+        }
+
+        WrappedTextPrepaintState { child_prepaints }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let state = self.state.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Capture {
+                return;
+            }
+
+            state.update(cx, |state, cx| {
+                if state.is_selecting {
+                    state.pending_selection_position = Some(event.position);
+                    cx.notify();
+                }
+            });
+        });
+
+        self.state.update(cx, |state, _cx| {
+            state.visible_lines_info.clear();
+        });
+
+        // Paint children with content mask for clipping
+        let visible_lines = self.line_clamp.min(self.children.len()).max(1);
+        let clip_bounds = Bounds {
+            origin: bounds.origin,
+            size: gpui::Size {
+                width: bounds.size.width,
+                height: multiline_height(self.line_height, visible_lines, self.scale_factor),
+            },
+        };
+
+        window.with_content_mask(
+            Some(gpui::ContentMask {
+                bounds: clip_bounds,
+            }),
+            |window| {
+                for (idx, child) in self.children.iter_mut().enumerate() {
+                    let child_bounds = Bounds {
+                        origin: point(
+                            bounds.origin.x,
+                            bounds.origin.y + self.line_height * idx as f32,
+                        ),
+                        size: gpui::Size {
+                            width: bounds.size.width,
+                            height: self.line_height,
+                        },
+                    };
+
+                    if let Some(child_prepaint) = prepaint.child_prepaints.get_mut(idx) {
+                        child.paint(
+                            None,
+                            None,
+                            child_bounds,
+                            &mut (),
+                            child_prepaint,
+                            window,
+                            cx,
+                        );
+                    }
+                }
+            },
+        );
+
+        self.paint_debug_overlays(bounds, window, cx);
+
+        self.state.update(cx, |state, _cx| {
+            state.last_bounds = Some(bounds);
+        });
+
+        // Process pending selection after visible_lines_info is fully populated
+        self.state.update(cx, |state, cx| {
+            state.process_pending_selection(cx);
+        });
+    }
+}
+
 pub(crate) struct UniformListElement {
     pub state: Entity<SelectableTextState>,
     pub child: AnyElement,
@@ -531,60 +874,30 @@ impl UniformListElement {
     }
 
     /// Checks if the container width changed and triggers a wrap recompute if needed.
+    /// Always calls cx.notify() when the width changes to ensure a re-render is scheduled,
+    /// even if GPUI skips render() during fast resize sequences.
     fn check_container_width_change(&self, actual_width: Pixels, cx: &mut App) {
         if actual_width <= Pixels::ZERO {
             return;
         }
 
-        let (precomputed_at_width, cached_wrap_width, needs_wrap_recompute) = {
+        let (cached_wrap_width, needs_wrap_recompute) = {
             let state = self.state.read(cx);
-            (
-                state.precomputed_at_width,
-                state.cached_wrap_width,
-                state.needs_wrap_recompute,
-            )
+            (state.cached_wrap_width, state.needs_wrap_recompute)
         };
 
-        if cached_wrap_width.is_none() {
-            self.initialize_wrap_width(actual_width, precomputed_at_width, cx);
-            return;
-        }
+        let cached = cached_wrap_width.unwrap_or(Pixels::ZERO);
+        let changed = (actual_width - cached).abs() > px(0.01);
 
-        if needs_wrap_recompute {
-            return;
-        }
-
-        if let Some(precomputed_width) = precomputed_at_width {
-            if (actual_width - precomputed_width).abs() > WIDTH_WRAP_BASE_MARGIN {
-                self.trigger_wrap_recompute(actual_width, cx);
-            }
-        }
-    }
-
-    fn initialize_wrap_width(
-        &self,
-        actual_width: Pixels,
-        precomputed_at_width: Option<Pixels>,
-        cx: &mut App,
-    ) {
-        self.state.update(cx, |state, cx| {
-            state.cached_wrap_width = Some(actual_width);
-            let needs_recompute = precomputed_at_width
-                .map(|pw| (actual_width - pw).abs() > WIDTH_WRAP_BASE_MARGIN)
-                .unwrap_or(true);
-            if needs_recompute {
-                state.needs_wrap_recompute = true;
+        if changed || cached_wrap_width.is_none() {
+            self.state.update(cx, |state, cx| {
+                state.cached_wrap_width = Some(actual_width);
+                if !needs_wrap_recompute {
+                    state.needs_wrap_recompute = true;
+                }
                 cx.notify();
-            }
-        });
-    }
-
-    fn trigger_wrap_recompute(&self, actual_width: Pixels, cx: &mut App) {
-        self.state.update(cx, |state, cx| {
-            state.cached_wrap_width = Some(actual_width);
-            state.needs_wrap_recompute = true;
-            cx.notify();
-        });
+            });
+        }
     }
 }
 
@@ -628,12 +941,26 @@ impl Element for UniformListElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         // Update cached_wrap_width and flag recompute if the container width changed.
-        // Do NOT immediately recompute here — the uniform_list was already created with
-        // a fixed item count during render. Reshaping at a narrower width mid-frame could
-        // produce more visual lines than the list has slots for, causing words to disappear.
-        // Instead, let check_container_width_change set needs_wrap_recompute + cx.notify()
-        // so the next frame's render reshapes with the correct cached_wrap_width.
         self.check_container_width_change(bounds.size.width, cx);
+
+        // If the container has SHRUNK since last render, re-wrap text at the actual
+        // narrower width BEFORE child elements prepaint. This prevents partially-clipped
+        // words (e.g. "don'" instead of "don't") during fast resize.
+        // Only re-wrap on shrink — on grow, the old narrower wrap is safe (text just
+        // doesn't fill the width for 1 frame). Re-wrapping on grow would produce fewer
+        // visual lines than uniform_list slots, causing text to vanish for 1 frame.
+        let actual_width = bounds.size.width;
+        if actual_width > Pixels::ZERO {
+            let precomputed_at = self.state.read(cx).precomputed_at_width;
+            let expected_wrap_width = actual_width + WIDTH_WRAP_BASE_MARGIN;
+            if let Some(prev_width) = precomputed_at {
+                if expected_wrap_width < prev_width - px(0.01) {
+                    self.state.update(cx, |state, _cx| {
+                        state.rewrap_at_width(actual_width, window);
+                    });
+                }
+            }
+        }
 
         self.child.prepaint(window, cx);
     }

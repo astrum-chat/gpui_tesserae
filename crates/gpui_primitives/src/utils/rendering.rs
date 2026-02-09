@@ -5,9 +5,11 @@ use gpui::{
     px, size,
 };
 
-use crate::input::VisualLineInfo;
-
 use crate::extensions::WindowExt;
+use crate::input::VisualLineInfo;
+use crate::utils::selection_shape::{
+    SelectionShape, build_selection_shape, compute_selection_corners, selection_config_from_options,
+};
 
 /// Base margin added to wrap widths to prevent janky text wrapping.
 /// Added to fallback width estimates (when no cached container width is available)
@@ -120,7 +122,7 @@ pub fn compute_selection_shape(
     corner_smoothing: Option<f32>,
     prev_line_bounds: Option<(Pixels, Pixels)>,
     next_line_bounds: Option<(Pixels, Pixels)>,
-) -> Option<super::SelectionShape> {
+) -> Option<SelectionShape> {
     let (selection_start_x, mut selection_end_x) = compute_selection_x_bounds(
         line,
         selected_range,
@@ -139,16 +141,22 @@ pub fn compute_selection_shape(
         selection_end_x = max_x;
     }
 
-    let config = super::selection_config_from_options(corner_radius, corner_smoothing);
-    let corners = super::compute_selection_corners(
+    // Clamp adjacent line bounds the same way so corner comparisons are consistent.
+    let clamp_bounds = |b: Option<(Pixels, Pixels)>| -> Option<(Pixels, Pixels)> {
+        b.map(|(start, end)| (start, end.min(max_x)))
+    };
+
+    let config = selection_config_from_options(corner_radius, corner_smoothing);
+    let corners = compute_selection_corners(
         selection_start_x,
         selection_end_x,
-        prev_line_bounds,
-        next_line_bounds,
+        clamp_bounds(prev_line_bounds),
+        clamp_bounds(next_line_bounds),
         config.corner_radius,
+        window.scale_factor(),
     );
 
-    Some(super::build_selection_shape(
+    Some(build_selection_shape(
         bounds,
         selection_start_x,
         selection_end_x,

@@ -149,6 +149,8 @@ pub struct InputState {
 
     /// Horizontal scroll offset for single-line mode (in pixels)
     pub(crate) horizontal_scroll_offset: Pixels,
+    /// Vertical scroll offset for wrapped mode with line_clamp (in pixels)
+    pub(crate) vertical_scroll_offset: Pixels,
     /// Last measured text width (for scroll wheel calculations)
     pub(crate) last_text_width: Pixels,
     /// When true, skip auto-scroll to cursor (user is manually scrolling)
@@ -157,6 +159,11 @@ pub struct InputState {
     pub(crate) skip_auto_scroll_on_next_render: bool,
     /// Whether the current selection is a "select all" (cmd+a)
     pub is_select_all: bool,
+
+    /// Cached render params for use in prepaint-phase re-wrapping
+    pub(crate) last_font: Option<Font>,
+    pub(crate) last_font_size: Option<Pixels>,
+    pub(crate) last_text_color: Option<Hsla>,
 
     /// Undo history stack
     undo_stack: Vec<UndoEntry>,
@@ -195,10 +202,14 @@ impl InputState {
             needs_wrap_recompute: false,
             scroll_to_cursor_on_next_render: false,
             horizontal_scroll_offset: Pixels::ZERO,
+            vertical_scroll_offset: Pixels::ZERO,
             last_text_width: Pixels::ZERO,
             is_manually_scrolling: false,
             skip_auto_scroll_on_next_render: false,
             is_select_all: false,
+            last_font: None,
+            last_font_size: None,
+            last_text_color: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_history: 200,
@@ -230,8 +241,8 @@ impl InputState {
     }
 
     /// Pre-compute visual line info for wrapped text.
-    /// Called during render to prepare data for uniform_list.
     /// Returns the number of visual lines.
+    #[allow(dead_code)]
     pub(crate) fn precompute_wrapped_lines(
         &mut self,
         width: Pixels,
@@ -261,17 +272,83 @@ impl InputState {
         self.precomputed_visual_lines.len().max(1)
     }
 
+    /// Re-wraps text at the given width during prepaint when the container has shrunk.
+    /// Uses cached render params from the last render() call.
+    /// Only updates precomputed_visual_lines — does NOT change the uniform_list item count.
+    pub(crate) fn rewrap_at_width(&mut self, width: Pixels, window: &Window) {
+        let Some(font) = self.last_font.clone() else {
+            return;
+        };
+        let Some(font_size) = self.last_font_size else {
+            return;
+        };
+        let Some(text_color) = self.last_text_color else {
+            return;
+        };
+
+        let wrap_width = width + crate::utils::WIDTH_WRAP_BASE_MARGIN;
+        let text = self.value();
+
+        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+            &text, wrap_width, font_size, font, text_color, window,
+        );
+
+        self.precomputed_at_width = Some(wrap_width);
+        self.precomputed_visual_lines = visual_lines;
+        self.precomputed_wrapped_lines = wrapped_lines;
+    }
+
     /// Ensure the cursor is visible by scrolling if necessary.
     pub fn ensure_cursor_visible(&mut self) {
-        crate::utils::ensure_cursor_visible_in_scroll(
-            self.cursor_offset(),
-            self.is_wrapped,
-            &self.precomputed_visual_lines,
-            self.line_clamp,
-            &self.scroll_handle,
-            |offset| self.offset_to_line_col(offset).0,
-            || self.line_count(),
-        );
+        if self.is_wrapped {
+            // Pixel-based vertical scroll for wrapped mode
+            let line_height = self.line_height.unwrap_or(px(16.0));
+            let cursor = self.cursor_offset();
+            let visual_line = self
+                .precomputed_visual_lines
+                .iter()
+                .position(|info| cursor >= info.start_offset && cursor <= info.end_offset)
+                .unwrap_or(0);
+
+            let line_top = line_height * visual_line as f32;
+            let line_bottom = line_top + line_height;
+            let visible_height = line_height * self.line_clamp as f32;
+
+            if line_top < self.vertical_scroll_offset {
+                self.vertical_scroll_offset = line_top;
+            } else if line_bottom > self.vertical_scroll_offset + visible_height {
+                self.vertical_scroll_offset = line_bottom - visible_height;
+            }
+
+            self.clamp_vertical_scroll();
+        } else {
+            crate::utils::ensure_cursor_visible_in_scroll(
+                self.cursor_offset(),
+                self.is_wrapped,
+                &self.precomputed_visual_lines,
+                self.line_clamp,
+                &self.scroll_handle,
+                |offset| self.offset_to_line_col(offset).0,
+                || self.line_count(),
+            );
+        }
+    }
+
+    /// Clamp vertical scroll offset to valid bounds.
+    pub(crate) fn clamp_vertical_scroll(&mut self) {
+        let line_height = self.line_height.unwrap_or(px(16.0));
+        let total_lines = self.precomputed_visual_lines.len().max(1);
+        let visible_lines = self.line_clamp.min(total_lines);
+        let max_scroll = line_height * (total_lines - visible_lines) as f32;
+        let max_scroll = if max_scroll > Pixels::ZERO {
+            max_scroll
+        } else {
+            Pixels::ZERO
+        };
+        self.vertical_scroll_offset = self
+            .vertical_scroll_offset
+            .max(Pixels::ZERO)
+            .min(max_scroll);
     }
 
     /// Ensure the cursor is horizontally visible in single-line or non-wrapped multiline mode.
@@ -702,7 +779,7 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    /// Handles trackpad/mouse horizontal scrolling in non-wrapped mode.
+    /// Handles scroll wheel events: vertical scroll in wrapped mode, horizontal in non-wrapped.
     pub fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -712,13 +789,33 @@ impl InputState {
         let line_height = self.line_height.unwrap_or(px(16.0));
         let delta = event.delta.pixel_delta(line_height);
 
-        // Check if there's vertical scrollable content (more lines than visible)
+        if self.is_wrapped {
+            // Wrapped mode: handle vertical scrolling
+            let total_visual_lines = self.precomputed_visual_lines.len().max(1);
+            let has_vertical_scroll = total_visual_lines > self.line_clamp;
+
+            if has_vertical_scroll && delta.y.abs() > px(0.01) {
+                let max_scroll = line_height * (total_visual_lines - self.line_clamp) as f32;
+                let new_offset = (self.vertical_scroll_offset - delta.y)
+                    .max(Pixels::ZERO)
+                    .min(max_scroll);
+
+                if new_offset != self.vertical_scroll_offset {
+                    self.vertical_scroll_offset = new_offset;
+                    self.is_manually_scrolling = true;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }
+            return;
+        }
+
+        // Non-wrapped mode: check for scrollable content
         let has_vertical_scroll = self.line_count() > self.line_clamp;
 
-        // Check if there's horizontal scrollable content
         let container_width = self.last_bounds.map(|b| b.size.width).unwrap_or(px(100.0));
         let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
-        let has_horizontal_scroll = !self.is_wrapped && max_scroll > Pixels::ZERO;
+        let has_horizontal_scroll = max_scroll > Pixels::ZERO;
 
         // Stop propagation if we have scrollable content in the scroll direction
         let is_vertical_scroll = delta.y.abs() > delta.x.abs();
@@ -728,18 +825,12 @@ impl InputState {
             cx.stop_propagation();
         }
 
-        // Don't handle horizontal scroll in wrapped mode (text wraps instead)
-        if self.is_wrapped {
-            return;
-        }
-
-        // Only handle horizontal scroll (use px comparison)
+        // Only handle horizontal scroll
         if delta.x.abs() < px(0.01) {
             return;
         }
 
         // Apply horizontal scroll (negative delta.x = scroll right, positive = scroll left)
-        // Note: delta.x is positive when scrolling left (content moves right)
         let new_offset = (self.horizontal_scroll_offset - delta.x)
             .max(Pixels::ZERO)
             .min(max_scroll);

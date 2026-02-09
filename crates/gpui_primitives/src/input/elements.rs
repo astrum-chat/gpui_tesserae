@@ -1,18 +1,20 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, Bounds, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, Font,
-    GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad,
-    Pixels, ShapedLine, SharedString, Style, TextRun, UnderlineStyle, Window, point, px, relative,
+    AnyElement, App, AvailableSpace, Bounds, DispatchPhase, Element, ElementId,
+    ElementInputHandler, Entity, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement,
+    LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, TextRun,
+    UnderlineStyle, Window, point, px, relative, size,
 };
 
 use crate::extensions::WindowExt;
 use crate::input::state::InputState;
-use crate::input::{TransformTextFn, VisibleLineInfo, WIDTH_WRAP_BASE_MARGIN};
+use crate::input::{TransformTextFn, VisibleLineInfo};
 use crate::utils::{
     SelectionShape, TextNavigation, build_selection_shape, compute_selection_shape,
     compute_selection_x_bounds, create_text_run, make_cursor_quad, selection_config_from_options,
 };
+use crate::utils::{WIDTH_WRAP_BASE_MARGIN, multiline_height};
 
 /// Helper: shapes a line from text slice, then computes selection x-bounds via shared util.
 fn shape_and_compute_selection_bounds(
@@ -934,6 +936,304 @@ impl Element for UniformListInputElement {
         });
 
         self.child.paint(window, cx);
+
+        self.input.update(cx, |input, _cx| {
+            input.last_bounds = Some(bounds);
+        });
+    }
+}
+
+/// Custom element that uses `request_measured_layout` with the user's actual style
+/// (width, max-width, etc.) to be the Taffy leaf node directly. This eliminates the
+/// parent-child height mismatch: since this element IS the container, Taffy's
+/// measurement directly determines the container's height.
+///
+/// The measure callback wraps text at the actual available width and returns the
+/// correct height in the same frame — no one-frame clipping during rapid resize.
+///
+/// Children (WrappedLineElements) are created in prepaint and painted in paint,
+/// similar to how GPUI's uniform_list manages its items.
+pub(crate) struct WrappedTextInputElement {
+    pub input: Entity<InputState>,
+    pub text_color: Hsla,
+    pub placeholder_text_color: Hsla,
+    pub highlight_text_color: Hsla,
+    pub line_height: Pixels,
+    pub font_size: Pixels,
+    pub font: Font,
+    pub transform_text: Option<TransformTextFn>,
+    pub cursor_visible: bool,
+    pub placeholder: SharedString,
+    pub selection_rounded: Option<Pixels>,
+    pub selection_rounded_smoothing: Option<f32>,
+    pub line_clamp: usize,
+    pub scale_factor: f32,
+    pub style: Style,
+    /// Created during prepaint, painted during paint.
+    pub children: Vec<WrappedLineElement>,
+}
+
+pub(crate) struct WrappedTextInputPrepaintState {
+    child_prepaints: Vec<WrappedLinePrepaintState>,
+}
+
+impl IntoElement for WrappedTextInputElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for WrappedTextInputElement {
+    type RequestLayoutState = ();
+    type PrepaintState = WrappedTextInputPrepaintState;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let state = self.input.clone();
+        let line_height = self.line_height;
+        let line_clamp = self.line_clamp;
+        let scale_factor = self.scale_factor;
+        let font = self.font.clone();
+        let font_size = self.font_size;
+        let text_color = self.text_color;
+
+        let style = self.style.clone();
+
+        let layout_id = window.request_measured_layout(style, {
+            move |known_dimensions, available_space, window, cx| {
+                let width = known_dimensions.width.or(match available_space.width {
+                    AvailableSpace::Definite(x) => Some(x),
+                    _ => None,
+                });
+
+                let Some(width) = width else {
+                    // No definite width available — use existing visual lines as fallback
+                    let count = state.read(cx).precomputed_visual_lines.len().max(1);
+                    let visible = line_clamp.min(count).max(1);
+                    let height = multiline_height(line_height, visible, scale_factor);
+                    return size(Pixels::ZERO, height);
+                };
+
+                let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
+                let text = state.read(cx).value();
+
+                let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+                    &text,
+                    wrap_width,
+                    font_size,
+                    font.clone(),
+                    text_color,
+                    window,
+                );
+
+                let visual_line_count = visual_lines.len().max(1);
+
+                let max_line_width = wrapped_lines
+                    .iter()
+                    .map(|line| line.unwrapped_layout.width)
+                    .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+
+                state.update(cx, |state, _cx| {
+                    state.precomputed_at_width = Some(wrap_width);
+                    state.precomputed_visual_lines = visual_lines;
+                    state.precomputed_wrapped_lines = wrapped_lines;
+                    state.cached_wrap_width = Some(width);
+                    state.clamp_vertical_scroll();
+
+                    if state.scroll_to_cursor_on_next_render {
+                        state.scroll_to_cursor_on_next_render = false;
+                        state.ensure_cursor_visible();
+                    }
+                });
+
+                let visible_lines = line_clamp.min(visual_line_count).max(1);
+                let height = multiline_height(line_height, visible_lines, scale_factor);
+
+                // If Taffy gave us a known width (user set explicit w()), use it.
+                // Otherwise return intrinsic content width clamped to available space.
+                let result_width = if known_dimensions.width.is_some() {
+                    width
+                } else {
+                    let content_width = window.round(max_line_width) + WIDTH_WRAP_BASE_MARGIN;
+                    content_width.min(width)
+                };
+                size(result_width, height)
+            }
+        });
+
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> WrappedTextInputPrepaintState {
+        let actual_line_count = self.input.read(cx).precomputed_visual_lines.len().max(1);
+        let visual_lines = self.input.read(cx).precomputed_visual_lines.clone();
+        let selected_range = self.input.read(cx).selected_range.clone();
+        let cursor_offset = self.input.read(cx).cursor_offset();
+        let vertical_scroll_offset = self.input.read(cx).vertical_scroll_offset;
+
+        self.children.clear();
+        self.children.reserve(actual_line_count);
+
+        for visual_idx in 0..actual_line_count {
+            let prev_visual_line_offsets = if visual_idx > 0 {
+                visual_lines
+                    .get(visual_idx - 1)
+                    .map(|info| (info.start_offset, info.end_offset))
+            } else {
+                None
+            };
+            let next_visual_line_offsets = visual_lines
+                .get(visual_idx + 1)
+                .map(|info| (info.start_offset, info.end_offset));
+
+            self.children.push(WrappedLineElement {
+                input: self.input.clone(),
+                visual_line_index: visual_idx,
+                text_color: self.text_color,
+                placeholder_text_color: self.placeholder_text_color,
+                highlight_text_color: self.highlight_text_color,
+                line_height: self.line_height,
+                font_size: self.font_size,
+                font: self.font.clone(),
+                transform_text: self.transform_text.clone(),
+                cursor_visible: self.cursor_visible,
+                selected_range: selected_range.clone(),
+                cursor_offset,
+                placeholder: self.placeholder.clone(),
+                selection_rounded: self.selection_rounded,
+                selection_rounded_smoothing: self.selection_rounded_smoothing,
+                prev_visual_line_offsets,
+                next_visual_line_offsets,
+            });
+        }
+
+        // Prepaint children, positioning them at line_height intervals offset by vertical scroll.
+        let mut child_prepaints = Vec::with_capacity(actual_line_count);
+        for (idx, child) in self.children.iter_mut().enumerate() {
+            let child_bounds = Bounds {
+                origin: point(
+                    bounds.origin.x,
+                    bounds.origin.y + self.line_height * idx as f32 - vertical_scroll_offset,
+                ),
+                size: gpui::Size {
+                    width: bounds.size.width,
+                    height: self.line_height,
+                },
+            };
+
+            let prepaint_state = child.prepaint(None, None, child_bounds, &mut (), window, cx);
+            child_prepaints.push(prepaint_state);
+        }
+
+        WrappedTextInputPrepaintState { child_prepaints }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut WrappedTextInputPrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus_handle = self.input.read(cx).focus_handle.clone();
+
+        // Register ElementInputHandler for IME/text input
+        window.handle_input(
+            &focus_handle,
+            ElementInputHandler::new(bounds, self.input.clone()),
+            cx,
+        );
+
+        // Mouse drag selection
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Capture {
+                return;
+            }
+
+            input.update(cx, |input, cx| {
+                if input.is_selecting {
+                    if let Some(line_height) = input.line_height {
+                        input.select_to_multiline(event.position, line_height, cx);
+                    }
+                }
+            });
+        });
+
+        let vertical_scroll_offset = self.input.read(cx).vertical_scroll_offset;
+
+        self.input.update(cx, |input, _cx| {
+            input.visible_lines_info.clear();
+        });
+
+        // Paint children with content mask for clipping
+        let visible_lines = self.line_clamp.min(self.children.len()).max(1);
+        let clip_bounds = Bounds {
+            origin: bounds.origin,
+            size: gpui::Size {
+                width: bounds.size.width,
+                height: multiline_height(self.line_height, visible_lines, self.scale_factor),
+            },
+        };
+
+        window.with_content_mask(
+            Some(gpui::ContentMask {
+                bounds: clip_bounds,
+            }),
+            |window| {
+                for (idx, child) in self.children.iter_mut().enumerate() {
+                    let child_bounds = Bounds {
+                        origin: point(
+                            bounds.origin.x,
+                            bounds.origin.y + self.line_height * idx as f32
+                                - vertical_scroll_offset,
+                        ),
+                        size: gpui::Size {
+                            width: bounds.size.width,
+                            height: self.line_height,
+                        },
+                    };
+
+                    if let Some(child_prepaint) = prepaint.child_prepaints.get_mut(idx) {
+                        child.paint(
+                            None,
+                            None,
+                            child_bounds,
+                            &mut (),
+                            child_prepaint,
+                            window,
+                            cx,
+                        );
+                    }
+                }
+            },
+        );
 
         self.input.update(cx, |input, _cx| {
             input.last_bounds = Some(bounds);

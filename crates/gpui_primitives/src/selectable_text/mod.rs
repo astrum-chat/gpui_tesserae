@@ -6,13 +6,13 @@ mod state;
 use gpui::{
     AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
     InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels,
-    Refineable, RenderOnce, SharedString, StyleRefinement, Styled, Window, div,
+    Refineable, RenderOnce, SharedString, Style, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder, rgb, uniform_list,
 };
 
 use crate::extensions::WindowExt;
 use crate::utils::{TextNavigation, WIDTH_WRAP_BASE_MARGIN, multiline_height, rgb_a};
-use elements::{LineElement, UniformListElement, WrappedLineElement};
+use elements::{LineElement, UniformListElement, WrappedTextElement};
 
 pub use state::{
     Copy, Down, End, Home, Left, MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord,
@@ -21,6 +21,7 @@ pub use state::{
     SelectToStartOfLine, SelectUp, SelectableTextState, Up, VisibleLineInfo, VisualLineInfo,
 };
 
+#[allow(dead_code)]
 fn compute_effective_width(
     user_wants_auto_width: bool,
     has_max_width_constraint: bool,
@@ -63,33 +64,31 @@ fn compute_effective_width(
     }
 }
 
+#[allow(dead_code)]
 fn compute_wrap_width(
     cached_wrap_width: Option<Pixels>,
     measured_width: Option<Pixels>,
     max_width_px: Option<Pixels>,
     user_wants_auto_width: bool,
 ) -> Pixels {
-    // Always add WIDTH_WRAP_BASE_MARGIN to the wrap width, regardless of whether we're
-    // using the cached container width or a fallback estimate. This ensures consistent
-    // wrapping across frames (prevents two-frame jitter where frame 1 wraps wider than
-    // frame 2) and provides a safety buffer against subpixel rounding.
-    if user_wants_auto_width {
+    // Add WIDTH_WRAP_BASE_MARGIN on every path so that wrap width is consistent across
+    // frames. The margin is added exactly once here — callers must not add it again.
+    let base = if user_wants_auto_width {
         if let Some(cached) = cached_wrap_width {
-            let w = max_width_px.map_or(cached, |max_w| cached.min(max_w));
-            return w + WIDTH_WRAP_BASE_MARGIN;
+            max_width_px.map_or(cached, |max_w| cached.min(max_w))
+        } else {
+            let width = max_width_px.or(measured_width).unwrap_or(Pixels::MAX);
+            max_width_px.map_or(width, |max_w| width.min(max_w))
         }
-        let width = max_width_px.or(measured_width).unwrap_or(Pixels::MAX);
-        let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
-        clamped + WIDTH_WRAP_BASE_MARGIN
     } else {
         if let Some(cached) = cached_wrap_width {
-            let w = max_width_px.map_or(cached, |max_w| cached.min(max_w));
-            return w + WIDTH_WRAP_BASE_MARGIN;
+            max_width_px.map_or(cached, |max_w| cached.min(max_w))
+        } else {
+            let width = max_width_px.unwrap_or(Pixels::MAX);
+            max_width_px.map_or(width, |max_w| width.min(max_w))
         }
-        let width = max_width_px.unwrap_or(Pixels::MAX);
-        let clamped = max_width_px.map_or(width, |max_w| width.min(max_w));
-        clamped + WIDTH_WRAP_BASE_MARGIN
-    }
+    };
+    base + WIDTH_WRAP_BASE_MARGIN
 }
 
 /// A selectable text element for displaying read-only text with selection and copy support.
@@ -398,8 +397,20 @@ impl RenderOnce for SelectableText {
             .id(self.id.clone())
             .min_w_0()
             .map(|mut this| {
-                this.style().refine(&self.style);
-                self.apply_auto_width(this.style(), &width_params);
+                if self.word_wrap {
+                    // For the wrapped path, DON'T apply sizing styles (w, max_w, etc.)
+                    // to the parent div. Those go on the WrappedTextElement via
+                    // request_measured_layout so Taffy computes height correctly in
+                    // a single pass. Only apply non-sizing styles (bg, border, text, etc.).
+                    let mut style_without_sizing = self.style.clone();
+                    style_without_sizing.size = Default::default();
+                    style_without_sizing.min_size = Default::default();
+                    style_without_sizing.max_size = Default::default();
+                    this.style().refine(&style_without_sizing);
+                } else {
+                    this.style().refine(&self.style);
+                    self.apply_auto_width(this.style(), &width_params);
+                }
                 this
             })
             .key_context("SelectableText")
@@ -413,15 +424,7 @@ impl RenderOnce for SelectableText {
             self.render_unwrapped_list(this, &params, user_wants_auto_width, max_width_px, cx)
         })
         .when(self.word_wrap, |this| {
-            self.render_wrapped_list(
-                this,
-                &params,
-                user_wants_auto_width,
-                has_max_width_constraint,
-                max_width_px,
-                window,
-                cx,
-            )
+            self.render_wrapped_list(this, &params, &width_params, window, cx)
         })
     }
 }
@@ -577,136 +580,57 @@ impl SelectableText {
         &self,
         container: gpui::Stateful<gpui::Div>,
         params: &RenderParams,
-        user_wants_auto_width: bool,
-        has_max_width_constraint: bool,
-        max_width_px: Option<Pixels>,
-        window: &mut Window,
+        _width_params: &WidthParams,
+        _window: &mut Window,
         cx: &mut App,
     ) -> gpui::Stateful<gpui::Div> {
         let font = params.font.clone();
-        let (scroll_handle, cached_wrap_width, measured_max_line_width) = {
-            let state = self.state.read(cx);
-            (
-                state.scroll_handle.clone(),
-                state.cached_wrap_width,
-                state.measured_max_line_width,
-            )
-        };
-        let state_entity = self.state.clone();
-        let line_clamp = self.line_clamp;
         let text_color = params.text_color;
         let highlight_text_color = params.highlight_text_color;
         let line_height = params.line_height;
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
-        let selection_rounded = self.selection_rounded;
-        let selection_rounded_smoothing = self.selection_rounded_smoothing;
-        let debug_character_bounds = self.debug_character_bounds;
 
-        let wrap_width = compute_wrap_width(
-            cached_wrap_width,
-            measured_max_line_width,
-            max_width_px,
-            user_wants_auto_width,
-        );
-
-        let (effective_width, use_relative_width) = compute_effective_width(
-            user_wants_auto_width,
-            has_max_width_constraint,
-            cached_wrap_width,
-            measured_max_line_width,
-            max_width_px,
-        );
-
-        let visual_line_count = self.state.update(cx, |state, _cx| {
-            state.using_auto_width = !use_relative_width && effective_width.is_some();
-            // Cache render params for use in paint phase
+        // Cache render params on state (needed for UniformListElement's rewrap_at_width fallback).
+        // The WrappedTextElement's measure callback handles wrapping with the actual width.
+        self.state.update(cx, |state, _cx| {
             state.last_font = Some(font.clone());
             state.last_font_size = Some(font_size);
             state.last_text_color = Some(text_color);
-
-            if state.needs_wrap_recompute || state.precomputed_visual_lines.is_empty() {
-                state.needs_wrap_recompute = false;
-                state.precompute_wrapped_lines(
-                    wrap_width,
-                    font_size,
-                    font.clone(),
-                    text_color,
-                    window,
-                )
-            } else {
-                if state.scroll_to_cursor_on_next_render {
-                    state.scroll_to_cursor_on_next_render = false;
-                    state.ensure_cursor_visible();
-                }
-                state.precomputed_visual_lines.len()
-            }
+            state.needs_wrap_recompute = false;
         });
 
-        let needs_scroll = visual_line_count > line_clamp;
+        let selected_range = self.state.read(cx).selected_range.clone();
 
-        let list = uniform_list(
-            self.id.clone(),
-            visual_line_count,
-            move |visible_range, _window, cx| {
-                let state = state_entity.read(cx);
-                let selected_range = state.selected_range.clone();
-                let visual_lines = &state.precomputed_visual_lines;
+        // Build a Style with the user's sizing constraints (w, max_w, etc.)
+        // to pass to WrappedTextElement's request_measured_layout. The parent div
+        // has no sizing — it naturally takes the child's size. This way Taffy
+        // computes height correctly from the measure callback on this node directly,
+        // avoiding the parent-child dual-call height mismatch.
+        let mut element_style = Style::default();
+        element_style.refine(&StyleRefinement {
+            size: self.style.size.clone(),
+            min_size: self.style.min_size.clone(),
+            max_size: self.style.max_size.clone(),
+            ..Default::default()
+        });
 
-                visible_range
-                    .map(|visual_idx| {
-                        // Get adjacent visual line offsets for corner radius computation
-                        let prev_visual_line_offsets = if visual_idx > 0 {
-                            visual_lines
-                                .get(visual_idx - 1)
-                                .map(|info| (info.start_offset, info.end_offset))
-                        } else {
-                            None
-                        };
-                        let next_visual_line_offsets = visual_lines
-                            .get(visual_idx + 1)
-                            .map(|info| (info.start_offset, info.end_offset));
-
-                        WrappedLineElement {
-                            state: state_entity.clone(),
-                            visual_line_index: visual_idx,
-                            text_color,
-                            highlight_text_color,
-                            line_height,
-                            font_size,
-                            font: font.clone(),
-                            selected_range: selected_range.clone(),
-                            selection_rounded,
-                            selection_rounded_smoothing,
-                            prev_visual_line_offsets,
-                            next_visual_line_offsets,
-                            debug_character_bounds,
-                        }
-                    })
-                    .collect()
-            },
-        )
-        .track_scroll(&scroll_handle)
-        .map(move |mut list| {
-            if !needs_scroll {
-                list.style().overflow.y = Some(Overflow::Hidden);
-            }
-            list.style().size.width = Some(gpui::relative(1.).into());
-            if let Some(width) = effective_width {
-                list.style().max_size.width = Some(width.into());
-            }
-            list
-        })
-        .h(multiline_height(
-            line_height,
-            line_clamp.min(visual_line_count).max(1),
-            scale_factor,
-        ));
-
-        container.child(UniformListElement {
+        container.child(WrappedTextElement {
             state: self.state.clone(),
-            child: list.into_any_element(),
+            text_color,
+            highlight_text_color,
+            line_height,
+            font_size,
+            font: font.clone(),
+            selected_range,
+            selection_rounded: self.selection_rounded,
+            selection_rounded_smoothing: self.selection_rounded_smoothing,
+            debug_character_bounds: self.debug_character_bounds,
             debug_wrapping: self.debug_wrapping,
+            line_clamp: self.line_clamp,
+            scale_factor,
+            style: element_style,
+            children: Vec::new(),
         })
     }
 }
@@ -884,8 +808,8 @@ mod tests {
     }
 
     #[test]
-    fn test_wrap_width_fallback_uses_base_margin() {
-        // Fallback estimate uses base margin
+    fn test_wrap_width_fallback_uses_margin() {
+        // Fallback uses base margin, same as cached path
         let result = compute_wrap_width(None, Some(px(200.)), Some(px(300.)), true);
         assert_eq!(result, px(300.) + WIDTH_WRAP_BASE_MARGIN);
     }
