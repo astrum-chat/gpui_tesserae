@@ -69,7 +69,7 @@ pub fn compute_selection_x_bounds(
     text_color: Hsla,
     window: &mut Window,
 ) -> Option<(Pixels, Pixels)> {
-    let selection_intersects = selected_range.start <= line_end && selected_range.end >= line_start;
+    let selection_intersects = selected_range.start < line_end && selected_range.end > line_start;
 
     if selected_range.is_empty() || !selection_intersects {
         return None;

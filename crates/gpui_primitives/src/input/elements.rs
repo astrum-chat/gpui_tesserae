@@ -392,8 +392,8 @@ impl Element for LineElement {
             None
         };
 
-        let selection_intersects = self.selected_range.start <= self.line_end_offset
-            && self.selected_range.end >= self.line_start_offset;
+        let selection_intersects = self.selected_range.start < self.line_end_offset
+            && self.selected_range.end > self.line_start_offset;
 
         let container_width = bounds.size.width;
         let scroll_offset = {
@@ -691,7 +691,7 @@ impl Element for WrappedLineElement {
         };
 
         let selection_intersects =
-            self.selected_range.start <= line_end && self.selected_range.end >= line_start;
+            self.selected_range.start < line_end && self.selected_range.end > line_start;
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             // Compute adjacent line selection bounds for corner radius
