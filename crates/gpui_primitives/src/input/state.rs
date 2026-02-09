@@ -272,32 +272,6 @@ impl InputState {
         self.precomputed_visual_lines.len().max(1)
     }
 
-    /// Re-wraps text at the given width during prepaint when the container has shrunk.
-    /// Uses cached render params from the last render() call.
-    /// Only updates precomputed_visual_lines — does NOT change the uniform_list item count.
-    pub(crate) fn rewrap_at_width(&mut self, width: Pixels, window: &Window) {
-        let Some(font) = self.last_font.clone() else {
-            return;
-        };
-        let Some(font_size) = self.last_font_size else {
-            return;
-        };
-        let Some(text_color) = self.last_text_color else {
-            return;
-        };
-
-        let wrap_width = width + crate::utils::WIDTH_WRAP_BASE_MARGIN;
-        let text = self.value();
-
-        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
-            &text, wrap_width, font_size, font, text_color, window,
-        );
-
-        self.precomputed_at_width = Some(wrap_width);
-        self.precomputed_visual_lines = visual_lines;
-        self.precomputed_wrapped_lines = wrapped_lines;
-    }
-
     /// Ensure the cursor is visible by scrolling if necessary.
     pub fn ensure_cursor_visible(&mut self) {
         if self.is_wrapped {
