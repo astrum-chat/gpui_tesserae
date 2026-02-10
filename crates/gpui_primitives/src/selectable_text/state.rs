@@ -219,7 +219,7 @@ impl SelectableTextState {
 
     /// Re-wraps text at the given width during prepaint when the container has shrunk.
     /// Uses cached render params from the last render() call.
-    /// Only updates precomputed_visual_lines — does NOT change the uniform_list item count.
+    /// Only updates precomputed_visual_lines - does NOT change the uniform_list item count.
     pub(crate) fn rewrap_at_width(&mut self, width: Pixels, window: &Window) {
         let Some(font) = self.last_font.clone() else {
             return;

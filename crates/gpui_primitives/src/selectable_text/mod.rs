@@ -30,7 +30,7 @@ fn compute_effective_width(
     max_width_px: Option<Pixels>,
 ) -> (Option<Pixels>, bool) {
     // Always use just the base margin for div sizing. The whitespace margin
-    // is only relevant for compute_wrap_width's fallback estimates — adding
+    // is only relevant for compute_wrap_width's fallback estimates - adding
     // it to the div width creates a feedback loop where the div width changes
     // based on the visual line count, causing oscillation.
     let margin = WIDTH_WRAP_BASE_MARGIN;
@@ -72,7 +72,7 @@ fn compute_wrap_width(
     user_wants_auto_width: bool,
 ) -> Pixels {
     // Add WIDTH_WRAP_BASE_MARGIN on every path so that wrap width is consistent across
-    // frames. The margin is added exactly once here — callers must not add it again.
+    // frames. The margin is added exactly once here - callers must not add it again.
     let base = if user_wants_auto_width {
         if let Some(cached) = cached_wrap_width {
             max_width_px.map_or(cached, |max_w| cached.min(max_w))
@@ -249,7 +249,7 @@ impl SelectableText {
             return;
         };
 
-        // Always use just the base margin for div sizing — see compute_effective_width.
+        // Always use just the base margin for div sizing - see compute_effective_width.
         let margin = WIDTH_WRAP_BASE_MARGIN;
         let auto_width = measured + margin;
 
@@ -614,7 +614,7 @@ impl SelectableText {
 
         // Build a Style with the user's sizing constraints (w, max_w, etc.)
         // to pass to WrappedTextElement's request_measured_layout. The parent div
-        // has no sizing — it naturally takes the child's size. This way Taffy
+        // has no sizing - it naturally takes the child's size. This way Taffy
         // computes height correctly from the measure callback on this node directly,
         // avoiding the parent-child dual-call height mismatch.
         let mut element_style = Style::default();

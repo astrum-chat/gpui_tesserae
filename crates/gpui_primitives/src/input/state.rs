@@ -1173,7 +1173,7 @@ impl EntityInputHandler for InputState {
             ));
         }
 
-        // Path 2: Multiline (wrapped or non-wrapped) — use visible_lines_info
+        // Path 2: Multiline (wrapped or non-wrapped) - use visible_lines_info
         // populated during paint by LineElement / WrappedLineElement
         for info in &self.visible_lines_info {
             let (line_start, line_end) = if self.is_wrapped {
@@ -1208,7 +1208,7 @@ impl EntityInputHandler for InputState {
             }
         }
 
-        // Fallback: cursor line not visible (scrolled off-screen) — return
+        // Fallback: cursor line not visible (scrolled off-screen) - return
         // bounds at top of container so the menu appears near the input.
         let line_h = self.line_height.unwrap_or(px(20.));
         Some(Bounds::from_corners(

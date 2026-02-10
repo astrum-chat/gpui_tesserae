@@ -953,7 +953,7 @@ impl Element for UniformListInputElement {
 /// measurement directly determines the container's height.
 ///
 /// The measure callback wraps text at the actual available width and returns the
-/// correct height in the same frame — no one-frame clipping during rapid resize.
+/// correct height in the same frame - no one-frame clipping during rapid resize.
 ///
 /// Children (WrappedLineElements) are created in prepaint and painted in paint,
 /// similar to how GPUI's uniform_list manages its items.
@@ -1027,7 +1027,7 @@ impl Element for WrappedTextInputElement {
                 });
 
                 let Some(width) = width else {
-                    // No definite width available — use existing visual lines as fallback
+                    // No definite width available - use existing visual lines as fallback
                     let count = state.read(cx).precomputed_visual_lines.len().max(1);
                     let visible = line_clamp.min(count).max(1);
                     let height = multiline_height(line_height, visible, scale_factor);

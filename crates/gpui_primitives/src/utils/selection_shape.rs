@@ -445,7 +445,7 @@ const MIN_INTERIOR_CORNER_STEP: Pixels = px(2.0);
 /// Each patch is a small filled shape that rounds the concave corner at the step.
 ///
 /// `bounds_left` is the absolute left edge of the line's render bounds.
-/// `line_height` is the vertical extent of the line — used as the patch size in both
+/// `line_height` is the vertical extent of the line - used as the patch size in both
 /// x and y directions so concave patches visually match the convex outer corners.
 /// `scroll_offset` is subtracted from x-coordinates for scrolled views.
 pub(crate) fn compute_interior_corner_patches(
@@ -477,7 +477,7 @@ pub(crate) fn compute_interior_corner_patches(
     let mut patches = Vec::new();
 
     // Helper: builds an interior corner patch and pushes it if the step is large enough.
-    // Skips when the step is smaller than the corner radius — in that range the adjacent
+    // Skips when the step is smaller than the corner radius - in that range the adjacent
     // line's rounded exterior corner already covers the visual transition.
     fn try_push_patch(
         patches: &mut Vec<SelectionPrimitive>,
@@ -500,7 +500,7 @@ pub(crate) fn compute_interior_corner_patches(
             return;
         }
         let rx = patch_size.min(available);
-        // Skip if the clamped width is less than half the full patch size —
+        // Skip if the clamped width is less than half the full patch size -
         // too narrow to render a recognizable concave curve.
         if rx < patch_size * 0.25 {
             return;

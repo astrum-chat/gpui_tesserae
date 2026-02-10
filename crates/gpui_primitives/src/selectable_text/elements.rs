@@ -635,7 +635,7 @@ impl Element for WrappedTextElement {
         // Pass the user's actual style (w, max_w, etc.) to request_measured_layout.
         // This makes THIS element the Taffy leaf node with the user's constraints,
         // so Taffy resolves the correct available width and our measure callback
-        // returns the correct height directly on this node — no parent needed.
+        // returns the correct height directly on this node - no parent needed.
         let style = self.style.clone();
 
         let layout_id = window.request_measured_layout(style, {
@@ -646,7 +646,7 @@ impl Element for WrappedTextElement {
                 });
 
                 let Some(width) = width else {
-                    // No definite width available — use existing visual lines as fallback
+                    // No definite width available - use existing visual lines as fallback
                     let count = state.read(cx).precomputed_visual_lines.len().max(1);
                     let visible = line_clamp.min(count).max(1);
                     let height = multiline_height(line_height, visible, scale_factor);
@@ -986,7 +986,7 @@ impl Element for UniformListElement {
         // If the container has SHRUNK since last render, re-wrap text at the actual
         // narrower width BEFORE child elements prepaint. This prevents partially-clipped
         // words (e.g. "don'" instead of "don't") during fast resize.
-        // Only re-wrap on shrink — on grow, the old narrower wrap is safe (text just
+        // Only re-wrap on shrink - on grow, the old narrower wrap is safe (text just
         // doesn't fill the width for 1 frame). Re-wrapping on grow would produce fewer
         // visual lines than uniform_list slots, causing text to vanish for 1 frame.
         let actual_width = bounds.size.width;

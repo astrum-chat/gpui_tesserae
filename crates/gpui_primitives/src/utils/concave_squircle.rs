@@ -6,7 +6,7 @@
 //!
 //! `corner_smoothing` controls how "squircle-like" the concave curve is:
 //! - 0.0 = quarter-circle arc (standard rounded corner, gentle inward curve)
-//! - 1.0 = maximally squircle — the curve scoops inward more aggressively,
+//! - 1.0 = maximally squircle - the curve scoops inward more aggressively,
 //!   approaching a right-angle crease toward the origin
 //!
 //! The shape for a TopRight corner (sx=+1, sy=-1) looks like:
