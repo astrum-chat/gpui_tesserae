@@ -88,7 +88,7 @@ impl Render for Main {
                     window.use_keyed_state(
                         ElementId::from("input").with_suffix("state"),
                         cx,
-                        |_window, cx| InputState::new(cx).initial_value("This is a long text that should wrap when the container is narrower than the text width, demonstrating the wrapping behavior"),
+                        |_window, cx| InputState::new(cx).initial_value("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."),
                     ),
                 )
                 .word_wrap(true)

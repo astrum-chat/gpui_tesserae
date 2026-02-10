@@ -1,9 +1,10 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, AvailableSpace, Bounds, DispatchPhase, Element, ElementId, Entity, Font,
-    GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad,
-    Pixels, ShapedLine, SharedString, Style, Window, point, px, relative, size,
+    AnyElement, App, AvailableSpace, Bounds, CursorStyle, DispatchPhase, Element, ElementId,
+    Entity, Font, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
+    LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, Window, point,
+    px, relative, size,
 };
 
 use crate::extensions::WindowExt;
@@ -80,11 +81,13 @@ pub(crate) struct LineElement {
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
     pub debug_character_bounds: bool,
+    pub debug_interior_corners: bool,
 }
 
 pub(crate) struct LinePrepaintState {
     pub line: Option<ShapedLine>,
     pub selection: Option<SelectionShape>,
+    pub text_hitbox: Option<Hitbox>,
 }
 
 impl IntoElement for LineElement {
@@ -212,11 +215,23 @@ impl Element for LineElement {
             self.selection_rounded_smoothing,
             prev_line_bounds,
             next_line_bounds,
+            self.debug_interior_corners,
         );
+
+        let text_hitbox = if line.width > Pixels::ZERO {
+            let text_bounds = Bounds {
+                origin: bounds.origin,
+                size: size(line.width, bounds.size.height),
+            };
+            Some(window.insert_hitbox(text_bounds, HitboxBehavior::Normal))
+        } else {
+            None
+        };
 
         LinePrepaintState {
             line: Some(line),
             selection,
+            text_hitbox,
         }
     }
 
@@ -231,6 +246,10 @@ impl Element for LineElement {
         cx: &mut App,
     ) {
         let line = prepaint.line.take().unwrap();
+
+        if let Some(hitbox) = &prepaint.text_hitbox {
+            window.set_cursor_style(CursorStyle::IBeam, hitbox);
+        }
 
         self.state.update(cx, |state, _cx| {
             state.visible_lines_info.push(VisibleLineInfo {
@@ -281,11 +300,13 @@ pub(crate) struct WrappedLineElement {
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
     pub debug_character_bounds: bool,
+    pub debug_interior_corners: bool,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
     pub line: Option<ShapedLine>,
     pub selection: Option<SelectionShape>,
+    pub text_hitbox: Option<Hitbox>,
 }
 
 impl IntoElement for WrappedLineElement {
@@ -341,6 +362,7 @@ impl Element for WrappedLineElement {
             return WrappedLinePrepaintState {
                 line: None,
                 selection: None,
+                text_hitbox: None,
             };
         };
 
@@ -414,11 +436,23 @@ impl Element for WrappedLineElement {
             self.selection_rounded_smoothing,
             prev_line_bounds,
             next_line_bounds,
+            self.debug_interior_corners,
         );
+
+        let text_hitbox = if line.width > Pixels::ZERO {
+            let text_bounds = Bounds {
+                origin: bounds.origin,
+                size: size(line.width, bounds.size.height),
+            };
+            Some(window.insert_hitbox(text_bounds, HitboxBehavior::Normal))
+        } else {
+            None
+        };
 
         WrappedLinePrepaintState {
             line: Some(line),
             selection,
+            text_hitbox,
         }
     }
 
@@ -435,6 +469,10 @@ impl Element for WrappedLineElement {
         let Some(line) = prepaint.line.take() else {
             return;
         };
+
+        if let Some(hitbox) = &prepaint.text_hitbox {
+            window.set_cursor_style(CursorStyle::IBeam, hitbox);
+        }
 
         if self.debug_character_bounds {
             let char_count = self
@@ -492,6 +530,7 @@ pub(crate) struct WrappedTextElement {
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
     pub debug_character_bounds: bool,
+    pub debug_interior_corners: bool,
     pub debug_wrapping: bool,
     pub line_clamp: usize,
     pub scale_factor: f32,
@@ -707,6 +746,7 @@ impl Element for WrappedTextElement {
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
                 debug_character_bounds: self.debug_character_bounds,
+                debug_interior_corners: self.debug_interior_corners,
             });
         }
 

@@ -51,6 +51,7 @@ pub struct Input {
     selection_rounded_smoothing: Option<f32>,
     transform_text: Option<TransformTextFn>,
     map_text: Option<MapTextFn>,
+    debug_interior_corners: bool,
     style: StyleRefinement,
 }
 
@@ -79,6 +80,7 @@ impl Input {
             selection_rounded_smoothing: None,
             transform_text: None,
             map_text: None,
+            debug_interior_corners: false,
             style: StyleRefinement::default(),
         }
     }
@@ -194,6 +196,13 @@ impl Input {
     /// When smoothing is 0 or unset, the faster PaintQuad rendering path is used.
     pub fn selection_rounded_smoothing(mut self, smoothing: f32) -> Self {
         self.selection_rounded_smoothing = Some(smoothing.clamp(0.0, 1.0));
+        self
+    }
+
+    /// Enables debug visualization of interior (concave) selection corners.
+    /// When enabled, interior corner patches are painted red instead of the selection color.
+    pub fn debug_interior_corners(mut self, enabled: bool) -> Self {
+        self.debug_interior_corners = enabled;
         self
     }
 
@@ -381,6 +390,7 @@ impl RenderOnce for Input {
                 let line_clamp = self.line_clamp;
                 let selection_rounded = self.selection_rounded;
                 let selection_rounded_smoothing = self.selection_rounded_smoothing;
+                let debug_interior_corners = self.debug_interior_corners;
 
                 let needs_scroll = line_count > line_clamp;
 
@@ -434,6 +444,7 @@ impl RenderOnce for Input {
                                     selection_rounded_smoothing,
                                     prev_line_offsets,
                                     next_line_offsets,
+                                    debug_interior_corners,
                                 }
                             })
                             .collect()
@@ -490,6 +501,7 @@ impl RenderOnce for Input {
                     placeholder: self.placeholder.clone(),
                     selection_rounded: self.selection_rounded,
                     selection_rounded_smoothing: self.selection_rounded_smoothing,
+                    debug_interior_corners: self.debug_interior_corners,
                     line_clamp: self.line_clamp,
                     scale_factor,
                     style: element_style,

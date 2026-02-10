@@ -292,6 +292,7 @@ pub(crate) struct LineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
+    pub debug_interior_corners: bool,
 }
 
 pub(crate) struct LinePrepaintState {
@@ -481,6 +482,7 @@ impl Element for LineElement {
                 self.selection_rounded_smoothing,
                 prev_line_bounds,
                 next_line_bounds,
+                self.debug_interior_corners,
             );
 
             (selection_shape, None)
@@ -573,6 +575,7 @@ pub(crate) struct WrappedLineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
+    pub debug_interior_corners: bool,
 }
 
 pub(crate) struct WrappedLinePrepaintState {
@@ -737,6 +740,7 @@ impl Element for WrappedLineElement {
                 self.selection_rounded_smoothing,
                 prev_line_bounds,
                 next_line_bounds,
+                self.debug_interior_corners,
             );
 
             (selection_shape, None)
@@ -966,6 +970,7 @@ pub(crate) struct WrappedTextInputElement {
     pub placeholder: SharedString,
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
+    pub debug_interior_corners: bool,
     pub line_clamp: usize,
     pub scale_factor: f32,
     pub style: Style,
@@ -1127,6 +1132,7 @@ impl Element for WrappedTextInputElement {
                 selection_rounded_smoothing: self.selection_rounded_smoothing,
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
+                debug_interior_corners: self.debug_interior_corners,
             });
         }
 

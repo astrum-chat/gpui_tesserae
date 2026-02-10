@@ -4,10 +4,10 @@ mod elements;
 mod state;
 
 use gpui::{
-    AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
-    InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels,
-    Refineable, RenderOnce, SharedString, Style, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder, rgb, uniform_list,
+    AbsoluteLength, App, ElementId, Entity, FocusHandle, Focusable, Font, Hsla, InteractiveElement,
+    IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels, Refineable, RenderOnce,
+    SharedString, Style, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, rgb,
+    uniform_list,
 };
 
 use crate::extensions::WindowExt;
@@ -103,6 +103,7 @@ pub struct SelectableText {
     selection_rounded_smoothing: Option<f32>,
     debug_wrapping: bool,
     debug_character_bounds: bool,
+    debug_interior_corners: bool,
     style: StyleRefinement,
 }
 
@@ -125,6 +126,7 @@ impl SelectableText {
             selection_rounded_smoothing: None,
             debug_wrapping: false,
             debug_character_bounds: false,
+            debug_interior_corners: false,
             style: StyleRefinement::default(),
         }
     }
@@ -179,6 +181,13 @@ impl SelectableText {
     /// Enables debug visualization of individual character bounds.
     pub fn debug_character_bounds(mut self, enabled: bool) -> Self {
         self.debug_character_bounds = enabled;
+        self
+    }
+
+    /// Enables debug visualization of interior (concave) selection corners.
+    /// When enabled, interior corner patches are painted red instead of the selection color.
+    pub fn debug_interior_corners(mut self, enabled: bool) -> Self {
+        self.debug_interior_corners = enabled;
         self
     }
 
@@ -414,8 +423,7 @@ impl RenderOnce for SelectableText {
                 this
             })
             .key_context("SelectableText")
-            .track_focus(&focus_handle)
-            .cursor(CursorStyle::IBeam);
+            .track_focus(&focus_handle);
 
         let base = register_actions(base, window, &self.state);
         let base = register_mouse_handlers(base, window, &self.state);
@@ -506,6 +514,7 @@ impl SelectableText {
         let selection_rounded = self.selection_rounded;
         let selection_rounded_smoothing = self.selection_rounded_smoothing;
         let debug_character_bounds = self.debug_character_bounds;
+        let debug_interior_corners = self.debug_interior_corners;
 
         let list = uniform_list(
             self.id.clone(),
@@ -546,6 +555,7 @@ impl SelectableText {
                             prev_line_offsets,
                             next_line_offsets,
                             debug_character_bounds,
+                            debug_interior_corners,
                         }
                     })
                     .collect()
@@ -626,6 +636,7 @@ impl SelectableText {
             selection_rounded: self.selection_rounded,
             selection_rounded_smoothing: self.selection_rounded_smoothing,
             debug_character_bounds: self.debug_character_bounds,
+            debug_interior_corners: self.debug_interior_corners,
             debug_wrapping: self.debug_wrapping,
             line_clamp: self.line_clamp,
             scale_factor,

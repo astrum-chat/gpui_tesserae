@@ -8,7 +8,8 @@ use gpui::{
 use crate::extensions::WindowExt;
 use crate::input::VisualLineInfo;
 use crate::utils::selection_shape::{
-    SelectionShape, build_selection_shape, compute_selection_corners, selection_config_from_options,
+    SelectionShape, build_selection_primitive, compute_interior_corner_patches,
+    compute_selection_corners, selection_config_from_options,
 };
 
 /// Base margin added to wrap widths to prevent janky text wrapping.
@@ -106,6 +107,7 @@ pub fn compute_selection_x_bounds(
 }
 
 /// Computes a full selection shape for a line, combining x-bounds, corner radius, and shape building.
+/// Returns the main selection shape plus any interior (concave) corner patches.
 pub fn compute_selection_shape(
     line: &ShapedLine,
     bounds: Bounds<Pixels>,
@@ -122,6 +124,7 @@ pub fn compute_selection_shape(
     corner_smoothing: Option<f32>,
     prev_line_bounds: Option<(Pixels, Pixels)>,
     next_line_bounds: Option<(Pixels, Pixels)>,
+    debug_interior_corners: bool,
 ) -> Option<SelectionShape> {
     let (selection_start_x, mut selection_end_x) = compute_selection_x_bounds(
         line,
@@ -146,17 +149,20 @@ pub fn compute_selection_shape(
         b.map(|(start, end)| (start, end.min(max_x)))
     };
 
+    let clamped_prev = clamp_bounds(prev_line_bounds);
+    let clamped_next = clamp_bounds(next_line_bounds);
+
     let config = selection_config_from_options(corner_radius, corner_smoothing);
     let corners = compute_selection_corners(
         selection_start_x,
         selection_end_x,
-        clamp_bounds(prev_line_bounds),
-        clamp_bounds(next_line_bounds),
+        clamped_prev,
+        clamped_next,
         config.corner_radius,
         window.scale_factor(),
     );
 
-    Some(build_selection_shape(
+    let shape = build_selection_primitive(
         bounds,
         selection_start_x,
         selection_end_x,
@@ -164,7 +170,35 @@ pub fn compute_selection_shape(
         highlight_color,
         &config,
         corners,
-    ))
+    );
+
+    let interior_corners = compute_interior_corner_patches(
+        selection_start_x,
+        selection_end_x,
+        clamped_prev,
+        clamped_next,
+        config.corner_radius,
+        config.corner_smoothing,
+        window.scale_factor(),
+        bounds.left(),
+        bounds.top(),
+        bounds.bottom(),
+        bounds.size.height,
+        scroll_offset,
+        if debug_interior_corners {
+            // DEBUG: red interior corners for visibility
+            gpui::Hsla {
+                h: 0.0,
+                s: 1.0,
+                l: 0.5,
+                a: 1.0,
+            }
+        } else {
+            highlight_color
+        },
+    );
+
+    Some(SelectionShape::new(shape, interior_corners))
 }
 
 /// Builds visual line info from a single wrapped line's wrap boundaries.

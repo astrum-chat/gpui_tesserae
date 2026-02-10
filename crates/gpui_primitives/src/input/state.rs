@@ -1156,17 +1156,64 @@ impl EntityInputHandler for InputState {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let last_layout = self.last_layout.as_ref()?;
         let range = self.range_from_utf16(&range_utf16);
+
+        // Path 1: Single-line mode (last_layout set by TextElement)
+        if let Some(last_layout) = self.last_layout.as_ref() {
+            let scroll = self.horizontal_scroll_offset;
+            return Some(Bounds::from_corners(
+                point(
+                    bounds.left() + last_layout.x_for_index(range.start) - scroll,
+                    bounds.top(),
+                ),
+                point(
+                    bounds.left() + last_layout.x_for_index(range.end) - scroll,
+                    bounds.bottom(),
+                ),
+            ));
+        }
+
+        // Path 2: Multiline (wrapped or non-wrapped) — use visible_lines_info
+        // populated during paint by LineElement / WrappedLineElement
+        for info in &self.visible_lines_info {
+            let (line_start, line_end) = if self.is_wrapped {
+                let vl = self.precomputed_visual_lines.get(info.line_index)?;
+                (vl.start_offset, vl.end_offset)
+            } else {
+                (
+                    self.line_start_offset(info.line_index),
+                    self.line_end_offset(info.line_index),
+                )
+            };
+
+            if range.start >= line_start && range.start <= line_end {
+                let local_start = range.start - line_start;
+                let local_end = (range.end - line_start).min(line_end - line_start);
+                let scroll = if self.is_wrapped {
+                    Pixels::ZERO
+                } else {
+                    self.horizontal_scroll_offset
+                };
+
+                return Some(Bounds::from_corners(
+                    point(
+                        info.bounds.left() + info.shaped_line.x_for_index(local_start) - scroll,
+                        info.bounds.top(),
+                    ),
+                    point(
+                        info.bounds.left() + info.shaped_line.x_for_index(local_end) - scroll,
+                        info.bounds.bottom(),
+                    ),
+                ));
+            }
+        }
+
+        // Fallback: cursor line not visible (scrolled off-screen) — return
+        // bounds at top of container so the menu appears near the input.
+        let line_h = self.line_height.unwrap_or(px(20.));
         Some(Bounds::from_corners(
-            point(
-                bounds.left() + last_layout.x_for_index(range.start),
-                bounds.top(),
-            ),
-            point(
-                bounds.left() + last_layout.x_for_index(range.end),
-                bounds.bottom(),
-            ),
+            point(bounds.left(), bounds.top()),
+            point(bounds.left(), bounds.top() + line_h),
         ))
     }
 

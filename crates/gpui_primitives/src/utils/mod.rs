@@ -1,6 +1,7 @@
 //! Shared utilities for primitive UI components.
 
 mod color;
+mod concave_squircle;
 mod rendering;
 mod selection_shape;
 mod text_navigation;
