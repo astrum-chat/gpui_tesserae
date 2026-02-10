@@ -49,16 +49,15 @@ Input::new("my-input", state)
 // Single-line (default)
 Input::new("input", state)
 
-// Multi-line
+// Enables mulitline with a maximum amount
+// of visible lines (scrolls after 5 lines).
 Input::new("input", state)
-    .multiline()
-
-// Maximum amount of visible lines (scrolls after 5 lines)
-Input::new("input", state)
-    .multiline()
     .line_clamp(5)
 
-
+// Shorthand for enabling multiline with
+// no maximum amount of visible lines.
+Input::new("input", state)
+    .multiline()
 
 // Word wrapping (auto-enables multiline)
 Input::new("input", state)
