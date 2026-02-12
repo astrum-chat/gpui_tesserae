@@ -11,10 +11,11 @@ use crate::extensions::WindowExt;
 use crate::input::state::InputState;
 use crate::input::{TransformTextFn, VisibleLineInfo};
 use crate::utils::{
-    SelectionShape, TextNavigation, build_selection_shape, compute_selection_shape,
-    create_text_run, make_cursor_quad, request_line_layout, selection_config_from_options,
+    SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, build_selection_shape,
+    compute_adjacent_line_selection_bounds, compute_selection_shape, create_text_run,
+    make_cursor_quad, multiline_height, request_line_layout, selection_config_from_options,
+    shape_and_build_visual_lines,
 };
-use crate::utils::{WIDTH_WRAP_BASE_MARGIN, multiline_height};
 
 fn resolve_display_text(
     content: &str,
@@ -176,7 +177,7 @@ impl Element for TextElement {
             let selection_start_x = window.round(line.x_for_index(selected_range.start));
             let mut selection_end_x = window.round(line.x_for_index(selected_range.end));
             if !self.selection_precise && selected_range.end >= line.len() {
-                selection_end_x = line.width.max(bounds.size.width);
+                selection_end_x = window.round(line.width.max(bounds.size.width));
             }
 
             let config = selection_config_from_options(
@@ -352,7 +353,6 @@ impl Element for LineElement {
         let full_value = input.value();
         let is_actually_empty = full_value.is_empty();
 
-        // Check bounds before slicing
         if !is_actually_empty
             && (self.line_start_offset > full_value.len()
                 || self.line_end_offset > full_value.len())
@@ -447,24 +447,32 @@ impl Element for LineElement {
 
         let content_width = Some(self.input.read(cx).last_text_width);
 
+        // For select-all, bump the range end so selected_range.end > line_end
+        // triggers the extend-to-edge logic in compute_selection_shape.
+        let is_select_all = self.input.read(cx).is_select_all;
+        let shape_range = if is_select_all {
+            self.selected_range.start..self.selected_range.end + 1
+        } else {
+            self.selected_range.clone()
+        };
+
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            let (prev_line_bounds, next_line_bounds) =
-                crate::utils::compute_adjacent_line_selection_bounds(
-                    &full_value,
-                    self.prev_line_offsets,
-                    self.next_line_offsets,
-                    &self.selected_range,
-                    self.selection_rounded,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                );
+            let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
+                &full_value,
+                self.prev_line_offsets,
+                self.next_line_offsets,
+                &shape_range,
+                self.selection_rounded,
+                &self.font,
+                self.font_size,
+                self.text_color,
+                window,
+            );
 
             let selection_shape = compute_selection_shape(
                 &line,
                 bounds,
-                &self.selected_range,
+                &shape_range,
                 self.line_start_offset,
                 self.line_end_offset,
                 &self.font,
@@ -646,14 +654,12 @@ impl Element for WrappedLineElement {
             if is_actually_empty && self.visual_line_index == 0 {
                 (self.placeholder.clone(), self.placeholder_text_color)
             } else if is_actually_empty {
-                // Value is empty but this isn't the first visual line - nothing to render
                 return WrappedLinePrepaintState {
                     line: None,
                     cursor: None,
                     selection: None,
                 };
             } else if info.start_offset > value.len() || info.end_offset > value.len() {
-                // Offsets are stale/invalid for current value - nothing to render
                 return WrappedLinePrepaintState {
                     line: None,
                     cursor: None,
@@ -691,24 +697,32 @@ impl Element for WrappedLineElement {
         let selection_intersects =
             self.selected_range.start < line_end && self.selected_range.end > line_start;
 
+        // For select-all, bump the range end so selected_range.end > line_end
+        // triggers the extend-to-edge logic in compute_selection_shape.
+        let is_select_all = self.input.read(cx).is_select_all;
+        let shape_range = if is_select_all {
+            self.selected_range.start..self.selected_range.end + 1
+        } else {
+            self.selected_range.clone()
+        };
+
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            let (prev_line_bounds, next_line_bounds) =
-                crate::utils::compute_adjacent_line_selection_bounds(
-                    &value,
-                    self.prev_visual_line_offsets,
-                    self.next_visual_line_offsets,
-                    &self.selected_range,
-                    self.selection_rounded,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                );
+            let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
+                &value,
+                self.prev_visual_line_offsets,
+                self.next_visual_line_offsets,
+                &shape_range,
+                self.selection_rounded,
+                &self.font,
+                self.font_size,
+                self.text_color,
+                window,
+            );
 
             let selection_shape = compute_selection_shape(
                 &line,
                 bounds,
-                &self.selected_range,
+                &shape_range,
                 line_start,
                 line_end,
                 &self.font,
@@ -1031,7 +1045,7 @@ impl Element for WrappedTextInputElement {
                 let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
                 let text = state.read(cx).value();
 
-                let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+                let (wrapped_lines, visual_lines) = shape_and_build_visual_lines(
                     &text,
                     wrap_width,
                     font_size,
@@ -1133,7 +1147,6 @@ impl Element for WrappedTextInputElement {
             });
         }
 
-        // Prepaint children, positioning them at line_height intervals offset by vertical scroll.
         let mut child_prepaints = Vec::with_capacity(actual_line_count);
         for (idx, child) in self.children.iter_mut().enumerate() {
             let child_bounds = Bounds {
@@ -1170,14 +1183,12 @@ impl Element for WrappedTextInputElement {
     ) {
         let focus_handle = self.input.read(cx).focus_handle.clone();
 
-        // Register ElementInputHandler for IME/text input
         window.handle_input(
             &focus_handle,
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
 
-        // Mouse drag selection
         let input = self.input.clone();
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
             if phase == DispatchPhase::Capture {
@@ -1203,7 +1214,6 @@ impl Element for WrappedTextInputElement {
             input.visible_lines_info.clear();
         });
 
-        // Paint children with content mask for clipping
         let visible_lines = self
             .multiline_clamp
             .map_or(1, |c| c.min(self.children.len()))

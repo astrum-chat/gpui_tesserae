@@ -396,6 +396,7 @@ impl RenderOnce for SelectableText {
 
         self.state.update(cx, |state, _cx| {
             state.is_constrained = is_constrained;
+            state.using_auto_width = user_wants_auto_width;
         });
 
         let width_params = WidthParams {

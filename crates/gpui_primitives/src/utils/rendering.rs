@@ -462,6 +462,41 @@ pub fn compute_line_offsets(text: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
+/// Computes the maximum visual line width across all wrapped visual lines.
+/// Each visual line's width is measured using x_for_index on the unwrapped layout,
+/// converting from the visual line's byte offsets to local offsets within its logical line.
+pub fn compute_max_visual_line_width(
+    visual_lines: &[VisualLineInfo],
+    wrapped_lines: &[WrappedLine],
+    text: &str,
+) -> Pixels {
+    let line_starts: Vec<usize> = {
+        let mut starts = vec![0usize];
+        for (i, b) in text.as_bytes().iter().enumerate() {
+            if *b == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        starts
+    };
+
+    let mut max_width = Pixels::ZERO;
+    for vl in visual_lines {
+        let line_start = line_starts.get(vl.wrapped_line_index).copied().unwrap_or(0);
+        let local_start = vl.start_offset.saturating_sub(line_start);
+        let local_end = vl.end_offset.saturating_sub(line_start);
+        if let Some(wl) = wrapped_lines.get(vl.wrapped_line_index) {
+            let start_x = wl.unwrapped_layout.x_for_index(local_start);
+            let end_x = wl.unwrapped_layout.x_for_index(local_end);
+            let w = end_x - start_x;
+            if w > max_width {
+                max_width = w;
+            }
+        }
+    }
+    max_width
+}
+
 /// Determines if trailing whitespace should be shown in selection highlighting.
 pub fn should_show_trailing_whitespace(
     selected_range: &Range<usize>,
@@ -513,6 +548,55 @@ pub fn auto_scroll_horizontal(
     }
 
     offset
+}
+
+/// Clamps a vertical scroll offset to valid bounds based on the total number
+/// of visual lines and the visible line count (from multiline_clamp).
+pub fn clamp_vertical_scroll(
+    scroll_offset: Pixels,
+    line_height: Pixels,
+    total_visual_lines: usize,
+    multiline_clamp: Option<usize>,
+) -> Pixels {
+    let total = total_visual_lines.max(1);
+    let visible = multiline_clamp.map_or(1, |c| c.min(total));
+    let max_scroll = line_height * (total - visible) as f32;
+    let max_scroll = if max_scroll > Pixels::ZERO {
+        max_scroll
+    } else {
+        Pixels::ZERO
+    };
+    scroll_offset.max(Pixels::ZERO).min(max_scroll)
+}
+
+/// Adjusts vertical scroll offset to keep the cursor's visual line visible in wrapped mode.
+/// Returns the updated scroll offset.
+pub fn ensure_cursor_visible_wrapped(
+    cursor_offset: usize,
+    visual_lines: &[VisualLineInfo],
+    line_height: Pixels,
+    multiline_clamp: Option<usize>,
+    scroll_offset: Pixels,
+) -> Pixels {
+    let visual_line = visual_lines
+        .iter()
+        .position(|info| cursor_offset >= info.start_offset && cursor_offset <= info.end_offset)
+        .unwrap_or(0);
+
+    let line_top = line_height * visual_line as f32;
+    let line_bottom = line_top + line_height;
+    let total_visual_lines = visual_lines.len().max(1);
+    let visible_height =
+        line_height * multiline_clamp.map_or(1, |c| c.min(total_visual_lines)) as f32;
+
+    let mut offset = scroll_offset;
+    if line_top < offset {
+        offset = line_top;
+    } else if line_bottom > offset + visible_height {
+        offset = line_bottom - visible_height;
+    }
+
+    clamp_vertical_scroll(offset, line_height, total_visual_lines, multiline_clamp)
 }
 
 /// Computes the vertical auto-scroll throttle interval (in milliseconds) based on
@@ -738,23 +822,25 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello world", window);
-            let result = compute_selection_x_bounds(
-                &line,
-                &(0..5), // "hello"
-                0,
-                11,
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(result.is_some(), "should return bounds for valid selection");
-            let (start_x, end_x) = result.unwrap();
-            assert_eq!(start_x, px(0.), "selection starts at beginning");
-            assert!(end_x > px(0.), "selection end should be positive");
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello world", window);
+                let result = compute_selection_x_bounds(
+                    &line,
+                    &(0..5), // "hello"
+                    0,
+                    11,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(result.is_some(), "should return bounds for valid selection");
+                let (start_x, end_x) = result.unwrap();
+                assert_eq!(start_x, px(0.), "selection starts at beginning");
+                assert!(end_x > px(0.), "selection end should be positive");
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -763,20 +849,22 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let result = compute_selection_x_bounds(
-                &line,
-                &(3..3),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(result.is_none(), "empty range should return None");
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let result = compute_selection_x_bounds(
+                    &line,
+                    &(3..3),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(result.is_none(), "empty range should return None");
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -785,21 +873,23 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            // Selection is on a different line entirely
-            let result = compute_selection_x_bounds(
-                &line,
-                &(10..20),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(result.is_none(), "non-intersecting should return None");
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                // Selection is on a different line entirely
+                let result = compute_selection_x_bounds(
+                    &line,
+                    &(10..20),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(result.is_none(), "non-intersecting should return None");
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -826,7 +916,7 @@ mod gpui_tests {
                 end_with > end_without,
                 "trailing whitespace should extend selection: with={end_with:?} without={end_without:?}"
             );
-        });
+        }).ok();
     }
 
     #[gpui::test]
@@ -835,35 +925,37 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello world test", window);
-            let result = compute_selection_x_bounds(
-                &line,
-                &(0..16),
-                0,
-                16,
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            let (start_x, end_x) = result.unwrap();
-            // Values should be rounded to pixel grid (0.5 increments on 2x, 1.0 on 1x)
-            let scale = window.scale_factor();
-            let increment = if scale >= 2.0 { 0.5 } else { 1.0 };
-            let start_val = start_x.to_f64() as f32;
-            let end_val = end_x.to_f64() as f32;
-            assert_eq!(
-                (start_val / increment).round() * increment,
-                start_val,
-                "start_x should be pixel-aligned"
-            );
-            assert_eq!(
-                (end_val / increment).round() * increment,
-                end_val,
-                "end_x should be pixel-aligned"
-            );
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello world test", window);
+                let result = compute_selection_x_bounds(
+                    &line,
+                    &(0..16),
+                    0,
+                    16,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                let (start_x, end_x) = result.unwrap();
+                // Values should be rounded to pixel grid (0.5 increments on 2x, 1.0 on 1x)
+                let scale = window.scale_factor();
+                let increment = if scale >= 2.0 { 0.5 } else { 1.0 };
+                let start_val = start_x.to_f64() as f32;
+                let end_val = end_x.to_f64() as f32;
+                assert_eq!(
+                    (start_val / increment).round() * increment,
+                    start_val,
+                    "start_x should be pixel-aligned"
+                );
+                assert_eq!(
+                    (end_val / increment).round() * increment,
+                    end_val,
+                    "end_x should be pixel-aligned"
+                );
+            })
+            .ok();
     }
 
     // ── compute_selection_shape — extend-to-edge (default) ───────────
@@ -875,35 +967,37 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            // selection 0..10 extends past line_end=5, so extend-to-edge triggers
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..10),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(0.), // scroll_offset
-                false,  // not wrapped
-                false,  // not precise (extend-to-edge)
-                None,   // no content_width → uses bounds.size.width
-                window,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            );
-            assert!(shape.is_some(), "should produce a selection shape");
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                // selection 0..10 extends past line_end=5, so extend-to-edge triggers
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..10),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(0.), // scroll_offset
+                    false,  // not wrapped
+                    false,  // not precise (extend-to-edge)
+                    None,   // no content_width → uses bounds.size.width
+                    window,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
+                assert!(shape.is_some(), "should produce a selection shape");
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -913,35 +1007,37 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            // selection 0..5 ends exactly at line_end=5 → last line, no extension
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..5),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(0.),
-                false,
-                false, // not precise
-                None,
-                window,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            );
-            assert!(shape.is_some());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                // selection 0..5 ends exactly at line_end=5 → last line, no extension
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..5),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(0.),
+                    false,
+                    false, // not precise
+                    None,
+                    window,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
+                assert!(shape.is_some());
+            })
+            .ok();
     }
 
     // ── compute_selection_shape — precise mode ───────────────────────
@@ -954,34 +1050,36 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..10),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(0.),
-                false,
-                true, // precise mode
-                None,
-                window,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            );
-            assert!(shape.is_some(), "precise mode should still produce a shape");
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..10),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(0.),
+                    false,
+                    true, // precise mode
+                    None,
+                    window,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
+                assert!(shape.is_some(), "precise mode should still produce a shape");
+            })
+            .ok();
     }
 
     // ── compute_selection_shape — content_width ──────────────────────
@@ -993,35 +1091,37 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            // bounds=300, content_width=800 (scrollable content wider than viewport)
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..10),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(100.),       // scroll_offset
-                false,          // not wrapped
-                false,          // not precise
-                Some(px(800.)), // content_width (scrollable content)
-                window,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            );
-            assert!(shape.is_some());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                // bounds=300, content_width=800 (scrollable content wider than viewport)
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..10),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(100.),       // scroll_offset
+                    false,          // not wrapped
+                    false,          // not precise
+                    Some(px(800.)), // content_width (scrollable content)
+                    window,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
+                assert!(shape.is_some());
+            })
+            .ok();
     }
 
     // ── scroll_offset rounding ───────────────────────────────────────
@@ -1034,39 +1134,41 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let text = "a]b]c]d]e]f]g]h]i]j]k]l]m]n]o]p]q]r]s]t]u]v]w]x]y]z";
-            let line = shape_text(text, window);
-            let bounds = line_bounds(px(200.));
-            // Use a sub-pixel scroll offset
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..text.len()),
-                0,
-                text.len(),
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(50.37), // sub-pixel scroll offset
-                false,
-                true, // precise
-                None,
-                window,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            );
-            assert!(
-                shape.is_some(),
-                "should produce shape with sub-pixel scroll"
-            );
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let text = "a]b]c]d]e]f]g]h]i]j]k]l]m]n]o]p]q]r]s]t]u]v]w]x]y]z";
+                let line = shape_text(text, window);
+                let bounds = line_bounds(px(200.));
+                // Use a sub-pixel scroll offset
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..text.len()),
+                    0,
+                    text.len(),
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(50.37), // sub-pixel scroll offset
+                    false,
+                    true, // precise
+                    None,
+                    window,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
+                assert!(
+                    shape.is_some(),
+                    "should produce shape with sub-pixel scroll"
+                );
+            })
+            .ok();
     }
 
     // ── wrapped mode clamping ────────────────────────────────────────
@@ -1078,34 +1180,36 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..10), // extends past line_end → trailing ws
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(0.), // scroll_offset=0 in wrapped mode
-                true,   // wrapped
-                true,   // precise
-                None,
-                window,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                false,
-            );
-            assert!(shape.is_some());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..10), // extends past line_end → trailing ws
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(0.), // scroll_offset=0 in wrapped mode
+                    true,   // wrapped
+                    true,   // precise
+                    None,
+                    window,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
+                assert!(shape.is_some());
+            })
+            .ok();
     }
 
     // ── adjacent line bounds in extend-to-edge mode ──────────────────
@@ -1118,34 +1222,36 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..20), // selection continues well past both lines
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(0.),
-                false, // not wrapped
-                false, // not precise (extend-to-edge)
-                None,
-                window,
-                Some(px(4.)), // corner_radius
-                None,
-                Some((px(0.), px(30.))), // prev_line_bounds
-                Some(3),                 // prev_line_end_offset (selection continues past)
-                Some((px(0.), px(25.))), // next_line_bounds
-                Some(8),                 // next_line_end_offset (selection continues past)
-                false,
-            );
-            assert!(shape.is_some());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..20), // selection continues well past both lines
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(0.),
+                    false, // not wrapped
+                    false, // not precise (extend-to-edge)
+                    None,
+                    window,
+                    Some(px(4.)), // corner_radius
+                    None,
+                    Some((px(0.), px(30.))), // prev_line_bounds
+                    Some(3),                 // prev_line_end_offset (selection continues past)
+                    Some((px(0.), px(25.))), // next_line_bounds
+                    Some(8),                 // next_line_end_offset (selection continues past)
+                    false,
+                );
+                assert!(shape.is_some());
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -1155,34 +1261,36 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let line = shape_text("hello", window);
-            let bounds = line_bounds(px(300.));
-            let shape = compute_selection_shape(
-                &line,
-                bounds,
-                &(0..20),
-                0,
-                5,
-                &test_font(),
-                px(14.),
-                black(),
-                highlight(),
-                px(0.),
-                false,
-                true, // precise — adjacent bounds should stay as-is
-                None,
-                window,
-                Some(px(4.)),
-                None,
-                Some((px(0.), px(30.))),
-                Some(3),
-                Some((px(0.), px(25.))),
-                Some(8),
-                false,
-            );
-            assert!(shape.is_some());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let line = shape_text("hello", window);
+                let bounds = line_bounds(px(300.));
+                let shape = compute_selection_shape(
+                    &line,
+                    bounds,
+                    &(0..20),
+                    0,
+                    5,
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    highlight(),
+                    px(0.),
+                    false,
+                    true, // precise — adjacent bounds should stay as-is
+                    None,
+                    window,
+                    Some(px(4.)),
+                    None,
+                    Some((px(0.), px(30.))),
+                    Some(3),
+                    Some((px(0.), px(25.))),
+                    Some(8),
+                    false,
+                );
+                assert!(shape.is_some());
+            })
+            .ok();
     }
 
     // ── shape_and_compute_selection_bounds ────────────────────────────
@@ -1193,22 +1301,24 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let result = shape_and_compute_selection_bounds(
-                "hello world",
-                0,
-                11,
-                &(0..5),
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(result.is_some());
-            let (start, end) = result.unwrap();
-            assert_eq!(start, px(0.));
-            assert!(end > px(0.));
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let result = shape_and_compute_selection_bounds(
+                    "hello world",
+                    0,
+                    11,
+                    &(0..5),
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(result.is_some());
+                let (start, end) = result.unwrap();
+                assert_eq!(start, px(0.));
+                assert!(end > px(0.));
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -1217,19 +1327,21 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let result = shape_and_compute_selection_bounds(
-                "hello world",
-                0,
-                11,
-                &(20..30), // doesn't intersect
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(result.is_none());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let result = shape_and_compute_selection_bounds(
+                    "hello world",
+                    0,
+                    11,
+                    &(20..30), // doesn't intersect
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(result.is_none());
+            })
+            .ok();
     }
 
     // ── compute_adjacent_line_selection_bounds ────────────────────────
@@ -1240,21 +1352,23 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let (prev, next) = compute_adjacent_line_selection_bounds(
-                "line1\nline2\nline3",
-                Some((0, 5)),
-                Some((12, 17)),
-                &(0..17),
-                None, // no selection_rounded → should return (None, None)
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(prev.is_none());
-            assert!(next.is_none());
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let (prev, next) = compute_adjacent_line_selection_bounds(
+                    "line1\nline2\nline3",
+                    Some((0, 5)),
+                    Some((12, 17)),
+                    &(0..17),
+                    None, // no selection_rounded → should return (None, None)
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(prev.is_none());
+                assert!(next.is_none());
+            })
+            .ok();
     }
 
     #[gpui::test]
@@ -1263,21 +1377,23 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let (prev, next) = compute_adjacent_line_selection_bounds(
-                "line1\nline2\nline3",
-                Some((0, 5)),
-                Some((12, 17)),
-                &(0..17),
-                Some(px(4.)), // has rounding → should compute bounds
-                &test_font(),
-                px(14.),
-                black(),
-                window,
-            );
-            assert!(prev.is_some(), "prev should have bounds");
-            assert!(next.is_some(), "next should have bounds");
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let (prev, next) = compute_adjacent_line_selection_bounds(
+                    "line1\nline2\nline3",
+                    Some((0, 5)),
+                    Some((12, 17)),
+                    &(0..17),
+                    Some(px(4.)), // has rounding → should compute bounds
+                    &test_font(),
+                    px(14.),
+                    black(),
+                    window,
+                );
+                assert!(prev.is_some(), "prev should have bounds");
+                assert!(next.is_some(), "next should have bounds");
+            })
+            .ok();
     }
 
     // ── window.round consistency ─────────────────────────────────────
@@ -1288,21 +1404,23 @@ mod gpui_tests {
             cx.open_window(Default::default(), |_, cx| cx.new(|_| gpui::Empty))
                 .unwrap()
         });
-        window.update(cx, |_, window, _cx| {
-            let scale = window.scale_factor();
-            if scale >= 2.0 {
-                // On 2x displays, rounds to 0.5px increments
-                assert_eq!(window.round(px(10.3)), px(10.5));
-                assert_eq!(window.round(px(10.7)), px(10.5));
-                assert_eq!(window.round(px(10.0)), px(10.0));
-                assert_eq!(window.round(px(10.25)), px(10.5));
-                assert_eq!(window.round(px(10.75)), px(11.0));
-            } else {
-                // On 1x displays, rounds to 1.0px increments
-                assert_eq!(window.round(px(10.3)), px(10.0));
-                assert_eq!(window.round(px(10.7)), px(11.0));
-                assert_eq!(window.round(px(10.0)), px(10.0));
-            }
-        });
+        window
+            .update(cx, |_, window, _cx| {
+                let scale = window.scale_factor();
+                if scale >= 2.0 {
+                    // On 2x displays, rounds to 0.5px increments
+                    assert_eq!(window.round(px(10.3)), px(10.5));
+                    assert_eq!(window.round(px(10.7)), px(10.5));
+                    assert_eq!(window.round(px(10.0)), px(10.0));
+                    assert_eq!(window.round(px(10.25)), px(10.5));
+                    assert_eq!(window.round(px(10.75)), px(11.0));
+                } else {
+                    // On 1x displays, rounds to 1.0px increments
+                    assert_eq!(window.round(px(10.3)), px(10.0));
+                    assert_eq!(window.round(px(10.7)), px(11.0));
+                    assert_eq!(window.round(px(10.0)), px(10.0));
+                }
+            })
+            .ok();
     }
 }

@@ -3,7 +3,10 @@ use gpui::{
 };
 
 use crate::input::state::InputState;
-use crate::utils::TextNavigation;
+use crate::utils::{
+    TextNavigation, apply_selection_change, auto_scroll_vertical_interval,
+    index_for_multiline_position,
+};
 
 #[allow(missing_docs)]
 impl InputState {
@@ -47,14 +50,13 @@ impl InputState {
     }
 
     fn select_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
-        crate::utils::apply_selection_change(
+        apply_selection_change(
             &mut self.selected_range,
             &mut self.selection_reversed,
             offset,
         );
 
         if scroll {
-            // Ensure cursor remains visible when selecting
             self.reset_manual_scroll();
             self.scroll_to_cursor_horizontal = true;
             if self.is_wrapped {
@@ -97,6 +99,7 @@ impl InputState {
         line_height: Pixels,
         cx: &mut Context<Self>,
     ) {
+        self.is_select_all = false;
         let offset = self.index_for_multiline_position(position, line_height);
         // Use select_to_without_scroll to prevent ensure_cursor_visible (vertical)
         // from fighting with our explicit scroll_up/down_one_line calls.
@@ -106,11 +109,9 @@ impl InputState {
 
         if self.is_selecting {
             if let Some(bounds) = &self.last_bounds {
-                if let Some(interval_ms) = crate::utils::auto_scroll_vertical_interval(
-                    position.y,
-                    bounds.top(),
-                    bounds.bottom(),
-                ) {
+                if let Some(interval_ms) =
+                    auto_scroll_vertical_interval(position.y, bounds.top(), bounds.bottom())
+                {
                     let now = std::time::Instant::now();
                     let should_scroll = self
                         .last_scroll_time
@@ -158,7 +159,6 @@ impl InputState {
         }
     }
 
-    /// Converts a mouse position to a byte offset in multiline mode.
     pub fn index_for_multiline_position(
         &self,
         position: Point<Pixels>,
@@ -167,7 +167,7 @@ impl InputState {
         if self.value().is_empty() {
             return 0;
         }
-        crate::utils::index_for_multiline_position(
+        index_for_multiline_position(
             position,
             line_height,
             self.is_wrapped,
@@ -181,7 +181,6 @@ impl InputState {
         )
     }
 
-    /// Handles mouse down: click to place cursor, double-click to select word, triple-click to select line.
     pub fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -189,11 +188,11 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         self.is_selecting = true;
+        self.is_select_all = false;
 
         let index = self.position_to_index(event.position);
 
         if event.click_count >= 3 {
-            // Select line at click position
             let (line_start, line_end) = self.line_range_at(index);
             self.move_to_without_scroll(line_start, cx);
             self.select_to_without_scroll(line_end, cx);

@@ -107,6 +107,10 @@ pub trait TextNavigation {
 
         let last_char = last_grapheme.chars().next().unwrap_or(' ');
         if !is_word_char(last_char) {
+            // Don't cross backward past newlines — the word starts on the current line.
+            if last_char == '\n' {
+                return offset;
+            }
             return last_idx;
         }
 
@@ -132,6 +136,10 @@ pub trait TextNavigation {
 
         let first_char = first_grapheme.chars().next().unwrap_or(' ');
         if !is_word_char(first_char) {
+            // Don't cross forward past newlines — the word ends on the current line.
+            if first_char == '\n' {
+                return offset;
+            }
             return offset + first_grapheme.len();
         }
 

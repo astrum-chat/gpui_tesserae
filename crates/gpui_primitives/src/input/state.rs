@@ -8,7 +8,10 @@ use gpui::{
 };
 
 use crate::input::CursorBlink;
-use crate::utils::TextNavigation;
+use crate::utils::{
+    TextNavigation, auto_scroll_horizontal, clamp_vertical_scroll, ensure_cursor_visible_in_scroll,
+    ensure_cursor_visible_wrapped, shape_and_build_visual_lines,
+};
 
 pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
 
@@ -79,73 +82,41 @@ pub use actions::*;
 pub struct InputState {
     pub focus_handle: FocusHandle,
     pub value: Option<SharedString>,
-    /// Byte range of the current selection. Empty range means cursor position only.
     pub selected_range: Range<usize>,
-    /// If true, the cursor is at selection start; if false, at selection end.
     pub selection_reversed: bool,
-    /// Byte range of IME composition text (marked text), if any.
     pub marked_range: Option<Range<usize>>,
     pub last_layout: Option<ShapedLine>,
     pub last_bounds: Option<Bounds<Pixels>>,
-    /// True while the user is dragging to select text.
     pub is_selecting: bool,
     pub cursor_blink: Entity<CursorBlink>,
     was_focused: bool,
-    /// Whether the input is in multiline mode (set during render)
     pub(crate) is_multiline: bool,
-    /// Line height for multiline calculations (set during render)
     pub(crate) line_height: Option<Pixels>,
-    /// Closure to transform text when it changes (modifies stored value)
     pub(crate) map_text: Option<MapTextFn>,
-    /// Whether the input is in wrapped mode (text wrapping enabled)
     pub(crate) is_wrapped: bool,
-    /// Scroll handle for uniform_list (both wrapped and non-wrapped modes)
     pub scroll_handle: UniformListScrollHandle,
-    /// Maximum visible lines (for scroll calculations). None = unlimited.
     pub(crate) multiline_clamp: Option<usize>,
-    /// Visible line info for uniform_list mode - populated during paint
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
-    /// Cached container width for wrapped text calculations (set during prepaint)
     pub(crate) cached_wrap_width: Option<Pixels>,
-    /// Pre-computed visual lines for wrapped uniform_list mode
     pub(crate) precomputed_visual_lines: Vec<VisualLineInfo>,
-    /// Pre-computed wrapped lines (the actual WrappedLine objects)
     pub(crate) precomputed_wrapped_lines: Vec<WrappedLine>,
-    /// Width that was used to compute current precomputed_visual_lines
     pub(crate) precomputed_at_width: Option<Pixels>,
-
-    /// Flag indicating visual lines need recompute due to width mismatch
     pub(crate) needs_wrap_recompute: bool,
-    /// Flag to scroll cursor into view on next render (for wrapped mode)
-    /// This defers scrolling until after visual lines are recomputed
+    /// Deferred: scroll cursor into view after visual lines are recomputed.
     pub(crate) scroll_to_cursor_on_next_render: bool,
-
-    /// Horizontal scroll offset for single-line mode (in pixels)
     pub(crate) horizontal_scroll_offset: Pixels,
-    /// Vertical scroll offset for wrapped mode with multiline_clamp (in pixels)
     pub(crate) vertical_scroll_offset: Pixels,
-    /// Last measured text width (for scroll wheel calculations)
     pub(crate) last_text_width: Pixels,
-    /// When true, skip auto-scroll to cursor (user is manually scrolling)
     pub(crate) is_manually_scrolling: bool,
-    /// When true, auto-scroll horizontally to keep cursor visible on next render.
     /// Opt-in: set by navigation/editing, NOT by double-click/triple-click/select-all.
     pub(crate) scroll_to_cursor_horizontal: bool,
-    /// Timestamp of last auto-scroll frame, for delta-time-based scrolling.
     pub(crate) last_scroll_time: Option<std::time::Instant>,
-    /// Whether the current selection is a "select all" (cmd+a)
     pub is_select_all: bool,
-
-    /// Cached render params for use in prepaint-phase re-wrapping
     pub(crate) last_font: Option<Font>,
     pub(crate) last_font_size: Option<Pixels>,
     pub(crate) last_text_color: Option<Hsla>,
-
-    /// Undo history stack
     undo_stack: Vec<UndoEntry>,
-    /// Redo history stack
     redo_stack: Vec<UndoEntry>,
-    /// Maximum number of undo/redo entries to keep
     max_history: usize,
 }
 
@@ -195,7 +166,7 @@ impl InputState {
 
     pub fn set_max_history(&mut self, max: usize) {
         self.max_history = max;
-        // Trim existing stacks if they exceed the new limit
+
         if self.undo_stack.len() > max {
             self.undo_stack.drain(0..self.undo_stack.len() - max);
         }
@@ -226,13 +197,11 @@ impl InputState {
     ) -> usize {
         let text = self.value();
 
-        // Input-specific: update cached wrap width
         self.cached_wrap_width = Some(width);
         self.precomputed_at_width = Some(width);
 
-        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
-            &text, width, font_size, font, text_color, window,
-        );
+        let (wrapped_lines, visual_lines) =
+            shape_and_build_visual_lines(&text, width, font_size, font, text_color, window);
 
         self.precomputed_visual_lines = visual_lines;
         self.precomputed_wrapped_lines = wrapped_lines;
@@ -247,32 +216,16 @@ impl InputState {
 
     pub fn ensure_cursor_visible(&mut self) {
         if self.is_wrapped {
-            // Pixel-based vertical scroll for wrapped mode
             let line_height = self.line_height.unwrap_or(px(16.0));
-            let cursor = self.cursor_offset();
-            let visual_line = self
-                .precomputed_visual_lines
-                .iter()
-                .position(|info| cursor >= info.start_offset && cursor <= info.end_offset)
-                .unwrap_or(0);
-
-            let line_top = line_height * visual_line as f32;
-            let line_bottom = line_top + line_height;
-            let total_visual_lines = self.precomputed_visual_lines.len().max(1);
-            let visible_height = line_height
-                * self
-                    .multiline_clamp
-                    .map_or(1, |c| c.min(total_visual_lines)) as f32;
-
-            if line_top < self.vertical_scroll_offset {
-                self.vertical_scroll_offset = line_top;
-            } else if line_bottom > self.vertical_scroll_offset + visible_height {
-                self.vertical_scroll_offset = line_bottom - visible_height;
-            }
-
-            self.clamp_vertical_scroll();
+            self.vertical_scroll_offset = ensure_cursor_visible_wrapped(
+                self.cursor_offset(),
+                &self.precomputed_visual_lines,
+                line_height,
+                self.multiline_clamp,
+                self.vertical_scroll_offset,
+            );
         } else {
-            crate::utils::ensure_cursor_visible_in_scroll(
+            ensure_cursor_visible_in_scroll(
                 self.cursor_offset(),
                 self.is_wrapped,
                 &self.precomputed_visual_lines,
@@ -286,18 +239,12 @@ impl InputState {
 
     pub(crate) fn clamp_vertical_scroll(&mut self) {
         let line_height = self.line_height.unwrap_or(px(16.0));
-        let total_lines = self.precomputed_visual_lines.len().max(1);
-        let visible_lines = self.multiline_clamp.map_or(1, |c| c.min(total_lines));
-        let max_scroll = line_height * (total_lines - visible_lines) as f32;
-        let max_scroll = if max_scroll > Pixels::ZERO {
-            max_scroll
-        } else {
-            Pixels::ZERO
-        };
-        self.vertical_scroll_offset = self
-            .vertical_scroll_offset
-            .max(Pixels::ZERO)
-            .min(max_scroll);
+        self.vertical_scroll_offset = clamp_vertical_scroll(
+            self.vertical_scroll_offset,
+            line_height,
+            self.precomputed_visual_lines.len(),
+            self.multiline_clamp,
+        );
     }
 
     pub(crate) fn ensure_cursor_visible_horizontal(
@@ -305,17 +252,15 @@ impl InputState {
         cursor_x: Pixels,
         container_width: Pixels,
     ) -> Pixels {
-        // Don't scroll in wrapped mode (text wraps, so horizontal scroll not needed)
         if self.is_wrapped {
             return Pixels::ZERO;
         }
 
-        // If user is manually scrolling, don't auto-scroll to cursor
         if self.is_manually_scrolling {
             return self.horizontal_scroll_offset;
         }
 
-        self.horizontal_scroll_offset = crate::utils::auto_scroll_horizontal(
+        self.horizontal_scroll_offset = auto_scroll_horizontal(
             self.horizontal_scroll_offset,
             cursor_x,
             container_width,
@@ -340,7 +285,6 @@ impl InputState {
                 self.start_cursor_blink(cx);
             } else {
                 self.stop_cursor_blink(cx);
-                // Clear selection when blurred
                 let cursor = self.cursor_offset();
                 self.selected_range = cursor..cursor;
             }
@@ -376,13 +320,13 @@ impl InputState {
             .unwrap_or_else(|| SharedString::new_static(""))
     }
 
-    /// Clears the text value and resets selection. Returns the previous value.
+    /// Clears the text value and resets selection.
     pub fn clear(&mut self) -> Option<SharedString> {
         self.selected_range = 0..0;
         self.value.take()
     }
 
-    /// Sets initial text only if value is currently unset.
+    /// Sets text only if value is currently `None`.
     pub fn initial_value(mut self, text: impl Into<SharedString>) -> Self {
         if self.value.is_some() {
             return self;
@@ -455,12 +399,10 @@ impl InputState {
         }
     }
 
-    /// Inserts a newline at the cursor position (primary submit action in multiline mode).
     pub fn insert_newline(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
-    /// Inserts a newline at the cursor position (secondary submit action).
     pub fn insert_newline_secondary(
         &mut self,
         _: &SecondarySubmit,
@@ -681,7 +623,6 @@ impl InputState {
         let delta = event.delta.pixel_delta(line_height);
 
         if self.is_wrapped {
-            // Wrapped mode: handle vertical scrolling
             let total_visual_lines = self.precomputed_visual_lines.len().max(1);
             let has_vertical_scroll = self
                 .multiline_clamp
@@ -704,7 +645,6 @@ impl InputState {
             return;
         }
 
-        // Non-wrapped mode: check for scrollable content
         let has_vertical_scroll = self
             .multiline_clamp
             .map_or(false, |clamp| self.line_count() > clamp);
@@ -713,7 +653,6 @@ impl InputState {
         let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
         let has_horizontal_scroll = max_scroll > Pixels::ZERO;
 
-        // Stop propagation if we have scrollable content in the scroll direction
         let is_vertical_scroll = delta.y.abs() > delta.x.abs();
         if (is_vertical_scroll && has_vertical_scroll)
             || (!is_vertical_scroll && has_horizontal_scroll)
@@ -721,12 +660,10 @@ impl InputState {
             cx.stop_propagation();
         }
 
-        // Only handle horizontal scroll
         if delta.x.abs() < px(0.01) {
             return;
         }
 
-        // Apply horizontal scroll (negative delta.x = scroll right, positive = scroll left)
         let new_offset = (self.horizontal_scroll_offset - delta.x)
             .max(Pixels::ZERO)
             .min(max_scroll);
@@ -742,7 +679,6 @@ impl InputState {
         self.is_manually_scrolling = false;
     }
 
-    /// Opens the system character palette (emoji/symbol picker).
     pub fn show_character_palette(
         &mut self,
         _: &ShowCharacterPalette,
@@ -752,10 +688,8 @@ impl InputState {
         window.show_character_palette();
     }
 
-    /// Newlines become spaces in single-line mode.
     pub fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            // Preserve newlines in multiline mode, replace with spaces in single-line mode
             let text = if self.is_multiline {
                 text
             } else {
@@ -836,11 +770,8 @@ impl InputState {
     fn move_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
         if scroll {
-            // Reset manual scroll so auto-scroll to cursor works
             self.reset_manual_scroll();
             self.scroll_to_cursor_horizontal = true;
-            // For wrapped mode, defer scroll until visual lines are recomputed
-            // For non-wrapped mode, scroll immediately since line calculation is always correct
             if self.is_wrapped {
                 self.scroll_to_cursor_on_next_render = true;
             } else {
@@ -959,7 +890,6 @@ impl EntityInputHandler for InputState {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Save current state for undo before making changes
         self.push_undo();
 
         let range = range_utf16
@@ -968,30 +898,19 @@ impl EntityInputHandler for InputState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        // Build the new text
         let before = &self.value()[0..range.start];
         let after = &self.value()[range.end..];
         let raw_new_text = format!("{}{}{}", before, new_text, after);
-
-        // Apply map_text transformation
         let final_text = self.apply_map_text(raw_new_text);
-
-        // Calculate cursor position, clamping to final text length
         let new_cursor = (range.start + new_text.len()).min(final_text.len());
 
         self.value = Some(final_text.into());
         self.selected_range = new_cursor..new_cursor;
         self.marked_range.take();
-
-        // Clear precomputed visual lines so they get recomputed with new text
         self.precomputed_visual_lines.clear();
-
-        // Reset manual scroll so auto-scroll to cursor works
         self.reset_manual_scroll();
         self.scroll_to_cursor_horizontal = true;
 
-        // For wrapped mode, defer scroll until visual lines are recomputed
-        // For non-wrapped mode, scroll immediately since line calculation is always correct
         if self.is_wrapped {
             self.scroll_to_cursor_on_next_render = true;
         } else {
@@ -1009,7 +928,6 @@ impl EntityInputHandler for InputState {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Save current state for undo before making changes
         self.push_undo();
 
         let range = range_utf16
@@ -1018,12 +936,9 @@ impl EntityInputHandler for InputState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
 
-        // Build the new text
         let before = &self.value()[0..range.start];
         let after = &self.value()[range.end..];
         let raw_new_text = format!("{}{}{}", before, new_text, after);
-
-        // Apply map_text transformation
         let final_text = self.apply_map_text(raw_new_text);
 
         self.value = Some(final_text.into());
@@ -1040,7 +955,6 @@ impl EntityInputHandler for InputState {
             .map(|new_range| new_range.start + range.start..new_range.end + range.end)
             .unwrap_or_else(|| range.start + new_text.len()..range.start + new_text.len());
 
-        // Clear precomputed visual lines so they get recomputed with new text
         self.precomputed_visual_lines.clear();
 
         self.reset_cursor_blink(cx);
@@ -1056,7 +970,6 @@ impl EntityInputHandler for InputState {
     ) -> Option<Bounds<Pixels>> {
         let range = self.range_from_utf16(&range_utf16);
 
-        // Path 1: Single-line mode (last_layout set by TextElement)
         if let Some(last_layout) = self.last_layout.as_ref() {
             let scroll = self.horizontal_scroll_offset;
             return Some(Bounds::from_corners(
@@ -1071,8 +984,6 @@ impl EntityInputHandler for InputState {
             ));
         }
 
-        // Path 2: Multiline (wrapped or non-wrapped) - use visible_lines_info
-        // populated during paint by LineElement / WrappedLineElement
         for info in &self.visible_lines_info {
             let (line_start, line_end) = if self.is_wrapped {
                 let vl = self.precomputed_visual_lines.get(info.line_index)?;
@@ -1106,8 +1017,6 @@ impl EntityInputHandler for InputState {
             }
         }
 
-        // Fallback: cursor line not visible (scrolled off-screen) - return
-        // bounds at top of container so the menu appears near the input.
         let line_h = self.line_height.unwrap_or(px(20.));
         Some(Bounds::from_corners(
             point(bounds.left(), bounds.top()),
@@ -1123,9 +1032,6 @@ impl EntityInputHandler for InputState {
     ) -> Option<usize> {
         let value = self.value();
 
-        // If the value is zero then we can just return zero.
-        // Also fixes issue where the assert would fail due to
-        // `last_layout.text` being equal to the placeholder text.
         if value.is_empty() {
             Some(0)
         } else {

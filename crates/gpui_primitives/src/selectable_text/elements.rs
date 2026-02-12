@@ -11,8 +11,9 @@ use crate::extensions::WindowExt;
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
-    SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_selection_shape,
-    create_text_run, multiline_height, request_line_layout,
+    SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_adjacent_line_selection_bounds,
+    compute_max_visual_line_width, compute_selection_shape, create_text_run, multiline_height,
+    request_line_layout, shape_and_build_visual_lines,
 };
 
 /// Paints alternating colored rectangles for each character's measured bounds.
@@ -153,7 +154,6 @@ impl Element for LineElement {
             });
         }
 
-        // Track max text width for horizontal scroll clamping
         let text_width = line.width;
         self.state.update(cx, |state, _cx| {
             if text_width > state.last_text_width {
@@ -175,18 +175,17 @@ impl Element for LineElement {
             self.selected_range.clone()
         };
 
-        let (prev_line_bounds, next_line_bounds) =
-            crate::utils::compute_adjacent_line_selection_bounds(
-                &full_value,
-                self.prev_line_offsets,
-                self.next_line_offsets,
-                &self.selected_range,
-                self.selection_rounded,
-                &self.font,
-                self.font_size,
-                self.text_color,
-                window,
-            );
+        let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
+            &full_value,
+            self.prev_line_offsets,
+            self.next_line_offsets,
+            &shape_range,
+            self.selection_rounded,
+            &self.font,
+            self.font_size,
+            self.text_color,
+            window,
+        );
 
         let selection = compute_selection_shape(
             &line,
@@ -291,6 +290,7 @@ pub(crate) struct WrappedLineElement {
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
     pub selection_precise: bool,
+    pub content_width: Option<Pixels>,
     pub debug_character_bounds: bool,
     pub debug_interior_corners: bool,
 }
@@ -371,18 +371,17 @@ impl Element for WrappedLineElement {
             .text_system()
             .shape_line(display_text, self.font_size, &[run], None);
 
-        let (prev_line_bounds, next_line_bounds) =
-            crate::utils::compute_adjacent_line_selection_bounds(
-                &value,
-                self.prev_visual_line_offsets,
-                self.next_visual_line_offsets,
-                &self.selected_range,
-                self.selection_rounded,
-                &self.font,
-                self.font_size,
-                self.text_color,
-                window,
-            );
+        let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
+            &value,
+            self.prev_visual_line_offsets,
+            self.next_visual_line_offsets,
+            &shape_range,
+            self.selection_rounded,
+            &self.font,
+            self.font_size,
+            self.text_color,
+            window,
+        );
 
         let selection = compute_selection_shape(
             &line,
@@ -397,7 +396,7 @@ impl Element for WrappedLineElement {
             Pixels::ZERO,
             true, // wrapped mode
             self.selection_precise,
-            None, // wrapped — bounds are the container
+            self.content_width, // auto-width: max wrapped line width; explicit: None → bounds
             window,
             self.selection_rounded,
             self.selection_rounded_smoothing,
@@ -627,7 +626,7 @@ impl Element for WrappedTextElement {
                 let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
                 let text = state.read(cx).get_text();
 
-                let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
+                let (wrapped_lines, visual_lines) = shape_and_build_visual_lines(
                     &text,
                     wrap_width,
                     font_size,
@@ -643,8 +642,12 @@ impl Element for WrappedTextElement {
                     .map(|line| line.unwrapped_layout.width)
                     .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
 
+                let max_wrapped_width =
+                    compute_max_visual_line_width(&visual_lines, &wrapped_lines, &text);
+
                 state.update(cx, |state, _cx| {
                     state.measured_max_line_width = Some(max_line_width);
+                    state.max_wrapped_line_width = Some(max_wrapped_width);
                     state.precomputed_at_width = Some(wrap_width);
                     state.precomputed_visual_lines = visual_lines;
                     state.precomputed_wrapped_lines = wrapped_lines;
@@ -694,6 +697,18 @@ impl Element for WrappedTextElement {
         let actual_line_count = self.state.read(cx).precomputed_visual_lines.len().max(1);
         let visual_lines = self.state.read(cx).precomputed_visual_lines.clone();
 
+        // In auto-width mode with a single visual line (no wrapping), use
+        // max wrapped line width for selection edge so selection doesn't
+        // extend past the text to the full unwrapped container width.
+        let content_width_for_selection = {
+            let state = self.state.read(cx);
+            if state.using_auto_width && actual_line_count == 1 {
+                state.max_wrapped_line_width
+            } else {
+                None
+            }
+        };
+
         self.children.clear();
         self.children.reserve(actual_line_count);
 
@@ -723,12 +738,12 @@ impl Element for WrappedTextElement {
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
                 selection_precise: self.selection_precise,
+                content_width: content_width_for_selection,
                 debug_character_bounds: self.debug_character_bounds,
                 debug_interior_corners: self.debug_interior_corners,
             });
         }
 
-        // Prepaint children, positioning them at line_height intervals offset by vertical scroll.
         let vertical_scroll_offset = self.state.read(cx).vertical_scroll_offset;
         let mut child_prepaints = Vec::with_capacity(actual_line_count);
         for (idx, child) in self.children.iter_mut().enumerate() {
@@ -791,7 +806,6 @@ impl Element for WrappedTextElement {
             state.visible_lines_info.clear();
         });
 
-        // Paint children with content mask for clipping
         let vertical_scroll_offset = self.state.read(cx).vertical_scroll_offset;
         let visible_lines = self
             .multiline_clamp

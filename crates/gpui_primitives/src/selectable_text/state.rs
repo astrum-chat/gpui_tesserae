@@ -7,7 +7,12 @@ use gpui::{
     WrappedLine, div,
 };
 
-use crate::utils::TextNavigation;
+use crate::utils::{
+    TextNavigation, WIDTH_WRAP_BASE_MARGIN, apply_selection_change, auto_scroll_horizontal,
+    auto_scroll_vertical_interval, clamp_vertical_scroll, compute_max_visual_line_width,
+    ensure_cursor_visible_in_scroll, ensure_cursor_visible_wrapped, index_for_multiline_position,
+    shape_and_build_visual_lines,
+};
 
 pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
 
@@ -52,14 +57,10 @@ pub use actions::*;
 pub struct SelectableTextState {
     pub focus_handle: FocusHandle,
     text: SharedString,
-    /// Byte range of the current selection. Empty range means cursor position only.
     pub selected_range: Range<usize>,
-    /// If true, the cursor is at selection start; if false, at selection end.
     pub selection_reversed: bool,
-    /// True while the user is dragging to select text.
     pub is_selecting: bool,
 
-    /// Scroll handle for uniform_list.
     pub scroll_handle: UniformListScrollHandle,
     pub(crate) multiline_clamp: Option<usize>,
     pub(crate) is_wrapped: bool,
@@ -76,32 +77,21 @@ pub struct SelectableTextState {
 
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
     pub(crate) last_bounds: Option<Bounds<Pixels>>,
-    /// Whether the current selection is a "select all" (cmd+a).
     pub is_select_all: bool,
     pub(crate) measured_max_line_width: Option<Pixels>,
+    pub(crate) max_wrapped_line_width: Option<Pixels>,
     pub(crate) is_constrained: bool,
-    /// Tracks previous focus state to detect blur events.
     was_focused: bool,
-    /// Cached render params for use in paint phase
     pub(crate) last_font: Option<Font>,
     pub(crate) last_font_size: Option<Pixels>,
     pub(crate) last_text_color: Option<Hsla>,
 
-    /// Horizontal scroll offset for non-wrapped mode (in pixels).
     pub(crate) horizontal_scroll_offset: Pixels,
-    /// Vertical scroll offset for wrapped mode with multiline_clamp (in pixels).
     pub(crate) vertical_scroll_offset: Pixels,
-    /// Max shaped line width across visible lines, for horizontal scroll clamping.
     pub(crate) last_text_width: Pixels,
-    /// Timestamp of last auto-scroll frame, for delta-time-based scrolling.
     pub(crate) last_scroll_time: Option<std::time::Instant>,
-    /// When true, auto-scroll horizontally to keep cursor visible on next render.
-    /// Opt-in: set by navigation/editing, NOT by double-click/triple-click/select-all.
     pub(crate) scroll_to_cursor_horizontal: bool,
-    /// Last known mouse position during a selection drag, used by the auto-scroll timer.
-    /// Updated by the element-level window.on_mouse_event handler (global, not bounds-gated).
     pub(crate) last_mouse_position: Option<Point<Pixels>>,
-    /// Spawned timer task for continuous auto-scroll while dragging outside bounds.
     auto_scroll_task: Option<Task<()>>,
 }
 
@@ -129,6 +119,7 @@ impl SelectableTextState {
             last_bounds: None,
             is_select_all: false,
             measured_max_line_width: None,
+            max_wrapped_line_width: None,
             is_constrained: false,
             was_focused: false,
             last_font: None,
@@ -161,12 +152,10 @@ impl SelectableTextState {
         self.text = text.into();
         let text_len = self.text.len();
 
-        // Clamp selection to valid range within new text
         let start = self.selected_range.start.min(text_len);
         let end = self.selected_range.end.min(text_len);
         self.selected_range = start..end;
 
-        // If selection is now invalid, reset it
         if self.selected_range.start > self.selected_range.end {
             self.selected_range = 0..0;
             self.selection_reversed = false;
@@ -176,6 +165,7 @@ impl SelectableTextState {
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
         self.measured_max_line_width = None;
+        self.max_wrapped_line_width = None;
         self.precomputed_at_width = None;
         self.horizontal_scroll_offset = Pixels::ZERO;
         self.last_text_width = Pixels::ZERO;
@@ -218,17 +208,20 @@ impl SelectableTextState {
         let text = self.get_text();
         self.precomputed_at_width = Some(width);
 
-        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
-            &text, width, font_size, font, text_color, window,
-        );
+        let (wrapped_lines, visual_lines) =
+            shape_and_build_visual_lines(&text, width, font_size, font, text_color, window);
 
-        // SelectableText-specific: track max line width for auto-width sizing.
-        // Round to pixel grid so div width aligns with GPUI's layout rounding.
         let max_line_width = wrapped_lines
             .iter()
             .map(|line| line.unwrapped_layout.width)
             .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
         self.measured_max_line_width = Some(max_line_width);
+
+        self.max_wrapped_line_width = Some(compute_max_visual_line_width(
+            &visual_lines,
+            &wrapped_lines,
+            &text,
+        ));
 
         self.precomputed_visual_lines = visual_lines;
         self.precomputed_wrapped_lines = wrapped_lines;
@@ -241,7 +234,6 @@ impl SelectableTextState {
         self.precomputed_visual_lines.len().max(1)
     }
 
-    /// Re-wraps at prepaint time when the container shrinks. Does NOT change uniform_list item count.
     pub(crate) fn rewrap_at_width(&mut self, width: Pixels, window: &Window) {
         let Some(font) = self.last_font.clone() else {
             return;
@@ -253,18 +245,23 @@ impl SelectableTextState {
             return;
         };
 
-        let wrap_width = width + crate::utils::WIDTH_WRAP_BASE_MARGIN;
+        let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
         let text = self.get_text();
 
-        let (wrapped_lines, visual_lines) = crate::utils::shape_and_build_visual_lines(
-            &text, wrap_width, font_size, font, text_color, window,
-        );
+        let (wrapped_lines, visual_lines) =
+            shape_and_build_visual_lines(&text, wrap_width, font_size, font, text_color, window);
 
         let max_line_width = wrapped_lines
             .iter()
             .map(|line| line.unwrapped_layout.width)
             .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
         self.measured_max_line_width = Some(max_line_width);
+
+        self.max_wrapped_line_width = Some(compute_max_visual_line_width(
+            &visual_lines,
+            &wrapped_lines,
+            &text,
+        ));
 
         self.precomputed_at_width = Some(wrap_width);
         self.precomputed_visual_lines = visual_lines;
@@ -273,34 +270,16 @@ impl SelectableTextState {
 
     pub fn ensure_cursor_visible(&mut self) {
         if self.is_wrapped {
-            // Pixel-based vertical scroll for wrapped mode.
-            // scroll_handle only works with uniform_list (unwrapped path),
-            // so we must manipulate vertical_scroll_offset directly.
             let line_height = self.line_height.unwrap_or(gpui::px(16.0));
-            let cursor = self.cursor_offset();
-            let visual_line = self
-                .precomputed_visual_lines
-                .iter()
-                .position(|info| cursor >= info.start_offset && cursor <= info.end_offset)
-                .unwrap_or(0);
-
-            let line_top = line_height * visual_line as f32;
-            let line_bottom = line_top + line_height;
-            let total_visual_lines = self.precomputed_visual_lines.len().max(1);
-            let visible_height = line_height
-                * self
-                    .multiline_clamp
-                    .map_or(1, |c| c.min(total_visual_lines)) as f32;
-
-            if line_top < self.vertical_scroll_offset {
-                self.vertical_scroll_offset = line_top;
-            } else if line_bottom > self.vertical_scroll_offset + visible_height {
-                self.vertical_scroll_offset = line_bottom - visible_height;
-            }
-
-            self.clamp_vertical_scroll();
+            self.vertical_scroll_offset = ensure_cursor_visible_wrapped(
+                self.cursor_offset(),
+                &self.precomputed_visual_lines,
+                line_height,
+                self.multiline_clamp,
+                self.vertical_scroll_offset,
+            );
         } else {
-            crate::utils::ensure_cursor_visible_in_scroll(
+            ensure_cursor_visible_in_scroll(
                 self.cursor_offset(),
                 self.is_wrapped,
                 &self.precomputed_visual_lines,
@@ -321,7 +300,7 @@ impl SelectableTextState {
     }
 
     fn select_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
-        crate::utils::apply_selection_change(
+        apply_selection_change(
             &mut self.selected_range,
             &mut self.selection_reversed,
             offset,
@@ -592,7 +571,7 @@ impl SelectableTextState {
         if self.get_text().is_empty() {
             return 0;
         }
-        crate::utils::index_for_multiline_position(
+        index_for_multiline_position(
             position,
             line_height,
             self.is_wrapped,
@@ -613,21 +592,16 @@ impl SelectableTextState {
         line_height: Pixels,
         cx: &mut Context<Self>,
     ) {
+        self.is_select_all = false;
         let offset = self.index_for_multiline_position(position, line_height);
-        // Use select_to_without_scroll to prevent ensure_cursor_visible (vertical)
-        // from fighting with our explicit scroll_up/down_one_line calls.
-        // But opt in to horizontal scroll so cursor stays visible during drag.
         self.select_to_without_scroll(offset, cx);
         self.scroll_to_cursor_horizontal = true;
 
         if self.is_selecting {
             if let Some(bounds) = &self.last_bounds {
-                let interval = crate::utils::auto_scroll_vertical_interval(
-                    position.y,
-                    bounds.top(),
-                    bounds.bottom(),
-                );
-                if let Some(interval_ms) = interval {
+                if let Some(interval_ms) =
+                    auto_scroll_vertical_interval(position.y, bounds.top(), bounds.bottom())
+                {
                     let now = std::time::Instant::now();
                     let should_scroll = self
                         .last_scroll_time
@@ -641,10 +615,8 @@ impl SelectableTextState {
                         }
                         self.last_scroll_time = Some(now);
                     }
-                    // Keep scrolling even when the mouse stops moving
                     self.start_auto_scroll_timer(cx);
                 } else {
-                    // Mouse is back inside bounds — cancel the timer
                     self.auto_scroll_task = None;
                 }
             }
@@ -660,7 +632,7 @@ impl SelectableTextState {
             return Pixels::ZERO;
         }
 
-        self.horizontal_scroll_offset = crate::utils::auto_scroll_horizontal(
+        self.horizontal_scroll_offset = auto_scroll_horizontal(
             self.horizontal_scroll_offset,
             cursor_x,
             container_width,
@@ -700,22 +672,14 @@ impl SelectableTextState {
 
     pub(crate) fn clamp_vertical_scroll(&mut self) {
         let line_height = self.line_height.unwrap_or(gpui::px(16.0));
-        let total_lines = self.precomputed_visual_lines.len().max(1);
-        let visible_lines = self.multiline_clamp.map_or(1, |c| c.min(total_lines));
-        let max_scroll = line_height * (total_lines - visible_lines) as f32;
-        let max_scroll = if max_scroll > Pixels::ZERO {
-            max_scroll
-        } else {
-            Pixels::ZERO
-        };
-        self.vertical_scroll_offset = self
-            .vertical_scroll_offset
-            .max(Pixels::ZERO)
-            .min(max_scroll);
+        self.vertical_scroll_offset = clamp_vertical_scroll(
+            self.vertical_scroll_offset,
+            line_height,
+            self.precomputed_visual_lines.len(),
+            self.multiline_clamp,
+        );
     }
 
-    /// Starts a repeating timer that continues auto-scrolling and extending the selection
-    /// while the mouse is held stationary outside the viewport bounds during a drag.
     fn start_auto_scroll_timer(&mut self, cx: &mut Context<Self>) {
         if self.auto_scroll_task.is_some() {
             return;
@@ -754,6 +718,7 @@ impl SelectableTextState {
         cx: &mut Context<Self>,
     ) {
         self.is_selecting = true;
+        self.is_select_all = false;
 
         let index = if let Some(line_height) = self.line_height {
             self.index_for_multiline_position(event.position, line_height)
@@ -762,7 +727,6 @@ impl SelectableTextState {
         };
 
         if event.click_count >= 3 {
-            // Select line at click position
             self.is_select_all = true;
             let (line_start, line_end) = self.line_range_at(index);
             self.move_to_without_scroll(line_start, cx);
@@ -787,11 +751,6 @@ impl SelectableTextState {
         self.auto_scroll_task = None;
     }
 
-    /// Handles mouse move on the parent div.
-    /// Note: last_mouse_position is updated by the element-level window.on_mouse_event
-    /// handler (global, fires even outside bounds), not here. The div-level on_mouse_move
-    /// is bounds-gated and stops firing when the mouse leaves the div, which would cause
-    /// the auto-scroll timer to use a stale in-bounds position.
     pub fn on_mouse_move(
         &mut self,
         _event: &gpui::MouseMoveEvent,
@@ -800,7 +759,6 @@ impl SelectableTextState {
     ) {
     }
 
-    /// Handles scroll wheel: stops propagation if there's scrollable content.
     pub fn on_scroll_wheel(
         &mut self,
         event: &gpui::ScrollWheelEvent,
