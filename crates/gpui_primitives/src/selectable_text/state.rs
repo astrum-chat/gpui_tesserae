@@ -1,15 +1,15 @@
 use std::ops::Range;
+use std::time::Duration;
 
 use gpui::{
     App, Bounds, ClipboardItem, Context, FocusHandle, Focusable, Font, Hsla, IntoElement, Pixels,
-    Render, ScrollStrategy, SharedString, UniformListScrollHandle, Window, WrappedLine, div,
+    Point, Render, ScrollStrategy, SharedString, Task, UniformListScrollHandle, Window,
+    WrappedLine, div,
 };
 
-use crate::extensions::WindowExt;
 use crate::utils::TextNavigation;
 
-// Re-export VisualLineInfo and VisibleLineInfo from input module since they're the same structure
-pub use crate::input::{VisibleLineInfo, VisualLineInfo};
+pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
 
 mod actions {
     #![allow(missing_docs)]
@@ -48,8 +48,8 @@ mod actions {
 pub use actions::*;
 
 /// Core state for selectable text, managing text content, selection, and scroll position.
+#[allow(missing_docs)]
 pub struct SelectableTextState {
-    /// Handle for keyboard focus management.
     pub focus_handle: FocusHandle,
     text: SharedString,
     /// Byte range of the current selection. Empty range means cursor position only.
@@ -61,7 +61,7 @@ pub struct SelectableTextState {
 
     /// Scroll handle for uniform_list.
     pub scroll_handle: UniformListScrollHandle,
-    pub(crate) line_clamp: usize,
+    pub(crate) multiline_clamp: Option<usize>,
     pub(crate) is_wrapped: bool,
     pub(crate) line_height: Option<Pixels>,
 
@@ -86,13 +86,27 @@ pub struct SelectableTextState {
     pub(crate) last_font: Option<Font>,
     pub(crate) last_font_size: Option<Pixels>,
     pub(crate) last_text_color: Option<Hsla>,
-    /// Pending mouse position for deferred selection processing.
-    /// Stored during mouse move events and processed after visible_lines_info is populated.
-    pub(crate) pending_selection_position: Option<gpui::Point<Pixels>>,
+
+    /// Horizontal scroll offset for non-wrapped mode (in pixels).
+    pub(crate) horizontal_scroll_offset: Pixels,
+    /// Vertical scroll offset for wrapped mode with multiline_clamp (in pixels).
+    pub(crate) vertical_scroll_offset: Pixels,
+    /// Max shaped line width across visible lines, for horizontal scroll clamping.
+    pub(crate) last_text_width: Pixels,
+    /// Timestamp of last auto-scroll frame, for delta-time-based scrolling.
+    pub(crate) last_scroll_time: Option<std::time::Instant>,
+    /// When true, auto-scroll horizontally to keep cursor visible on next render.
+    /// Opt-in: set by navigation/editing, NOT by double-click/triple-click/select-all.
+    pub(crate) scroll_to_cursor_horizontal: bool,
+    /// Last known mouse position during a selection drag, used by the auto-scroll timer.
+    /// Updated by the element-level window.on_mouse_event handler (global, not bounds-gated).
+    pub(crate) last_mouse_position: Option<Point<Pixels>>,
+    /// Spawned timer task for continuous auto-scroll while dragging outside bounds.
+    auto_scroll_task: Option<Task<()>>,
 }
 
+#[allow(missing_docs)]
 impl SelectableTextState {
-    /// Creates a new selectable text state with default values and a fresh focus handle.
     pub fn new(cx: &App) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -101,8 +115,8 @@ impl SelectableTextState {
             selection_reversed: false,
             is_selecting: false,
             scroll_handle: UniformListScrollHandle::new(),
-            line_clamp: usize::MAX,
-            is_wrapped: true,
+            multiline_clamp: None,
+            is_wrapped: false,
             line_height: None,
             cached_wrap_width: None,
             precomputed_visual_lines: Vec::new(),
@@ -120,12 +134,16 @@ impl SelectableTextState {
             last_font: None,
             last_font_size: None,
             last_text_color: None,
-            pending_selection_position: None,
+            horizontal_scroll_offset: Pixels::ZERO,
+            vertical_scroll_offset: Pixels::ZERO,
+            last_text_width: Pixels::ZERO,
+            last_scroll_time: None,
+            scroll_to_cursor_horizontal: false,
+            last_mouse_position: None,
+            auto_scroll_task: None,
         }
     }
 
-    /// Updates focus state and clears selection when focus is lost.
-    /// Call this during render to detect blur events.
     pub fn update_focus_state(&mut self, window: &Window) {
         let is_focused = self.focus_handle.is_focused(window);
         if is_focused != self.was_focused {
@@ -133,11 +151,12 @@ impl SelectableTextState {
             if !is_focused && !self.selected_range.is_empty() {
                 self.selected_range = 0..0;
                 self.is_select_all = false;
+                self.scroll_to_cursor_horizontal = false;
             }
         }
     }
 
-    /// Sets the text content, preserving selection if valid, and triggering recomputation.
+    /// Sets the text content, clamping any existing selection to the new text length.
     pub fn text(&mut self, text: impl Into<SharedString>) {
         self.text = text.into();
         let text_len = self.text.len();
@@ -158,16 +177,21 @@ impl SelectableTextState {
         self.needs_wrap_recompute = true;
         self.measured_max_line_width = None;
         self.precomputed_at_width = None;
+        self.horizontal_scroll_offset = Pixels::ZERO;
+        self.last_text_width = Pixels::ZERO;
     }
 
-    /// Returns the current text content.
     pub fn get_text(&self) -> SharedString {
         self.text.clone()
     }
 
-    pub(crate) fn set_multiline_params(&mut self, line_height: Pixels, line_clamp: usize) {
+    pub(crate) fn set_multiline_params(
+        &mut self,
+        line_height: Pixels,
+        multiline_clamp: Option<usize>,
+    ) {
         self.line_height = Some(line_height);
-        self.line_clamp = line_clamp;
+        self.multiline_clamp = multiline_clamp;
     }
 
     pub(crate) fn set_wrap_mode(&mut self, wrapped: bool) {
@@ -177,11 +201,11 @@ impl SelectableTextState {
             self.precomputed_wrapped_lines.clear();
             self.precomputed_at_width = None;
             self.needs_wrap_recompute = true;
+            self.horizontal_scroll_offset = Pixels::ZERO;
         }
         self.is_wrapped = wrapped;
     }
 
-    /// Pre-computes visual line info for wrapped text. Returns the number of visual lines.
     #[allow(dead_code)]
     pub(crate) fn precompute_wrapped_lines(
         &mut self,
@@ -204,7 +228,7 @@ impl SelectableTextState {
             .iter()
             .map(|line| line.unwrapped_layout.width)
             .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
-        self.measured_max_line_width = Some(window.round(max_line_width));
+        self.measured_max_line_width = Some(max_line_width);
 
         self.precomputed_visual_lines = visual_lines;
         self.precomputed_wrapped_lines = wrapped_lines;
@@ -217,9 +241,7 @@ impl SelectableTextState {
         self.precomputed_visual_lines.len().max(1)
     }
 
-    /// Re-wraps text at the given width during prepaint when the container has shrunk.
-    /// Uses cached render params from the last render() call.
-    /// Only updates precomputed_visual_lines - does NOT change the uniform_list item count.
+    /// Re-wraps at prepaint time when the container shrinks. Does NOT change uniform_list item count.
     pub(crate) fn rewrap_at_width(&mut self, width: Pixels, window: &Window) {
         let Some(font) = self.last_font.clone() else {
             return;
@@ -242,27 +264,54 @@ impl SelectableTextState {
             .iter()
             .map(|line| line.unwrapped_layout.width)
             .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
-        self.measured_max_line_width = Some(window.round(max_line_width));
+        self.measured_max_line_width = Some(max_line_width);
 
         self.precomputed_at_width = Some(wrap_width);
         self.precomputed_visual_lines = visual_lines;
         self.precomputed_wrapped_lines = wrapped_lines;
     }
 
-    /// Ensure the cursor is visible by scrolling if necessary.
     pub fn ensure_cursor_visible(&mut self) {
-        crate::utils::ensure_cursor_visible_in_scroll(
-            self.cursor_offset(),
-            self.is_wrapped,
-            &self.precomputed_visual_lines,
-            self.line_clamp,
-            &self.scroll_handle,
-            |offset| self.offset_to_line_col(offset).0,
-            || self.line_count(),
-        );
+        if self.is_wrapped {
+            // Pixel-based vertical scroll for wrapped mode.
+            // scroll_handle only works with uniform_list (unwrapped path),
+            // so we must manipulate vertical_scroll_offset directly.
+            let line_height = self.line_height.unwrap_or(gpui::px(16.0));
+            let cursor = self.cursor_offset();
+            let visual_line = self
+                .precomputed_visual_lines
+                .iter()
+                .position(|info| cursor >= info.start_offset && cursor <= info.end_offset)
+                .unwrap_or(0);
+
+            let line_top = line_height * visual_line as f32;
+            let line_bottom = line_top + line_height;
+            let total_visual_lines = self.precomputed_visual_lines.len().max(1);
+            let visible_height = line_height
+                * self
+                    .multiline_clamp
+                    .map_or(1, |c| c.min(total_visual_lines)) as f32;
+
+            if line_top < self.vertical_scroll_offset {
+                self.vertical_scroll_offset = line_top;
+            } else if line_bottom > self.vertical_scroll_offset + visible_height {
+                self.vertical_scroll_offset = line_bottom - visible_height;
+            }
+
+            self.clamp_vertical_scroll();
+        } else {
+            crate::utils::ensure_cursor_visible_in_scroll(
+                self.cursor_offset(),
+                self.is_wrapped,
+                &self.precomputed_visual_lines,
+                self.multiline_clamp,
+                &self.scroll_handle,
+                |offset| self.offset_to_line_col(offset).0,
+                || self.line_count(),
+            );
+        }
     }
 
-    /// Returns the active end of the selection (where the cursor is rendered).
     pub fn cursor_offset(&self) -> usize {
         if self.selection_reversed {
             self.selected_range.start
@@ -279,6 +328,7 @@ impl SelectableTextState {
         );
 
         if scroll {
+            self.scroll_to_cursor_horizontal = true;
             if self.is_wrapped {
                 self.scroll_to_cursor_on_next_render = true;
             } else {
@@ -289,29 +339,31 @@ impl SelectableTextState {
         cx.notify()
     }
 
-    /// Extends the selection to the given offset, scrolling to keep the cursor visible.
     pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.is_select_all = false;
         self.select_to_inner(offset, true, cx)
     }
 
-    /// Extends the selection to the given offset without scrolling.
     pub fn select_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.scroll_to_cursor_on_next_render = false;
+        self.scroll_to_cursor_horizontal = false;
         self.select_to_inner(offset, false, cx)
     }
 
-    /// Selects the word at the given offset (used for double-click selection).
     pub fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
         let start = self.word_start(offset);
         let end = self.word_end(start);
         self.selected_range = start..end;
         self.selection_reversed = false;
+        self.scroll_to_cursor_on_next_render = false;
+        self.scroll_to_cursor_horizontal = false;
         cx.notify()
     }
 
     fn move_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
         if scroll {
+            self.scroll_to_cursor_horizontal = true;
             if self.is_wrapped {
                 self.scroll_to_cursor_on_next_render = true;
             } else {
@@ -321,20 +373,17 @@ impl SelectableTextState {
         cx.notify()
     }
 
-    /// Sets cursor position and clears selection, scrolling to keep cursor visible.
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.is_select_all = false;
         self.move_to_inner(offset, true, cx)
     }
 
-    /// Sets cursor position without auto-scrolling.
     pub fn move_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
+        self.scroll_to_cursor_on_next_render = false;
+        self.scroll_to_cursor_horizontal = false;
         self.move_to_inner(offset, false, cx)
     }
 
-    // Action handlers
-
-    /// Copies selected text to clipboard. No-op if nothing selected.
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -343,14 +392,12 @@ impl SelectableTextState {
         }
     }
 
-    /// Selects all text without scrolling.
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.is_select_all = true;
         self.move_to_without_scroll(0, cx);
         self.select_to_without_scroll(self.get_text().len(), cx)
     }
 
-    /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
     pub fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);
@@ -359,7 +406,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
     pub fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.next_boundary(self.selected_range.end), cx);
@@ -368,17 +414,14 @@ impl SelectableTextState {
         }
     }
 
-    /// Extends selection by one grapheme left.
     pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
-    /// Extends selection by one grapheme right.
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
-    /// Collapses selection or moves to same column on previous line.
     pub fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let (line, col) = self.offset_to_line_col(self.cursor_offset());
@@ -391,7 +434,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Collapses selection or moves to same column on next line.
     pub fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let (line, col) = self.offset_to_line_col(self.cursor_offset());
@@ -404,7 +446,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Extends selection to same column on previous line.
     pub fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
         let (line, col) = self.offset_to_line_col(self.cursor_offset());
         if line > 0 {
@@ -413,7 +454,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Extends selection to same column on next line.
     pub fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         let (line, col) = self.offset_to_line_col(self.cursor_offset());
         if line < self.line_count().saturating_sub(1) {
@@ -422,17 +462,14 @@ impl SelectableTextState {
         }
     }
 
-    /// Moves cursor to start of text.
     pub fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
-    /// Moves cursor to end of text.
     pub fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.get_text().len(), cx);
     }
 
-    /// Moves cursor to start of current line.
     pub fn move_to_start_of_line(
         &mut self,
         _: &MoveToStartOfLine,
@@ -444,7 +481,6 @@ impl SelectableTextState {
         self.move_to(target, cx);
     }
 
-    /// Moves cursor to end of current line.
     pub fn move_to_end_of_line(
         &mut self,
         _: &MoveToEndOfLine,
@@ -456,7 +492,6 @@ impl SelectableTextState {
         self.move_to(target, cx);
     }
 
-    /// Extends selection to start of current line.
     pub fn select_to_start_of_line(
         &mut self,
         _: &SelectToStartOfLine,
@@ -468,7 +503,6 @@ impl SelectableTextState {
         self.select_to(target, cx);
     }
 
-    /// Extends selection to end of current line.
     pub fn select_to_end_of_line(
         &mut self,
         _: &SelectToEndOfLine,
@@ -480,27 +514,22 @@ impl SelectableTextState {
         self.select_to(target, cx);
     }
 
-    /// Moves cursor to start of document.
     pub fn move_to_start(&mut self, _: &MoveToStart, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
-    /// Moves cursor to end of document.
     pub fn move_to_end(&mut self, _: &MoveToEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.get_text().len(), cx);
     }
 
-    /// Extends selection to start of document.
     pub fn select_to_start(&mut self, _: &SelectToStart, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(0, cx);
     }
 
-    /// Extends selection to end of document.
     pub fn select_to_end(&mut self, _: &SelectToEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.get_text().len(), cx);
     }
 
-    /// Moves past whitespace/punctuation to start of previous word.
     pub fn move_to_previous_word(
         &mut self,
         _: &MoveToPreviousWord,
@@ -517,7 +546,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Moves to end of current/next word.
     pub fn move_to_next_word(
         &mut self,
         _: &MoveToNextWord,
@@ -533,7 +561,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Extends selection to start of previous word.
     pub fn select_to_previous_word_start(
         &mut self,
         _: &SelectToPreviousWordStart,
@@ -546,7 +573,6 @@ impl SelectableTextState {
         self.select_to(target, cx);
     }
 
-    /// Extends selection to end of next word.
     pub fn select_to_next_word_end(
         &mut self,
         _: &SelectToNextWordEnd,
@@ -558,9 +584,6 @@ impl SelectableTextState {
         self.select_to(target, cx);
     }
 
-    // Mouse handling
-
-    /// Converts a mouse position to a text offset for multiline mode.
     pub fn index_for_multiline_position(
         &self,
         position: gpui::Point<Pixels>,
@@ -573,7 +596,7 @@ impl SelectableTextState {
             position,
             line_height,
             self.is_wrapped,
-            Pixels::ZERO,
+            self.horizontal_scroll_offset,
             &self.visible_lines_info,
             &self.precomputed_visual_lines,
             self.last_bounds.as_ref(),
@@ -591,21 +614,67 @@ impl SelectableTextState {
         cx: &mut Context<Self>,
     ) {
         let offset = self.index_for_multiline_position(position, line_height);
-        self.select_to(offset, cx);
+        // Use select_to_without_scroll to prevent ensure_cursor_visible (vertical)
+        // from fighting with our explicit scroll_up/down_one_line calls.
+        // But opt in to horizontal scroll so cursor stays visible during drag.
+        self.select_to_without_scroll(offset, cx);
+        self.scroll_to_cursor_horizontal = true;
 
         if self.is_selecting {
             if let Some(bounds) = &self.last_bounds {
-                if position.y < bounds.top() {
-                    self.scroll_up_one_line();
-                } else if position.y > bounds.bottom() {
-                    self.scroll_down_one_line();
+                let interval = crate::utils::auto_scroll_vertical_interval(
+                    position.y,
+                    bounds.top(),
+                    bounds.bottom(),
+                );
+                if let Some(interval_ms) = interval {
+                    let now = std::time::Instant::now();
+                    let should_scroll = self
+                        .last_scroll_time
+                        .map_or(true, |t| now.duration_since(t).as_millis() > interval_ms);
+
+                    if should_scroll {
+                        if position.y < bounds.top() {
+                            self.scroll_up_one_line();
+                        } else {
+                            self.scroll_down_one_line();
+                        }
+                        self.last_scroll_time = Some(now);
+                    }
+                    // Keep scrolling even when the mouse stops moving
+                    self.start_auto_scroll_timer(cx);
+                } else {
+                    // Mouse is back inside bounds — cancel the timer
+                    self.auto_scroll_task = None;
                 }
             }
         }
     }
 
-    pub(crate) fn scroll_up_one_line(&self) {
-        if let Some(first) = self.visible_lines_info.first() {
+    pub(crate) fn ensure_cursor_visible_horizontal(
+        &mut self,
+        cursor_x: Pixels,
+        container_width: Pixels,
+    ) -> Pixels {
+        if self.is_wrapped {
+            return Pixels::ZERO;
+        }
+
+        self.horizontal_scroll_offset = crate::utils::auto_scroll_horizontal(
+            self.horizontal_scroll_offset,
+            cursor_x,
+            container_width,
+            &mut self.last_scroll_time,
+        );
+        self.horizontal_scroll_offset
+    }
+
+    pub(crate) fn scroll_up_one_line(&mut self) {
+        if self.is_wrapped {
+            let line_height = self.line_height.unwrap_or(gpui::px(16.0));
+            self.vertical_scroll_offset =
+                (self.vertical_scroll_offset - line_height).max(Pixels::ZERO);
+        } else if let Some(first) = self.visible_lines_info.first() {
             if first.line_index > 0 {
                 self.scroll_handle
                     .scroll_to_item(first.line_index - 1, ScrollStrategy::Top);
@@ -613,22 +682,71 @@ impl SelectableTextState {
         }
     }
 
-    pub(crate) fn scroll_down_one_line(&self) {
-        let line_count = if self.is_wrapped {
-            self.precomputed_visual_lines.len()
+    pub(crate) fn scroll_down_one_line(&mut self) {
+        if self.is_wrapped {
+            let line_height = self.line_height.unwrap_or(gpui::px(16.0));
+            self.vertical_scroll_offset = self.vertical_scroll_offset + line_height;
+            self.clamp_vertical_scroll();
         } else {
-            self.line_count()
-        };
-
-        if let Some(last) = self.visible_lines_info.last() {
-            if last.line_index + 1 < line_count {
-                self.scroll_handle
-                    .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
+            let line_count = self.line_count();
+            if let Some(last) = self.visible_lines_info.last() {
+                if last.line_index + 1 < line_count {
+                    self.scroll_handle
+                        .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
+                }
             }
         }
     }
 
-    /// Handles mouse down: starts selection, supports click/double-click/triple-click and shift-extend.
+    pub(crate) fn clamp_vertical_scroll(&mut self) {
+        let line_height = self.line_height.unwrap_or(gpui::px(16.0));
+        let total_lines = self.precomputed_visual_lines.len().max(1);
+        let visible_lines = self.multiline_clamp.map_or(1, |c| c.min(total_lines));
+        let max_scroll = line_height * (total_lines - visible_lines) as f32;
+        let max_scroll = if max_scroll > Pixels::ZERO {
+            max_scroll
+        } else {
+            Pixels::ZERO
+        };
+        self.vertical_scroll_offset = self
+            .vertical_scroll_offset
+            .max(Pixels::ZERO)
+            .min(max_scroll);
+    }
+
+    /// Starts a repeating timer that continues auto-scrolling and extending the selection
+    /// while the mouse is held stationary outside the viewport bounds during a drag.
+    fn start_auto_scroll_timer(&mut self, cx: &mut Context<Self>) {
+        if self.auto_scroll_task.is_some() {
+            return;
+        }
+        self.auto_scroll_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+                let Some(this) = this.upgrade() else {
+                    break;
+                };
+                let should_continue = this.update(cx, |state, cx| {
+                    if !state.is_selecting {
+                        return false;
+                    }
+                    if let Some(position) = state.last_mouse_position {
+                        if let Some(line_height) = state.line_height {
+                            state.select_to_multiline(position, line_height, cx);
+                        }
+                    }
+                    true
+                });
+                if !should_continue {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Handles mouse down: click to place cursor, double-click to select word, triple-click to select line.
     pub fn on_mouse_down(
         &mut self,
         event: &gpui::MouseDownEvent,
@@ -645,6 +763,7 @@ impl SelectableTextState {
 
         if event.click_count >= 3 {
             // Select line at click position
+            self.is_select_all = true;
             let (line_start, line_end) = self.line_range_at(index);
             self.move_to_without_scroll(line_start, cx);
             self.select_to_without_scroll(line_end, cx);
@@ -657,7 +776,6 @@ impl SelectableTextState {
         }
     }
 
-    /// Handles mouse up: ends the current selection drag.
     pub fn on_mouse_up(
         &mut self,
         _: &gpui::MouseUpEvent,
@@ -665,52 +783,85 @@ impl SelectableTextState {
         _: &mut Context<Self>,
     ) {
         self.is_selecting = false;
-        self.pending_selection_position = None;
+        self.last_mouse_position = None;
+        self.auto_scroll_task = None;
     }
 
-    /// Handles mouse move: stores position for deferred selection processing.
-    /// The actual selection update happens after visible_lines_info is populated.
+    /// Handles mouse move on the parent div.
+    /// Note: last_mouse_position is updated by the element-level window.on_mouse_event
+    /// handler (global, fires even outside bounds), not here. The div-level on_mouse_move
+    /// is bounds-gated and stops firing when the mouse leaves the div, which would cause
+    /// the auto-scroll timer to use a stale in-bounds position.
     pub fn on_mouse_move(
         &mut self,
-        event: &gpui::MouseMoveEvent,
+        _event: &gpui::MouseMoveEvent,
         _: &mut Window,
-        cx: &mut Context<Self>,
+        _: &mut Context<Self>,
     ) {
-        if self.is_selecting {
-            self.pending_selection_position = Some(event.position);
-            cx.notify();
-        }
-    }
-
-    /// Processes any pending selection update.
-    /// Called after visible_lines_info is fully populated during paint.
-    pub fn process_pending_selection(&mut self, cx: &mut Context<Self>) {
-        if let Some(position) = self.pending_selection_position.take() {
-            if self.is_selecting {
-                if let Some(line_height) = self.line_height {
-                    self.select_to_multiline(position, line_height, cx);
-                }
-            }
-        }
     }
 
     /// Handles scroll wheel: stops propagation if there's scrollable content.
     pub fn on_scroll_wheel(
         &mut self,
-        _event: &gpui::ScrollWheelEvent,
+        event: &gpui::ScrollWheelEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let line_height = self.line_height.unwrap_or(gpui::px(16.0));
+        let delta = event.delta.pixel_delta(line_height);
+
         // Check if there's vertical scrollable content (more lines than visible)
         let line_count = if self.is_wrapped {
             self.precomputed_visual_lines.len()
         } else {
             self.line_count()
         };
-        let has_vertical_scroll = line_count > self.line_clamp;
+        let has_vertical_scroll = self
+            .multiline_clamp
+            .map_or(false, |clamp| line_count > clamp);
 
         if has_vertical_scroll {
             cx.stop_propagation();
+
+            // Vertical scroll for wrapped mode
+            if self.is_wrapped && delta.y.abs() > gpui::px(0.01) {
+                let clamp = self.multiline_clamp.unwrap();
+                let max_scroll = line_height * (line_count - clamp) as f32;
+                let new_offset = (self.vertical_scroll_offset - delta.y)
+                    .max(Pixels::ZERO)
+                    .min(max_scroll);
+
+                if new_offset != self.vertical_scroll_offset {
+                    self.vertical_scroll_offset = new_offset;
+                    cx.notify();
+                }
+            }
+        }
+
+        // Horizontal scroll: only in non-wrapped mode
+        if !self.is_wrapped {
+            let container_width = self
+                .last_bounds
+                .map(|b| b.size.width)
+                .unwrap_or(gpui::px(100.0));
+            let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
+            let has_horizontal_scroll = max_scroll > Pixels::ZERO;
+
+            let is_vertical_scroll = delta.y.abs() > delta.x.abs();
+            if !is_vertical_scroll && has_horizontal_scroll {
+                cx.stop_propagation();
+            }
+
+            if delta.x.abs() > gpui::px(0.01) {
+                let new_offset = (self.horizontal_scroll_offset - delta.x)
+                    .max(Pixels::ZERO)
+                    .min(max_scroll);
+
+                if new_offset != self.horizontal_scroll_offset {
+                    self.horizontal_scroll_offset = new_offset;
+                    cx.notify();
+                }
+            }
         }
     }
 }

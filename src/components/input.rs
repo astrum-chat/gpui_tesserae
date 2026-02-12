@@ -245,21 +245,20 @@ impl Input {
     }
 
     /// Sets the maximum number of visible lines before scrolling. Use `multiline()` for unlimited.
-    pub fn line_clamp(mut self, line_clamp: usize) -> Self {
-        self.base = self.base.line_clamp(line_clamp);
+    pub fn multiline_clamp(mut self, multiline_clamp: usize) -> Self {
+        self.base = self.base.multiline_clamp(multiline_clamp);
         self
     }
 
     /// Enables multi-line mode with unconstrained height (no scrolling).
-    /// Equivalent to `.line_clamp(usize::MAX)`.
     pub fn multiline(mut self) -> Self {
         self.base = self.base.multiline();
         self
     }
 
-    /// Enables or disables word wrapping. Sets `line_clamp` to 1 if currently 0.
-    pub fn word_wrap(mut self, enabled: bool) -> Self {
-        self.base = self.base.word_wrap(enabled);
+    /// Enables word wrapping. Only effective when multiline is enabled.
+    pub fn multiline_wrapped(mut self) -> Self {
+        self.base = self.base.multiline_wrapped();
         self
     }
 

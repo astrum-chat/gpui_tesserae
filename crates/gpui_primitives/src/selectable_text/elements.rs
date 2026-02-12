@@ -4,15 +4,15 @@ use gpui::{
     AnyElement, App, AvailableSpace, Bounds, CursorStyle, DispatchPhase, Element, ElementId,
     Entity, Font, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
     LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, Window, point,
-    px, relative, size,
+    px, size,
 };
 
 use crate::extensions::WindowExt;
 use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
-    SelectionShape, WIDTH_WRAP_BASE_MARGIN, compute_selection_shape, compute_selection_x_bounds,
-    create_text_run, multiline_height,
+    SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_selection_shape,
+    create_text_run, multiline_height, request_line_layout,
 };
 
 /// Paints alternating colored rectangles for each character's measured bounds.
@@ -80,6 +80,7 @@ pub(crate) struct LineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
+    pub selection_precise: bool,
     pub debug_character_bounds: bool,
     pub debug_interior_corners: bool,
 }
@@ -88,6 +89,7 @@ pub(crate) struct LinePrepaintState {
     pub line: Option<ShapedLine>,
     pub selection: Option<SelectionShape>,
     pub text_hitbox: Option<Hitbox>,
+    pub scroll_offset: Pixels,
 }
 
 impl IntoElement for LineElement {
@@ -117,10 +119,7 @@ impl Element for LineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-        (window.request_layout(style, [], cx), ())
+        request_line_layout(self.line_height, window, cx)
     }
 
     fn prepaint(
@@ -154,76 +153,67 @@ impl Element for LineElement {
             });
         }
 
-        // Compute adjacent line selection bounds for corner radius calculation
-        let (prev_line_bounds, next_line_bounds) = if self.selection_rounded.is_some() {
-            let prev_bounds = self.prev_line_offsets.and_then(|(start, end)| {
-                let content: String = full_value[start..end].to_string();
-                let run = create_text_run(self.font.clone(), self.text_color, content.len());
-                let shaped =
-                    window
-                        .text_system()
-                        .shape_line(content.into(), self.font_size, &[run], None);
-                compute_selection_x_bounds(
-                    &shaped,
-                    &self.selected_range,
-                    start,
-                    end,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                )
-            });
+        // Track max text width for horizontal scroll clamping
+        let text_width = line.width;
+        self.state.update(cx, |state, _cx| {
+            if text_width > state.last_text_width {
+                state.last_text_width = text_width;
+            }
+        });
 
-            let next_bounds = self.next_line_offsets.and_then(|(start, end)| {
-                let content: String = full_value[start..end].to_string();
-                let run = create_text_run(self.font.clone(), self.text_color, content.len());
-                let shaped =
-                    window
-                        .text_system()
-                        .shape_line(content.into(), self.font_size, &[run], None);
-                compute_selection_x_bounds(
-                    &shaped,
-                    &self.selected_range,
-                    start,
-                    end,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                )
-            });
-
-            (prev_bounds, next_bounds)
+        // Read the current scroll offset from state (not the stale field value from render time).
+        // This ensures all lines see the same up-to-date offset, so adjacent-line corner
+        // rounding stays consistent even when auto-scroll changed the offset after render.
+        let state = self.state.read(cx);
+        let scroll_offset = state.horizontal_scroll_offset;
+        let content_width = state.measured_max_line_width;
+        // For select-all/triple-click, bump the range end so selected_range.end > line_end
+        // triggers the extend-to-edge logic in compute_selection_shape.
+        let shape_range = if state.is_select_all {
+            self.selected_range.start..self.selected_range.end + 1
         } else {
-            (None, None)
+            self.selected_range.clone()
         };
+
+        let (prev_line_bounds, next_line_bounds) =
+            crate::utils::compute_adjacent_line_selection_bounds(
+                &full_value,
+                self.prev_line_offsets,
+                self.next_line_offsets,
+                &self.selected_range,
+                self.selection_rounded,
+                &self.font,
+                self.font_size,
+                self.text_color,
+                window,
+            );
 
         let selection = compute_selection_shape(
             &line,
             bounds,
-            &self.selected_range,
+            &shape_range,
             self.line_start_offset,
             self.line_end_offset,
             &self.font,
             self.font_size,
             self.text_color,
             self.highlight_text_color,
-            Pixels::ZERO,
+            scroll_offset,
+            false, // not wrapped — non-wrapped multiline mode
+            self.selection_precise,
+            content_width,
             window,
             self.selection_rounded,
             self.selection_rounded_smoothing,
             prev_line_bounds,
+            self.prev_line_offsets.map(|(_, end)| end),
             next_line_bounds,
+            self.next_line_offsets.map(|(_, end)| end),
             self.debug_interior_corners,
         );
 
         let text_hitbox = if line.width > Pixels::ZERO {
-            let text_bounds = Bounds {
-                origin: bounds.origin,
-                size: size(line.width, bounds.size.height),
-            };
-            Some(window.insert_hitbox(text_bounds, HitboxBehavior::Normal))
+            Some(window.insert_hitbox(bounds, HitboxBehavior::Normal))
         } else {
             None
         };
@@ -232,6 +222,7 @@ impl Element for LineElement {
             line: Some(line),
             selection,
             text_hitbox,
+            scroll_offset,
         }
     }
 
@@ -262,16 +253,16 @@ impl Element for LineElement {
         let debug_chars = self.debug_character_bounds;
         let char_count = self.line_end_offset - self.line_start_offset;
 
+        if let Some(selection) = prepaint.selection.take() {
+            selection.paint(window);
+        }
+
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             if debug_chars {
                 paint_character_bounds(&line, bounds, char_count, window);
             }
 
-            if let Some(selection) = prepaint.selection.take() {
-                selection.paint(window);
-            }
-
-            let text_origin = point(bounds.origin.x, bounds.origin.y);
+            let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
             line.paint(
                 text_origin,
                 self.line_height,
@@ -299,6 +290,7 @@ pub(crate) struct WrappedLineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
+    pub selection_precise: bool,
     pub debug_character_bounds: bool,
     pub debug_interior_corners: bool,
 }
@@ -336,10 +328,7 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-        (window.request_layout(style, [], cx), ())
+        request_line_layout(self.line_height, window, cx)
     }
 
     fn prepaint(
@@ -352,6 +341,13 @@ impl Element for WrappedLineElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let state = self.state.read(cx);
+        // For select-all/triple-click, bump the range end so selected_range.end > line_end
+        // triggers the extend-to-edge logic in compute_selection_shape.
+        let shape_range = if state.is_select_all {
+            self.selected_range.start..self.selected_range.end + 1
+        } else {
+            self.selected_range.clone()
+        };
 
         let visual_info = state
             .precomputed_visual_lines
@@ -375,55 +371,23 @@ impl Element for WrappedLineElement {
             .text_system()
             .shape_line(display_text, self.font_size, &[run], None);
 
-        // Compute adjacent line selection bounds for corner radius calculation
-        let (prev_line_bounds, next_line_bounds) = if self.selection_rounded.is_some() {
-            let prev_bounds = self.prev_visual_line_offsets.and_then(|(start, end)| {
-                let content: String = value[start..end].to_string();
-                let run = create_text_run(self.font.clone(), self.text_color, content.len());
-                let shaped =
-                    window
-                        .text_system()
-                        .shape_line(content.into(), self.font_size, &[run], None);
-                compute_selection_x_bounds(
-                    &shaped,
-                    &self.selected_range,
-                    start,
-                    end,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                )
-            });
-
-            let next_bounds = self.next_visual_line_offsets.and_then(|(start, end)| {
-                let content: String = value[start..end].to_string();
-                let run = create_text_run(self.font.clone(), self.text_color, content.len());
-                let shaped =
-                    window
-                        .text_system()
-                        .shape_line(content.into(), self.font_size, &[run], None);
-                compute_selection_x_bounds(
-                    &shaped,
-                    &self.selected_range,
-                    start,
-                    end,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                )
-            });
-
-            (prev_bounds, next_bounds)
-        } else {
-            (None, None)
-        };
+        let (prev_line_bounds, next_line_bounds) =
+            crate::utils::compute_adjacent_line_selection_bounds(
+                &value,
+                self.prev_visual_line_offsets,
+                self.next_visual_line_offsets,
+                &self.selected_range,
+                self.selection_rounded,
+                &self.font,
+                self.font_size,
+                self.text_color,
+                window,
+            );
 
         let selection = compute_selection_shape(
             &line,
             bounds,
-            &self.selected_range,
+            &shape_range,
             info.start_offset,
             info.end_offset,
             &self.font,
@@ -431,11 +395,16 @@ impl Element for WrappedLineElement {
             self.text_color,
             self.highlight_text_color,
             Pixels::ZERO,
+            true, // wrapped mode
+            self.selection_precise,
+            None, // wrapped — bounds are the container
             window,
             self.selection_rounded,
             self.selection_rounded_smoothing,
             prev_line_bounds,
+            self.prev_visual_line_offsets.map(|(_, end)| end),
             next_line_bounds,
+            self.next_visual_line_offsets.map(|(_, end)| end),
             self.debug_interior_corners,
         );
 
@@ -529,10 +498,11 @@ pub(crate) struct WrappedTextElement {
     pub selected_range: Range<usize>,
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
+    pub selection_precise: bool,
     pub debug_character_bounds: bool,
     pub debug_interior_corners: bool,
     pub debug_wrapping: bool,
-    pub line_clamp: usize,
+    pub multiline_clamp: Option<usize>,
     pub scale_factor: f32,
     pub style: Style,
     /// Created during prepaint, painted during paint.
@@ -541,6 +511,7 @@ pub(crate) struct WrappedTextElement {
 
 pub(crate) struct WrappedTextPrepaintState {
     child_prepaints: Vec<WrappedLinePrepaintState>,
+    container_hitbox: Hitbox,
 }
 
 impl WrappedTextElement {
@@ -626,7 +597,7 @@ impl Element for WrappedTextElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let state = self.state.clone();
         let line_height = self.line_height;
-        let line_clamp = self.line_clamp;
+        let multiline_clamp = self.multiline_clamp;
         let scale_factor = self.scale_factor;
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -648,7 +619,7 @@ impl Element for WrappedTextElement {
                 let Some(width) = width else {
                     // No definite width available - use existing visual lines as fallback
                     let count = state.read(cx).precomputed_visual_lines.len().max(1);
-                    let visible = line_clamp.min(count).max(1);
+                    let visible = multiline_clamp.map_or(1, |c| c.min(count)).max(1);
                     let height = multiline_height(line_height, visible, scale_factor);
                     return size(Pixels::ZERO, height);
                 };
@@ -673,11 +644,15 @@ impl Element for WrappedTextElement {
                     .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
 
                 state.update(cx, |state, _cx| {
-                    state.measured_max_line_width = Some(window.round(max_line_width));
+                    state.measured_max_line_width = Some(max_line_width);
                     state.precomputed_at_width = Some(wrap_width);
                     state.precomputed_visual_lines = visual_lines;
                     state.precomputed_wrapped_lines = wrapped_lines;
                     state.cached_wrap_width = Some(width);
+
+                    // Clamp vertical scroll after updating visual lines — the number
+                    // of lines may have changed, making the old offset out of range.
+                    state.clamp_vertical_scroll();
 
                     if state.scroll_to_cursor_on_next_render {
                         state.scroll_to_cursor_on_next_render = false;
@@ -685,7 +660,9 @@ impl Element for WrappedTextElement {
                     }
                 });
 
-                let visible_lines = line_clamp.min(visual_line_count).max(1);
+                let visible_lines = multiline_clamp
+                    .map_or(1, |c| c.min(visual_line_count))
+                    .max(1);
                 let height = multiline_height(line_height, visible_lines, scale_factor);
 
                 // If Taffy gave us a known width (user set explicit w()), use it.
@@ -745,18 +722,20 @@ impl Element for WrappedTextElement {
                 selection_rounded_smoothing: self.selection_rounded_smoothing,
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
+                selection_precise: self.selection_precise,
                 debug_character_bounds: self.debug_character_bounds,
                 debug_interior_corners: self.debug_interior_corners,
             });
         }
 
-        // Prepaint children, positioning them manually at line_height intervals.
+        // Prepaint children, positioning them at line_height intervals offset by vertical scroll.
+        let vertical_scroll_offset = self.state.read(cx).vertical_scroll_offset;
         let mut child_prepaints = Vec::with_capacity(actual_line_count);
         for (idx, child) in self.children.iter_mut().enumerate() {
             let child_bounds = Bounds {
                 origin: point(
                     bounds.origin.x,
-                    bounds.origin.y + self.line_height * idx as f32,
+                    bounds.origin.y + self.line_height * idx as f32 - vertical_scroll_offset,
                 ),
                 size: gpui::Size {
                     width: bounds.size.width,
@@ -768,7 +747,11 @@ impl Element for WrappedTextElement {
             child_prepaints.push(prepaint_state);
         }
 
-        WrappedTextPrepaintState { child_prepaints }
+        let container_hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        WrappedTextPrepaintState {
+            child_prepaints,
+            container_hitbox,
+        }
     }
 
     fn paint(
@@ -782,6 +765,7 @@ impl Element for WrappedTextElement {
         cx: &mut App,
     ) {
         let state = self.state.clone();
+        let line_height = self.line_height;
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
             if phase == DispatchPhase::Capture {
                 return;
@@ -789,18 +773,30 @@ impl Element for WrappedTextElement {
 
             state.update(cx, |state, cx| {
                 if state.is_selecting {
-                    state.pending_selection_position = Some(event.position);
-                    cx.notify();
+                    // Update last_mouse_position here (global handler) instead of the
+                    // div-level on_mouse_move (bounds-gated). The div handler stops
+                    // receiving events when the mouse leaves its bounds, causing the
+                    // auto-scroll timer to use a stale in-bounds position and cancel itself.
+                    state.last_mouse_position = Some(event.position);
+                    state.select_to_multiline(event.position, line_height, cx);
                 }
             });
         });
+
+        if self.state.read(cx).is_selecting {
+            window.set_cursor_style(CursorStyle::IBeam, &prepaint.container_hitbox);
+        }
 
         self.state.update(cx, |state, _cx| {
             state.visible_lines_info.clear();
         });
 
         // Paint children with content mask for clipping
-        let visible_lines = self.line_clamp.min(self.children.len()).max(1);
+        let vertical_scroll_offset = self.state.read(cx).vertical_scroll_offset;
+        let visible_lines = self
+            .multiline_clamp
+            .map_or(1, |c| c.min(self.children.len()))
+            .max(1);
         let clip_bounds = Bounds {
             origin: bounds.origin,
             size: gpui::Size {
@@ -818,7 +814,8 @@ impl Element for WrappedTextElement {
                     let child_bounds = Bounds {
                         origin: point(
                             bounds.origin.x,
-                            bounds.origin.y + self.line_height * idx as f32,
+                            bounds.origin.y + self.line_height * idx as f32
+                                - vertical_scroll_offset,
                         ),
                         size: gpui::Size {
                             width: bounds.size.width,
@@ -846,11 +843,6 @@ impl Element for WrappedTextElement {
         self.state.update(cx, |state, _cx| {
             state.last_bounds = Some(bounds);
         });
-
-        // Process pending selection after visible_lines_info is fully populated
-        self.state.update(cx, |state, cx| {
-            state.process_pending_selection(cx);
-        });
     }
 }
 
@@ -858,6 +850,9 @@ pub(crate) struct UniformListElement {
     pub state: Entity<SelectableTextState>,
     pub child: AnyElement,
     pub debug_wrapping: bool,
+    pub font: Font,
+    pub font_size: Pixels,
+    pub text_color: Hsla,
 }
 
 impl UniformListElement {
@@ -951,7 +946,7 @@ impl IntoElement for UniformListElement {
 
 impl Element for UniformListElement {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Hitbox;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -980,6 +975,11 @@ impl Element for UniformListElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        // Reset last_text_width before child prepaint so LineElements accumulate fresh values.
+        self.state.update(cx, |state, _cx| {
+            state.last_text_width = Pixels::ZERO;
+        });
+
         // Update cached_wrap_width and flag recompute if the container width changed.
         self.check_container_width_change(bounds.size.width, cx);
 
@@ -1002,7 +1002,42 @@ impl Element for UniformListElement {
             }
         }
 
+        // Auto-scroll horizontally BEFORE child prepaint so all LineElements see
+        // the updated scroll_offset when computing selection shapes and corner rounding.
+        // Without this, the offset updates during paint (one frame too late), causing
+        // adjacent-line corner rounding to be stale.
+        // Only scroll when scroll_to_cursor_horizontal is set (opt-in by navigation/editing/drag,
+        // NOT by double-click/triple-click/select-all).
+        let cursor_line_info = {
+            let state = self.state.read(cx);
+            if state.scroll_to_cursor_horizontal && !state.is_wrapped {
+                let cursor_offset = state.cursor_offset();
+                let text = state.get_text();
+                let (cursor_line_idx, cursor_col) = state.offset_to_line_col(cursor_offset);
+                let line_start = state.line_start_offset(cursor_line_idx);
+                let line_end = state.line_end_offset(cursor_line_idx);
+                let line_content: String = text[line_start..line_end].to_string();
+                Some((line_content, cursor_col))
+            } else {
+                None
+            }
+        };
+        if let Some((line_content, cursor_col)) = cursor_line_info {
+            let run = create_text_run(self.font.clone(), self.text_color, line_content.len());
+            let shaped =
+                window
+                    .text_system()
+                    .shape_line(line_content.into(), self.font_size, &[run], None);
+            let cursor_x = shaped.x_for_index(cursor_col);
+            self.state.update(cx, |state, _cx| {
+                state.scroll_to_cursor_horizontal = false;
+                state.ensure_cursor_visible_horizontal(cursor_x, bounds.size.width);
+            });
+        }
+
         self.child.prepaint(window, cx);
+
+        window.insert_hitbox(bounds, HitboxBehavior::Normal)
     }
 
     fn paint(
@@ -1011,7 +1046,7 @@ impl Element for UniformListElement {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
-        _prepaint: &mut Self::PrepaintState,
+        prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -1023,12 +1058,21 @@ impl Element for UniformListElement {
 
             state.update(cx, |state, cx| {
                 if state.is_selecting {
-                    // Store position for deferred processing after visible_lines_info is populated
-                    state.pending_selection_position = Some(event.position);
-                    cx.notify();
+                    // Update last_mouse_position here (global handler) instead of the
+                    // div-level on_mouse_move (bounds-gated). The div handler stops
+                    // receiving events when the mouse leaves its bounds, causing the
+                    // auto-scroll timer to use a stale in-bounds position and cancel itself.
+                    state.last_mouse_position = Some(event.position);
+                    if let Some(line_height) = state.line_height {
+                        state.select_to_multiline(event.position, line_height, cx);
+                    }
                 }
             });
         });
+
+        if self.state.read(cx).is_selecting {
+            window.set_cursor_style(CursorStyle::IBeam, prepaint);
+        }
 
         self.state.update(cx, |state, _cx| {
             state.visible_lines_info.clear();
@@ -1039,11 +1083,6 @@ impl Element for UniformListElement {
 
         self.state.update(cx, |state, _cx| {
             state.last_bounds = Some(bounds);
-        });
-
-        // Process pending selection after visible_lines_info is fully populated
-        self.state.update(cx, |state, cx| {
-            state.process_pending_selection(cx);
         });
     }
 }

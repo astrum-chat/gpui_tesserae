@@ -4,14 +4,15 @@ mod elements;
 mod state;
 
 use gpui::{
-    AbsoluteLength, App, ElementId, Entity, FocusHandle, Focusable, Font, Hsla, InteractiveElement,
-    IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Pixels, Refineable, RenderOnce,
-    SharedString, Style, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, rgb,
+    App, ElementId, Entity, FocusHandle, Focusable, Font, Hsla, InteractiveElement, IntoElement,
+    KeyBinding, MouseButton, Overflow, ParentElement, Pixels, Refineable, RenderOnce, SharedString,
+    Style, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, relative, rgb,
     uniform_list,
 };
 
-use crate::extensions::WindowExt;
-use crate::utils::{TextNavigation, WIDTH_WRAP_BASE_MARGIN, multiline_height, rgb_a};
+use crate::utils::{
+    TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_line_offsets, multiline_height, rgb_a,
+};
 use elements::{LineElement, UniformListElement, WrappedTextElement};
 
 pub use state::{
@@ -96,11 +97,12 @@ fn compute_wrap_width(
 pub struct SelectableText {
     id: ElementId,
     state: Entity<SelectableTextState>,
-    line_clamp: usize,
-    word_wrap: bool,
+    multiline_clamp: Option<usize>,
+    multiline_wrapped: bool,
     selection_color: Option<Hsla>,
     selection_rounded: Option<Pixels>,
     selection_rounded_smoothing: Option<f32>,
+    selection_precise: bool,
     debug_wrapping: bool,
     debug_character_bounds: bool,
     debug_interior_corners: bool,
@@ -113,17 +115,18 @@ impl Styled for SelectableText {
     }
 }
 
+#[allow(missing_docs)]
 impl SelectableText {
-    /// Creates a new selectable text element.
     pub fn new(id: impl Into<ElementId>, state: Entity<SelectableTextState>) -> Self {
         Self {
             id: id.into(),
             state,
-            line_clamp: usize::MAX,
-            word_wrap: true,
+            multiline_clamp: None,
+            multiline_wrapped: false,
             selection_color: None,
             selection_rounded: None,
             selection_rounded_smoothing: None,
+            selection_precise: false,
             debug_wrapping: false,
             debug_character_bounds: false,
             debug_interior_corners: false,
@@ -131,19 +134,22 @@ impl SelectableText {
         }
     }
 
+    pub fn multiline(mut self) -> Self {
+        self.multiline_clamp = Some(usize::MAX);
+        self
+    }
+
     /// Sets the maximum number of visible lines before scrolling.
-    pub fn line_clamp(mut self, line_clamp: usize) -> Self {
-        self.line_clamp = line_clamp.max(1);
+    pub fn multiline_clamp(mut self, multiline_clamp: usize) -> Self {
+        self.multiline_clamp = Some(multiline_clamp.max(1));
         self
     }
 
-    /// Enables or disables word wrapping.
-    pub fn word_wrap(mut self, enabled: bool) -> Self {
-        self.word_wrap = enabled;
+    pub fn multiline_wrapped(mut self) -> Self {
+        self.multiline_wrapped = true;
         self
     }
 
-    /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection_color = Some(color.into());
         self
@@ -172,13 +178,21 @@ impl SelectableText {
         self
     }
 
-    /// Enables debug visualization of text wrapping width.
+    /// Uses precise selection highlighting that stops at the last selected character.
+    ///
+    /// By default, selection extends to the right edge of the container on lines
+    /// where the selection continues to the next line. This method disables that
+    /// behavior so the highlight exactly wraps the selected text.
+    pub fn selection_precise(mut self) -> Self {
+        self.selection_precise = true;
+        self
+    }
+
     pub fn debug_wrapping(mut self, enabled: bool) -> Self {
         self.debug_wrapping = enabled;
         self
     }
 
-    /// Enables debug visualization of individual character bounds.
     pub fn debug_character_bounds(mut self, enabled: bool) -> Self {
         self.debug_character_bounds = enabled;
         self
@@ -191,7 +205,6 @@ impl SelectableText {
         self
     }
 
-    /// Returns the current text value from state.
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.state.read(cx).get_text()
     }
@@ -234,7 +247,6 @@ impl SelectableText {
             }
         }
 
-        let max_width = window.round(max_width);
         self.state.update(cx, |state, _cx| {
             state.measured_max_line_width = Some(max_width);
         });
@@ -335,24 +347,16 @@ fn register_mouse_handlers(
         .on_scroll_wheel(window.listener_for(state, SelectableTextState::on_scroll_wheel))
 }
 
-fn compute_line_offsets(text: &str) -> Vec<(usize, usize)> {
-    text.split('\n')
-        .scan(0, |start, line| {
-            let end = *start + line.len();
-            let offsets = (*start, end);
-            *start = end + 1;
-            Some(offsets)
-        })
-        .collect()
-}
-
 impl RenderOnce for SelectableText {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let params = self.compute_render_params(window);
 
+        // Word wrapping only takes effect when multiline is also enabled
+        let is_wrapped = self.multiline_wrapped && self.multiline_clamp.is_some();
+
         self.state.update(cx, |state, _cx| {
-            state.set_multiline_params(params.line_height, self.line_clamp);
-            state.set_wrap_mode(self.word_wrap);
+            state.set_multiline_params(params.line_height, self.multiline_clamp);
+            state.set_wrap_mode(is_wrapped);
             state.update_focus_state(window);
         });
 
@@ -399,25 +403,15 @@ impl RenderOnce for SelectableText {
             has_max_width_constraint,
             container_width,
             max_width_px,
-            is_wrapped: self.word_wrap,
+            is_wrapped,
         };
 
         let base = div()
             .id(self.id.clone())
             .min_w_0()
             .map(|mut this| {
-                if self.word_wrap {
-                    // For the wrapped path, DON'T apply sizing styles (w, max_w, etc.)
-                    // to the parent div. Those go on the WrappedTextElement via
-                    // request_measured_layout so Taffy computes height correctly in
-                    // a single pass. Only apply non-sizing styles (bg, border, text, etc.).
-                    let mut style_without_sizing = self.style.clone();
-                    style_without_sizing.size = Default::default();
-                    style_without_sizing.min_size = Default::default();
-                    style_without_sizing.max_size = Default::default();
-                    this.style().refine(&style_without_sizing);
-                } else {
-                    this.style().refine(&self.style);
+                this.style().refine(&self.style);
+                if !is_wrapped {
                     self.apply_auto_width(this.style(), &width_params);
                 }
                 this
@@ -428,10 +422,10 @@ impl RenderOnce for SelectableText {
         let base = register_actions(base, window, &self.state);
         let base = register_mouse_handlers(base, window, &self.state);
 
-        base.when(!self.word_wrap, |this| {
+        base.when(!is_wrapped, |this| {
             self.render_unwrapped_list(this, &params, user_wants_auto_width, max_width_px, cx)
         })
-        .when(self.word_wrap, |this| {
+        .when(is_wrapped, |this| {
             self.render_wrapped_list(this, &params, &width_params, window, cx)
         })
     }
@@ -439,30 +433,7 @@ impl RenderOnce for SelectableText {
 
 impl SelectableText {
     fn compute_render_params(&self, window: &Window) -> RenderParams {
-        let text_style = &self.style.text;
-        let font_size = match text_style
-            .font_size
-            .unwrap_or_else(|| window.text_style().font_size)
-        {
-            AbsoluteLength::Pixels(px) => px,
-            AbsoluteLength::Rems(rems) => rems.to_pixels(window.rem_size()),
-        };
-        let line_height = text_style
-            .line_height
-            .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
-            .unwrap_or_else(|| window.line_height());
-        let line_height = window.round(line_height);
-        let scale_factor = window.scale_factor();
-        let font = Font {
-            family: text_style
-                .font_family
-                .clone()
-                .unwrap_or_else(|| window.text_style().font_family),
-            features: text_style.font_features.clone().unwrap_or_default(),
-            fallbacks: text_style.font_fallbacks.clone(),
-            weight: text_style.font_weight.unwrap_or_default(),
-            style: text_style.font_style.unwrap_or_default(),
-        };
+        let params = crate::utils::compute_text_render_params(&self.style.text, window);
         let text_color = self
             .style
             .text
@@ -473,10 +444,10 @@ impl SelectableText {
             .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
 
         RenderParams {
-            font,
-            font_size,
-            line_height,
-            scale_factor,
+            font: params.font,
+            font_size: params.font_size,
+            line_height: params.line_height,
+            scale_factor: params.scale_factor,
             text_color,
             highlight_text_color,
         }
@@ -504,8 +475,8 @@ impl SelectableText {
             )
         };
         let state_entity = self.state.clone();
-        let line_clamp = self.line_clamp;
-        let needs_scroll = line_count > line_clamp;
+        let multiline_clamp = self.multiline_clamp;
+        let needs_scroll = multiline_clamp.is_some_and(|clamp| line_count > clamp);
         let text_color = params.text_color;
         let highlight_text_color = params.highlight_text_color;
         let line_height = params.line_height;
@@ -515,6 +486,7 @@ impl SelectableText {
         let selection_rounded_smoothing = self.selection_rounded_smoothing;
         let debug_character_bounds = self.debug_character_bounds;
         let debug_interior_corners = self.debug_interior_corners;
+        let selection_precise = self.selection_precise;
 
         let list = uniform_list(
             self.id.clone(),
@@ -554,6 +526,7 @@ impl SelectableText {
                             selection_rounded_smoothing,
                             prev_line_offsets,
                             next_line_offsets,
+                            selection_precise,
                             debug_character_bounds,
                             debug_interior_corners,
                         }
@@ -567,15 +540,21 @@ impl SelectableText {
                 list.style().overflow.y = Some(Overflow::Hidden);
             }
             if let Some(width) = measured_width {
+                // Auto-width mode: size to content
                 let auto_width = width + WIDTH_WRAP_BASE_MARGIN;
                 let clamped = max_width_px.map_or(auto_width, |max_w| auto_width.min(max_w));
                 list.style().size.width = Some(clamped.into());
+            } else if !user_wants_auto_width {
+                // User set explicit width (w_full, w(px(...)), etc.) — fill parent
+                list.style().size.width = Some(relative(1.).into());
             }
             list
         })
         .h(multiline_height(
             line_height,
-            line_clamp.min(line_count).max(1),
+            multiline_clamp
+                .map_or(1, |clamp| clamp.min(line_count))
+                .max(1),
             scale_factor,
         ));
 
@@ -583,6 +562,9 @@ impl SelectableText {
             state: self.state.clone(),
             child: list.into_any_element(),
             debug_wrapping: self.debug_wrapping,
+            font: params.font.clone(),
+            font_size: params.font_size,
+            text_color: params.text_color,
         })
     }
 
@@ -612,18 +594,11 @@ impl SelectableText {
 
         let selected_range = self.state.read(cx).selected_range.clone();
 
-        // Build a Style with the user's sizing constraints (w, max_w, etc.)
-        // to pass to WrappedTextElement's request_measured_layout. The parent div
-        // has no sizing - it naturally takes the child's size. This way Taffy
-        // computes height correctly from the measure callback on this node directly,
-        // avoiding the parent-child dual-call height mismatch.
+        // The parent div keeps the user's sizing (w, max_w, etc.).
+        // The WrappedTextElement fills the parent at 100% width so it gets the
+        // parent's resolved width in its measure callback — matching Input's pattern.
         let mut element_style = Style::default();
-        element_style.refine(&StyleRefinement {
-            size: self.style.size.clone(),
-            min_size: self.style.min_size.clone(),
-            max_size: self.style.max_size.clone(),
-            ..Default::default()
-        });
+        element_style.size.width = relative(1.).into();
 
         container.child(WrappedTextElement {
             state: self.state.clone(),
@@ -635,10 +610,11 @@ impl SelectableText {
             selected_range,
             selection_rounded: self.selection_rounded,
             selection_rounded_smoothing: self.selection_rounded_smoothing,
+            selection_precise: self.selection_precise,
             debug_character_bounds: self.debug_character_bounds,
             debug_interior_corners: self.debug_interior_corners,
             debug_wrapping: self.debug_wrapping,
-            line_clamp: self.line_clamp,
+            multiline_clamp: self.multiline_clamp,
             scale_factor,
             style: element_style,
             children: Vec::new(),
@@ -832,5 +808,85 @@ mod tests {
             compute_effective_width(true, false, None, Some(px(400.)), None);
         assert_eq!(width, Some(px(400.) + WIDTH_WRAP_BASE_MARGIN));
         assert!(!use_relative);
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod builder_tests {
+    use super::*;
+    use gpui::{AppContext as _, TestAppContext, px};
+
+    #[gpui::test]
+    fn test_selection_precise_default_false(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        cx.update(|_cx| {
+            let st = SelectableText::new("test", state);
+            assert!(
+                !st.selection_precise,
+                "selection_precise should default to false"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_selection_precise_setter(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        cx.update(|_cx| {
+            let st = SelectableText::new("test", state).selection_precise();
+            assert!(
+                st.selection_precise,
+                "selection_precise should be true after calling .selection_precise()"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_selection_precise_in_builder_chain(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        cx.update(|_cx| {
+            let st = SelectableText::new("test", state)
+                .selection_color(gpui::hsla(0.6, 1., 0.5, 0.3))
+                .selection_rounded(px(4.))
+                .selection_precise()
+                .multiline();
+            assert!(st.selection_precise);
+            assert!(st.selection_color.is_some());
+            assert!(st.selection_rounded.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn test_is_selecting_default_false(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.read_with(cx, |state, _| {
+            assert!(!state.is_selecting, "is_selecting should default to false");
+        });
+    }
+
+    #[gpui::test]
+    fn test_is_selecting_set_on_mouse_down_cleared_on_mouse_up(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+
+        // Simulate mouse down — is_selecting should become true
+        state.update(cx, |state, _cx| {
+            state.is_selecting = true;
+        });
+        state.read_with(cx, |state, _| {
+            assert!(
+                state.is_selecting,
+                "is_selecting should be true after mouse down"
+            );
+        });
+
+        // Simulate mouse up — is_selecting should become false
+        state.update(cx, |state, _cx| {
+            state.is_selecting = false;
+        });
+        state.read_with(cx, |state, _| {
+            assert!(
+                !state.is_selecting,
+                "is_selecting should be false after mouse up"
+            );
+        });
     }
 }

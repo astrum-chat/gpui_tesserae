@@ -10,30 +10,7 @@ use gpui::{
 use crate::input::CursorBlink;
 use crate::utils::TextNavigation;
 
-/// Maps visual line indices to byte ranges in the source text. Used by wrapped mode to translate between screen position and text offset.
-#[derive(Clone, Debug)]
-pub struct VisualLineInfo {
-    /// Byte offset in the full text where this visual line starts.
-    pub start_offset: usize,
-    /// Byte offset in the full text where this visual line ends (exclusive).
-    pub end_offset: usize,
-    /// Index into the `WrappedLine` vec this segment belongs to.
-    pub wrapped_line_index: usize,
-    /// Which visual segment within the wrapped line (0 for first, increments at each wrap boundary).
-    pub visual_index_in_wrapped: usize,
-}
-
-/// Information about a visible line in uniform_list mode (non-wrapped).
-/// Used for accurate mouse hit testing.
-#[derive(Clone)]
-pub struct VisibleLineInfo {
-    /// Absolute line index in the text
-    pub line_index: usize,
-    /// Screen bounds of this line element
-    pub bounds: Bounds<Pixels>,
-    /// Shaped line for X position lookup
-    pub shaped_line: ShapedLine,
-}
+pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
 
 /// Function type for transforming text when it changes.
 /// Takes the full text after the change and returns the transformed text.
@@ -98,10 +75,9 @@ mod actions {
 pub use actions::*;
 
 /// Core state for a text input, managing text content, selection, cursor, and IME composition.
+#[allow(missing_docs)]
 pub struct InputState {
-    /// Handle for keyboard focus management.
     pub focus_handle: FocusHandle,
-    /// The current text value, or None if empty.
     pub value: Option<SharedString>,
     /// Byte range of the current selection. Empty range means cursor position only.
     pub selected_range: Range<usize>,
@@ -109,13 +85,10 @@ pub struct InputState {
     pub selection_reversed: bool,
     /// Byte range of IME composition text (marked text), if any.
     pub marked_range: Option<Range<usize>>,
-    /// Cached shaped line from last render (single-line mode).
     pub last_layout: Option<ShapedLine>,
-    /// Cached bounds from last render.
     pub last_bounds: Option<Bounds<Pixels>>,
     /// True while the user is dragging to select text.
     pub is_selecting: bool,
-    /// Entity managing cursor blink animation.
     pub cursor_blink: Entity<CursorBlink>,
     was_focused: bool,
     /// Whether the input is in multiline mode (set during render)
@@ -128,8 +101,8 @@ pub struct InputState {
     pub(crate) is_wrapped: bool,
     /// Scroll handle for uniform_list (both wrapped and non-wrapped modes)
     pub scroll_handle: UniformListScrollHandle,
-    /// Maximum visible lines (for scroll calculations)
-    pub(crate) line_clamp: usize,
+    /// Maximum visible lines (for scroll calculations). None = unlimited.
+    pub(crate) multiline_clamp: Option<usize>,
     /// Visible line info for uniform_list mode - populated during paint
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
     /// Cached container width for wrapped text calculations (set during prepaint)
@@ -149,14 +122,17 @@ pub struct InputState {
 
     /// Horizontal scroll offset for single-line mode (in pixels)
     pub(crate) horizontal_scroll_offset: Pixels,
-    /// Vertical scroll offset for wrapped mode with line_clamp (in pixels)
+    /// Vertical scroll offset for wrapped mode with multiline_clamp (in pixels)
     pub(crate) vertical_scroll_offset: Pixels,
     /// Last measured text width (for scroll wheel calculations)
     pub(crate) last_text_width: Pixels,
     /// When true, skip auto-scroll to cursor (user is manually scrolling)
     pub(crate) is_manually_scrolling: bool,
-    /// When true, skip auto-scroll to cursor on next render (for select_all)
-    pub(crate) skip_auto_scroll_on_next_render: bool,
+    /// When true, auto-scroll horizontally to keep cursor visible on next render.
+    /// Opt-in: set by navigation/editing, NOT by double-click/triple-click/select-all.
+    pub(crate) scroll_to_cursor_horizontal: bool,
+    /// Timestamp of last auto-scroll frame, for delta-time-based scrolling.
+    pub(crate) last_scroll_time: Option<std::time::Instant>,
     /// Whether the current selection is a "select all" (cmd+a)
     pub is_select_all: bool,
 
@@ -173,8 +149,8 @@ pub struct InputState {
     max_history: usize,
 }
 
+#[allow(missing_docs)]
 impl InputState {
-    /// Creates a new input state with default values and a fresh focus handle.
     pub fn new(cx: &mut App) -> Self {
         InputState {
             focus_handle: cx.focus_handle().tab_stop(true),
@@ -192,7 +168,7 @@ impl InputState {
             map_text: None,
             is_wrapped: false,
             scroll_handle: UniformListScrollHandle::new(),
-            line_clamp: 1,
+            multiline_clamp: None,
             visible_lines_info: Vec::new(),
             cached_wrap_width: None,
             precomputed_visual_lines: Vec::new(),
@@ -205,7 +181,8 @@ impl InputState {
             vertical_scroll_offset: Pixels::ZERO,
             last_text_width: Pixels::ZERO,
             is_manually_scrolling: false,
-            skip_auto_scroll_on_next_render: false,
+            scroll_to_cursor_horizontal: false,
+            last_scroll_time: None,
             is_select_all: false,
             last_font: None,
             last_font_size: None,
@@ -216,7 +193,6 @@ impl InputState {
         }
     }
 
-    /// Set the maximum number of undo/redo entries to keep.
     pub fn set_max_history(&mut self, max: usize) {
         self.max_history = max;
         // Trim existing stacks if they exceed the new limit
@@ -228,20 +204,17 @@ impl InputState {
         }
     }
 
-    /// Set multiline mode parameters (called during render)
     pub(crate) fn set_multiline_params(
         &mut self,
         is_multiline: bool,
         line_height: Pixels,
-        line_clamp: usize,
+        multiline_clamp: Option<usize>,
     ) {
         self.is_multiline = is_multiline;
         self.line_height = Some(line_height);
-        self.line_clamp = line_clamp;
+        self.multiline_clamp = multiline_clamp;
     }
 
-    /// Pre-compute visual line info for wrapped text.
-    /// Returns the number of visual lines.
     #[allow(dead_code)]
     pub(crate) fn precompute_wrapped_lines(
         &mut self,
@@ -272,7 +245,6 @@ impl InputState {
         self.precomputed_visual_lines.len().max(1)
     }
 
-    /// Ensure the cursor is visible by scrolling if necessary.
     pub fn ensure_cursor_visible(&mut self) {
         if self.is_wrapped {
             // Pixel-based vertical scroll for wrapped mode
@@ -286,7 +258,11 @@ impl InputState {
 
             let line_top = line_height * visual_line as f32;
             let line_bottom = line_top + line_height;
-            let visible_height = line_height * self.line_clamp as f32;
+            let total_visual_lines = self.precomputed_visual_lines.len().max(1);
+            let visible_height = line_height
+                * self
+                    .multiline_clamp
+                    .map_or(1, |c| c.min(total_visual_lines)) as f32;
 
             if line_top < self.vertical_scroll_offset {
                 self.vertical_scroll_offset = line_top;
@@ -300,7 +276,7 @@ impl InputState {
                 self.cursor_offset(),
                 self.is_wrapped,
                 &self.precomputed_visual_lines,
-                self.line_clamp,
+                self.multiline_clamp,
                 &self.scroll_handle,
                 |offset| self.offset_to_line_col(offset).0,
                 || self.line_count(),
@@ -308,11 +284,10 @@ impl InputState {
         }
     }
 
-    /// Clamp vertical scroll offset to valid bounds.
     pub(crate) fn clamp_vertical_scroll(&mut self) {
         let line_height = self.line_height.unwrap_or(px(16.0));
         let total_lines = self.precomputed_visual_lines.len().max(1);
-        let visible_lines = self.line_clamp.min(total_lines);
+        let visible_lines = self.multiline_clamp.map_or(1, |c| c.min(total_lines));
         let max_scroll = line_height * (total_lines - visible_lines) as f32;
         let max_scroll = if max_scroll > Pixels::ZERO {
             max_scroll
@@ -325,9 +300,6 @@ impl InputState {
             .min(max_scroll);
     }
 
-    /// Ensure the cursor is horizontally visible in single-line or non-wrapped multiline mode.
-    /// Called during prepaint with the cursor's x position and container width.
-    /// Returns the updated scroll offset.
     pub(crate) fn ensure_cursor_visible_horizontal(
         &mut self,
         cursor_x: Pixels,
@@ -343,22 +315,15 @@ impl InputState {
             return self.horizontal_scroll_offset;
         }
 
-        let scroll_margin = px(2.0); // Small margin to keep cursor slightly away from edges
-        let visible_start = self.horizontal_scroll_offset;
-        let visible_end = self.horizontal_scroll_offset + container_width;
-
-        if cursor_x < visible_start + scroll_margin {
-            // Cursor is to the left of visible area - scroll left
-            self.horizontal_scroll_offset = (cursor_x - scroll_margin).max(Pixels::ZERO);
-        } else if cursor_x > visible_end - scroll_margin {
-            // Cursor is to the right of visible area - scroll right
-            self.horizontal_scroll_offset = cursor_x - container_width + scroll_margin;
-        }
-
+        self.horizontal_scroll_offset = crate::utils::auto_scroll_horizontal(
+            self.horizontal_scroll_offset,
+            cursor_x,
+            container_width,
+            &mut self.last_scroll_time,
+        );
         self.horizontal_scroll_offset
     }
 
-    /// Apply map_text transformation if set
     fn apply_map_text(&self, text: String) -> String {
         if let Some(map_fn) = &self.map_text {
             map_fn(text.into()).to_string()
@@ -367,7 +332,6 @@ impl InputState {
         }
     }
 
-    /// Call this during render to update focus state and manage cursor blink
     pub fn update_focus_state(&mut self, window: &Window, cx: &mut Context<Self>) {
         let is_focused = self.focus_handle.is_focused(window);
         if is_focused != self.was_focused {
@@ -383,19 +347,16 @@ impl InputState {
         }
     }
 
-    /// Returns whether the cursor should be rendered this frame (toggles for blink effect).
     pub fn cursor_visible(&self, cx: &App) -> bool {
         self.cursor_blink.read(cx).visible()
     }
 
-    /// Starts cursor blinking. Called automatically when input gains focus.
     pub fn start_cursor_blink(&self, cx: &mut Context<Self>) {
         self.cursor_blink.update(cx, |blink, cx| {
             blink.start(cx);
         });
     }
 
-    /// Stops cursor blinking, leaving it visible. Called automatically when input loses focus.
     pub fn stop_cursor_blink(&self, cx: &mut Context<Self>) {
         self.cursor_blink.update(cx, |blink, cx| {
             blink.stop();
@@ -409,20 +370,19 @@ impl InputState {
         });
     }
 
-    /// Returns the current text, or empty string if unset.
     pub fn value(&self) -> SharedString {
         self.value
             .clone()
             .unwrap_or_else(|| SharedString::new_static(""))
     }
 
-    /// Takes and returns the current value, leaving the input empty.
+    /// Clears the text value and resets selection. Returns the previous value.
     pub fn clear(&mut self) -> Option<SharedString> {
         self.selected_range = 0..0;
         self.value.take()
     }
 
-    /// Builder method: sets initial text only if value is currently unset.
+    /// Sets initial text only if value is currently unset.
     pub fn initial_value(mut self, text: impl Into<SharedString>) -> Self {
         if self.value.is_some() {
             return self;
@@ -431,10 +391,6 @@ impl InputState {
         self
     }
 
-    // Action handlers for keyboard navigation and editing.
-    // These are registered via `.on_action()` in the Input element's render method.
-
-    /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
     pub fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.previous_boundary(self.cursor_offset()), cx);
@@ -443,7 +399,6 @@ impl InputState {
         }
     }
 
-    /// Collapses selection to its start/end boundary, or moves one grapheme if no selection.
     pub fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.next_boundary(self.selected_range.end), cx);
@@ -452,17 +407,14 @@ impl InputState {
         }
     }
 
-    /// Extends selection by one grapheme.
     pub fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.previous_boundary(self.cursor_offset()), cx);
     }
 
-    /// Extends selection by one grapheme.
     pub fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.next_boundary(self.cursor_offset()), cx);
     }
 
-    /// Collapses selection or moves to same column on previous line.
     pub fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let (line, col) = self.offset_to_line_col(self.cursor_offset());
@@ -475,7 +427,6 @@ impl InputState {
         }
     }
 
-    /// Collapses selection or moves to same column on next line.
     pub fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             let (line, col) = self.offset_to_line_col(self.cursor_offset());
@@ -488,7 +439,6 @@ impl InputState {
         }
     }
 
-    /// Extends selection to same column on previous line.
     pub fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
         let (line, col) = self.offset_to_line_col(self.cursor_offset());
         if line > 0 {
@@ -497,7 +447,6 @@ impl InputState {
         }
     }
 
-    /// Extends selection to same column on next line.
     pub fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         let (line, col) = self.offset_to_line_col(self.cursor_offset());
         if line < self.line_count().saturating_sub(1) {
@@ -506,12 +455,12 @@ impl InputState {
         }
     }
 
-    /// Inserts a newline.
+    /// Inserts a newline at the cursor position (primary submit action in multiline mode).
     pub fn insert_newline(&mut self, _: &Submit, window: &mut Window, cx: &mut Context<Self>) {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
-    /// Inserts a newline.
+    /// Inserts a newline at the cursor position (secondary submit action).
     pub fn insert_newline_secondary(
         &mut self,
         _: &SecondarySubmit,
@@ -521,26 +470,20 @@ impl InputState {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
-    /// Selects all text without scrolling.
     pub fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.is_select_all = true;
         self.move_to_without_scroll(0, cx);
         self.select_to_without_scroll(self.value().len(), cx)
     }
 
-    /// Moves cursor to start of text.
     pub fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
-    /// Moves cursor to end of text.
     pub fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.value().len(), cx);
     }
 
-    // Word navigation (Option+Arrow on macOS, Ctrl+Arrow elsewhere)
-
-    /// Moves past whitespace/punctuation to start of previous word.
     pub fn move_to_previous_word(
         &mut self,
         _: &MoveToPreviousWord,
@@ -557,7 +500,6 @@ impl InputState {
         }
     }
 
-    /// Moves to end of current/next word.
     pub fn move_to_next_word(
         &mut self,
         _: &MoveToNextWord,
@@ -573,7 +515,6 @@ impl InputState {
         }
     }
 
-    /// Extends selection to start of previous word.
     pub fn select_to_previous_word_start(
         &mut self,
         _: &SelectToPreviousWordStart,
@@ -586,7 +527,6 @@ impl InputState {
         self.select_to(target, cx);
     }
 
-    /// Extends selection to end of next word.
     pub fn select_to_next_word_end(
         &mut self,
         _: &SelectToNextWordEnd,
@@ -598,9 +538,6 @@ impl InputState {
         self.select_to(target, cx);
     }
 
-    // Line navigation (Cmd+Arrow on macOS)
-
-    /// Moves cursor to start of current line.
     pub fn move_to_start_of_line(
         &mut self,
         _: &MoveToStartOfLine,
@@ -612,7 +549,6 @@ impl InputState {
         self.move_to(target, cx);
     }
 
-    /// Moves cursor to end of current line.
     pub fn move_to_end_of_line(
         &mut self,
         _: &MoveToEndOfLine,
@@ -624,7 +560,6 @@ impl InputState {
         self.move_to(target, cx);
     }
 
-    /// Extends selection to start of current line.
     pub fn select_to_start_of_line(
         &mut self,
         _: &SelectToStartOfLine,
@@ -636,7 +571,6 @@ impl InputState {
         self.select_to(target, cx);
     }
 
-    /// Extends selection to end of current line.
     pub fn select_to_end_of_line(
         &mut self,
         _: &SelectToEndOfLine,
@@ -648,31 +582,22 @@ impl InputState {
         self.select_to(target, cx);
     }
 
-    // Document navigation (Cmd+Up/Down on macOS)
-
-    /// Moves cursor to start of document.
     pub fn move_to_start(&mut self, _: &MoveToStart, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(0, cx);
     }
 
-    /// Moves cursor to end of document.
     pub fn move_to_end(&mut self, _: &MoveToEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.value().len(), cx);
     }
 
-    /// Extends selection to start of document.
     pub fn select_to_start(&mut self, _: &SelectToStart, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(0, cx);
     }
 
-    /// Extends selection to end of document.
     pub fn select_to_end(&mut self, _: &SelectToEnd, _: &mut Window, cx: &mut Context<Self>) {
         self.select_to(self.value().len(), cx);
     }
 
-    // Word deletion (Option+Backspace/Delete on macOS)
-
-    /// Deletes from cursor to start of previous word.
     pub fn delete_to_previous_word_start(
         &mut self,
         _: &DeleteToPreviousWordStart,
@@ -688,7 +613,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    /// Deletes from cursor to end of next word.
     pub fn delete_to_next_word_end(
         &mut self,
         _: &DeleteToNextWordEnd,
@@ -703,9 +627,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    // Line deletion (Cmd+Backspace/Delete on macOS)
-
-    /// Deletes from cursor to start of current line.
     pub fn delete_to_beginning_of_line(
         &mut self,
         _: &DeleteToBeginningOfLine,
@@ -720,7 +641,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    /// Deletes from cursor to end of current line.
     pub fn delete_to_end_of_line(
         &mut self,
         _: &DeleteToEndOfLine,
@@ -735,7 +655,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    /// Deletes selection, or one grapheme before cursor if no selection.
     pub fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.previous_boundary(self.cursor_offset()), cx)
@@ -744,7 +663,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    /// Deletes selection, or one grapheme after cursor if no selection.
     pub fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.select_to(self.next_boundary(self.cursor_offset()), cx)
@@ -753,7 +671,6 @@ impl InputState {
         self.replace_text_in_range(None, "", window, cx)
     }
 
-    /// Handles scroll wheel events: vertical scroll in wrapped mode, horizontal in non-wrapped.
     pub fn on_scroll_wheel(
         &mut self,
         event: &ScrollWheelEvent,
@@ -766,10 +683,13 @@ impl InputState {
         if self.is_wrapped {
             // Wrapped mode: handle vertical scrolling
             let total_visual_lines = self.precomputed_visual_lines.len().max(1);
-            let has_vertical_scroll = total_visual_lines > self.line_clamp;
+            let has_vertical_scroll = self
+                .multiline_clamp
+                .map_or(false, |clamp| total_visual_lines > clamp);
 
             if has_vertical_scroll && delta.y.abs() > px(0.01) {
-                let max_scroll = line_height * (total_visual_lines - self.line_clamp) as f32;
+                let clamp = self.multiline_clamp.unwrap(); // safe: has_vertical_scroll implies Some
+                let max_scroll = line_height * (total_visual_lines - clamp) as f32;
                 let new_offset = (self.vertical_scroll_offset - delta.y)
                     .max(Pixels::ZERO)
                     .min(max_scroll);
@@ -785,7 +705,9 @@ impl InputState {
         }
 
         // Non-wrapped mode: check for scrollable content
-        let has_vertical_scroll = self.line_count() > self.line_clamp;
+        let has_vertical_scroll = self
+            .multiline_clamp
+            .map_or(false, |clamp| self.line_count() > clamp);
 
         let container_width = self.last_bounds.map(|b| b.size.width).unwrap_or(px(100.0));
         let max_scroll = (self.last_text_width - container_width).max(Pixels::ZERO);
@@ -816,12 +738,11 @@ impl InputState {
         }
     }
 
-    /// Reset manual scrolling flag (called when user types or moves cursor)
     pub(crate) fn reset_manual_scroll(&mut self) {
         self.is_manually_scrolling = false;
     }
 
-    /// Opens the system character palette (macOS emoji/symbol picker).
+    /// Opens the system character palette (emoji/symbol picker).
     pub fn show_character_palette(
         &mut self,
         _: &ShowCharacterPalette,
@@ -831,7 +752,7 @@ impl InputState {
         window.show_character_palette();
     }
 
-    /// Pastes from clipboard. Newlines become spaces in single-line mode.
+    /// Newlines become spaces in single-line mode.
     pub fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             // Preserve newlines in multiline mode, replace with spaces in single-line mode
@@ -844,7 +765,6 @@ impl InputState {
         }
     }
 
-    /// Copies selected text to clipboard. No-op if nothing selected.
     pub fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -853,7 +773,6 @@ impl InputState {
         }
     }
 
-    /// Cuts selected text to clipboard. No-op if nothing selected.
     pub fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
@@ -864,9 +783,7 @@ impl InputState {
         }
     }
 
-    /// Push current state onto the undo stack before making a change.
     fn push_undo(&mut self) {
-        // Remove oldest entry if at capacity
         if self.undo_stack.len() >= self.max_history {
             self.undo_stack.remove(0);
         }
@@ -875,63 +792,44 @@ impl InputState {
             selected_range: self.selected_range.clone(),
             selection_reversed: self.selection_reversed,
         });
-        // Clear redo stack when a new edit is made
         self.redo_stack.clear();
     }
 
-    /// Restores previous state from undo stack. No-op if stack is empty.
+    fn apply_history_entry(&mut self, entry: UndoEntry, cx: &mut Context<Self>) {
+        self.value = Some(entry.text);
+        self.selected_range = entry.selected_range;
+        self.selection_reversed = entry.selection_reversed;
+        self.precomputed_visual_lines.clear();
+        self.reset_manual_scroll();
+        self.scroll_to_cursor_horizontal = true;
+        if self.is_wrapped {
+            self.scroll_to_cursor_on_next_render = true;
+        } else {
+            self.ensure_cursor_visible();
+        }
+        self.reset_cursor_blink(cx);
+        cx.notify();
+    }
+
     pub fn undo(&mut self, _: &Undo, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.undo_stack.pop() {
-            // Save current state to redo stack
             self.redo_stack.push(UndoEntry {
                 text: self.value(),
                 selected_range: self.selected_range.clone(),
                 selection_reversed: self.selection_reversed,
             });
-
-            // Restore previous state
-            self.value = Some(entry.text);
-            self.selected_range = entry.selected_range;
-            self.selection_reversed = entry.selection_reversed;
-
-            // Clear layout caches and notify
-            self.precomputed_visual_lines.clear();
-            self.reset_manual_scroll();
-            if self.is_wrapped {
-                self.scroll_to_cursor_on_next_render = true;
-            } else {
-                self.ensure_cursor_visible();
-            }
-            self.reset_cursor_blink(cx);
-            cx.notify();
+            self.apply_history_entry(entry, cx);
         }
     }
 
-    /// Restores state from redo stack. No-op if stack is empty.
     pub fn redo(&mut self, _: &Redo, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(entry) = self.redo_stack.pop() {
-            // Save current state to undo stack
             self.undo_stack.push(UndoEntry {
                 text: self.value(),
                 selected_range: self.selected_range.clone(),
                 selection_reversed: self.selection_reversed,
             });
-
-            // Restore redo state
-            self.value = Some(entry.text);
-            self.selected_range = entry.selected_range;
-            self.selection_reversed = entry.selection_reversed;
-
-            // Clear layout caches and notify
-            self.precomputed_visual_lines.clear();
-            self.reset_manual_scroll();
-            if self.is_wrapped {
-                self.scroll_to_cursor_on_next_render = true;
-            } else {
-                self.ensure_cursor_visible();
-            }
-            self.reset_cursor_blink(cx);
-            cx.notify();
+            self.apply_history_entry(entry, cx);
         }
     }
 
@@ -940,6 +838,7 @@ impl InputState {
         if scroll {
             // Reset manual scroll so auto-scroll to cursor works
             self.reset_manual_scroll();
+            self.scroll_to_cursor_horizontal = true;
             // For wrapped mode, defer scroll until visual lines are recomputed
             // For non-wrapped mode, scroll immediately since line calculation is always correct
             if self.is_wrapped {
@@ -952,19 +851,17 @@ impl InputState {
         cx.notify()
     }
 
-    /// Sets cursor position and clears selection, scrolling to keep cursor visible.
     pub fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.is_select_all = false;
         self.move_to_inner(offset, true, cx)
     }
 
-    /// Sets cursor position without auto-scrolling. Used by `select_all` to avoid scroll jump.
     pub fn move_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
-        self.skip_auto_scroll_on_next_render = true;
+        self.scroll_to_cursor_on_next_render = false;
+        self.scroll_to_cursor_horizontal = false;
         self.move_to_inner(offset, false, cx)
     }
 
-    /// Returns the active end of the selection (where the cursor is rendered).
     pub fn cursor_offset(&self) -> usize {
         if self.selection_reversed {
             self.selected_range.start
@@ -1091,6 +988,7 @@ impl EntityInputHandler for InputState {
 
         // Reset manual scroll so auto-scroll to cursor works
         self.reset_manual_scroll();
+        self.scroll_to_cursor_horizontal = true;
 
         // For wrapped mode, defer scroll until visual lines are recomputed
         // For non-wrapped mode, scroll immediately since line calculation is always correct

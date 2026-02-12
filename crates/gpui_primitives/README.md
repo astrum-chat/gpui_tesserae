@@ -52,20 +52,22 @@ Input::new("input", state)
 // Enables mulitline with a maximum amount
 // of visible lines (scrolls after 5 lines).
 Input::new("input", state)
-    .line_clamp(5)
+    .multiline_clamp(5)
 
 // Shorthand for enabling multiline with
 // no maximum amount of visible lines.
 Input::new("input", state)
     .multiline()
 
-// Word wrapping (auto-enables multiline)
+// Word wrapping (requires multiline)
 Input::new("input", state)
-    .word_wrap(true)
+    .multiline()
+    .multiline_wrapped()
 
 // Enter now triggers on_submit (Use Shift+Enter for newlines)
 Input::new("input", state)
-    .word_wrap(true)
+    .multiline()
+    .multiline_wrapped()
     .on_submit(|_window, _cx| { /* handle submit */ })
 ```
 
@@ -112,9 +114,9 @@ state.update(cx, |this, _cx| { this.clear(); });
 | Method | Description |
 |---|---|
 | `placeholder(text)` | Placeholder text shown when empty |
-| `line_clamp(n)` | Max visible lines before scrolling |
+| `multiline_clamp(n)` | Max visible lines before scrolling |
 | `multiline()` | Unlimited lines with vertical scrolling |
-| `word_wrap(bool)` | Enable word wrapping |
+| `multiline_wrapped()` | Enable word wrapping (requires multiline) |
 | `on_submit(callback)` | Callback on Enter; forces Shift+Enter for newlines |
 | `submit_disabled(bool)` | Disable the submit action |
 | `secondary_newline()` | Force Shift+Enter for newlines without an on_submit callback |
@@ -162,18 +164,34 @@ let state = cx.new(|cx| {
 });
 
 SelectableText::new("my-text", state)
-    .word_wrap(true)
     .text_color(rgb(0xcdd6f4))
     .text_size(px(16.))
     .selection_rounded(px(4.))
+```
+
+### Multiline Modes
+
+```rust
+// Single-line (default)
+SelectableText::new("text", state)
+
+// Unlimited multiline with word wrapping
+SelectableText::new("text", state)
+    .multiline()
+    .multiline_wrapped()
+
+// Limit to 5 visible lines with scrolling
+SelectableText::new("text", state)
+    .multiline_clamp(5)
 ```
 
 ### Builder Methods
 
 | Method | Description |
 |---|---|
-| `word_wrap(bool)` | Enable word wrapping (default: enabled) |
-| `line_clamp(n)` | Max visible lines before scrolling |
+| `multiline()` | Enable unlimited multiline display |
+| `multiline_clamp(n)` | Max visible lines before scrolling |
+| `multiline_wrapped()` | Enable word wrapping (requires multiline) |
 | `selection_color(color)` | Selection highlight color |
 | `selection_rounded(px)` | Selection corner radius |
 | `selection_rounded_smoothing(f32)` | Squircle smoothing (0.0–1.0) |

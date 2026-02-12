@@ -9,13 +9,12 @@ pub mod text_transforms;
 use std::sync::Arc;
 
 use gpui::{
-    AbsoluteLength, App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Font, Hsla,
-    InteractiveElement, IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable,
-    RenderOnce, SharedString, Style, StyleRefinement, Styled, Window, div, hsla,
-    prelude::FluentBuilder, relative, rgb, uniform_list,
+    App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Hsla, InteractiveElement,
+    IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable, RenderOnce,
+    SharedString, Style, StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder,
+    relative, rgb, uniform_list,
 };
 
-use crate::extensions::WindowExt;
 use crate::input::state::{SecondarySubmit, Submit};
 use crate::utils::{TextNavigation, multiline_height, rgb_a};
 pub use cursor_blink::CursorBlink;
@@ -39,8 +38,8 @@ pub struct Input {
     id: ElementId,
     state: Entity<InputState>,
     disabled: bool,
-    line_clamp: usize,
-    word_wrap: bool,
+    multiline_clamp: Option<usize>,
+    multiline_wrapped: bool,
     on_submit: Option<OnEnterFn>,
     submit_disabled: bool,
     secondary_newline: bool,
@@ -49,6 +48,7 @@ pub struct Input {
     selection_color: Option<Hsla>,
     selection_rounded: Option<gpui::Pixels>,
     selection_rounded_smoothing: Option<f32>,
+    selection_precise: bool,
     transform_text: Option<TransformTextFn>,
     map_text: Option<MapTextFn>,
     debug_interior_corners: bool,
@@ -61,15 +61,15 @@ impl Styled for Input {
     }
 }
 
+#[allow(missing_docs)]
 impl Input {
-    /// Creates a new input element with the given ID and state entity.
     pub fn new(id: impl Into<ElementId>, state: Entity<InputState>) -> Self {
         Self {
             id: id.into(),
             state,
             disabled: false,
-            line_clamp: 1,
-            word_wrap: false,
+            multiline_clamp: None,
+            multiline_wrapped: false,
             on_submit: None,
             submit_disabled: false,
             secondary_newline: false,
@@ -78,6 +78,7 @@ impl Input {
             selection_color: None,
             selection_rounded: None,
             selection_rounded_smoothing: None,
+            selection_precise: false,
             transform_text: None,
             map_text: None,
             debug_interior_corners: false,
@@ -86,25 +87,18 @@ impl Input {
     }
 
     /// Sets the maximum number of visible lines before scrolling. Use `multiline()` for unlimited.
-    pub fn line_clamp(mut self, line_clamp: usize) -> Self {
-        self.line_clamp = line_clamp.max(1);
+    pub fn multiline_clamp(mut self, multiline_clamp: usize) -> Self {
+        self.multiline_clamp = Some(multiline_clamp.max(1));
         self
     }
 
-    /// Enables unlimited multiline input with vertical scrolling.
     pub fn multiline(mut self) -> Self {
-        self.line_clamp = usize::MAX;
+        self.multiline_clamp = Some(usize::MAX);
         self
     }
 
-    /// Enables or disables word wrapping.
-    /// When enabling word wrap and `line_clamp` is still at the default (1),
-    /// automatically sets unlimited line growth so wrapped lines are visible.
-    pub fn word_wrap(mut self, enabled: bool) -> Self {
-        self.word_wrap = enabled;
-        if enabled && self.line_clamp == 1 {
-            self.line_clamp = usize::MAX;
-        }
+    pub fn multiline_wrapped(mut self) -> Self {
+        self.multiline_wrapped = true;
         self
     }
 
@@ -149,7 +143,6 @@ impl Input {
         self
     }
 
-    /// Disables the input, preventing focus and interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -164,13 +157,11 @@ impl Input {
         self
     }
 
-    /// Sets the color for placeholder text.
     pub fn placeholder_text_color(mut self, color: impl Into<Hsla>) -> Self {
         self.placeholder_text_color = Some(color.into());
         self
     }
 
-    /// Sets the background color for selected text.
     pub fn selection_color(mut self, color: impl Into<Hsla>) -> Self {
         self.selection_color = Some(color.into());
         self
@@ -199,6 +190,16 @@ impl Input {
         self
     }
 
+    /// Uses precise selection highlighting that stops at the last selected character.
+    ///
+    /// By default, selection extends to the right edge of the container on lines
+    /// where the selection continues to the next line. This method disables that
+    /// behavior so the highlight exactly wraps the selected text.
+    pub fn selection_precise(mut self) -> Self {
+        self.selection_precise = true;
+        self
+    }
+
     /// Enables debug visualization of interior (concave) selection corners.
     /// When enabled, interior corner patches are painted red instead of the selection color.
     pub fn debug_interior_corners(mut self, enabled: bool) -> Self {
@@ -206,18 +207,15 @@ impl Input {
         self
     }
 
-    /// Sets the placeholder text shown when input is empty.
     pub fn placeholder(mut self, text: impl Into<SharedString>) -> Self {
         self.placeholder = text.into();
         self
     }
 
-    /// Returns the current placeholder text.
     pub fn get_placeholder(&self) -> &SharedString {
         &self.placeholder
     }
 
-    /// Returns the current text value from state.
     pub fn read_text(&self, cx: &mut App) -> SharedString {
         self.state.read(cx).value()
     }
@@ -225,38 +223,18 @@ impl Input {
 
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let is_multiline = self.line_clamp > 1 || self.word_wrap;
+        let is_multiline = self.multiline_clamp.is_some_and(|c| c > 1);
 
-        let text_style = &self.style.text;
-        let font_size = match text_style
-            .font_size
-            .unwrap_or_else(|| window.text_style().font_size)
-        {
-            AbsoluteLength::Pixels(px) => px,
-            AbsoluteLength::Rems(rems) => rems.to_pixels(window.rem_size()),
-        };
-        let line_height = text_style
-            .line_height
-            .map(|this| this.to_pixels(font_size.into(), window.rem_size()))
-            .unwrap_or_else(|| window.line_height());
-        let line_height = window.round(line_height);
-        let scale_factor = window.scale_factor();
-
-        let font = Font {
-            family: text_style
-                .font_family
-                .clone()
-                .unwrap_or_else(|| window.text_style().font_family),
-            features: text_style.font_features.clone().unwrap_or_default(),
-            fallbacks: text_style.font_fallbacks.clone(),
-            weight: text_style.font_weight.unwrap_or_default(),
-            style: text_style.font_style.unwrap_or_default(),
-        };
+        let params = crate::utils::compute_text_render_params(&self.style.text, window);
+        let font = params.font;
+        let font_size = params.font_size;
+        let line_height = params.line_height;
+        let scale_factor = params.scale_factor;
 
         let map_text = self.map_text.clone();
         self.state.update(cx, |state, cx| {
             state.update_focus_state(window, cx);
-            state.set_multiline_params(is_multiline, line_height, self.line_clamp);
+            state.set_multiline_params(is_multiline, line_height, self.multiline_clamp);
             state.map_text = map_text;
         });
 
@@ -291,80 +269,16 @@ impl RenderOnce for Input {
             } else {
                 CursorStyle::IBeam
             })
-            // Basic navigation (universal)
-            .on_action(window.listener_for(&self.state, InputState::backspace))
-            .on_action(window.listener_for(&self.state, InputState::delete))
-            .on_action(window.listener_for(&self.state, InputState::left))
-            .on_action(window.listener_for(&self.state, InputState::right))
-            .on_action(window.listener_for(&self.state, InputState::home))
-            .on_action(window.listener_for(&self.state, InputState::end))
-            // Basic selection (universal)
-            .on_action(window.listener_for(&self.state, InputState::select_left))
-            .on_action(window.listener_for(&self.state, InputState::select_right))
-            .on_action(window.listener_for(&self.state, InputState::select_to_start_of_line))
-            .on_action(window.listener_for(&self.state, InputState::select_to_end_of_line))
-            // Clipboard & Undo
-            .on_action(window.listener_for(&self.state, InputState::select_all))
-            .on_action(window.listener_for(&self.state, InputState::copy))
-            .on_action(window.listener_for(&self.state, InputState::cut))
-            .on_action(window.listener_for(&self.state, InputState::paste))
-            .on_action(window.listener_for(&self.state, InputState::undo))
-            .on_action(window.listener_for(&self.state, InputState::redo))
-            // Word navigation
-            .on_action(window.listener_for(&self.state, InputState::move_to_previous_word))
-            .on_action(window.listener_for(&self.state, InputState::move_to_next_word))
-            .on_action(window.listener_for(&self.state, InputState::select_to_previous_word_start))
-            .on_action(window.listener_for(&self.state, InputState::select_to_next_word_end))
-            // Word deletion
-            .on_action(window.listener_for(&self.state, InputState::delete_to_previous_word_start))
-            .on_action(window.listener_for(&self.state, InputState::delete_to_next_word_end))
-            // Line navigation
-            .on_action(window.listener_for(&self.state, InputState::move_to_start_of_line))
-            .on_action(window.listener_for(&self.state, InputState::move_to_end_of_line))
-            // Document navigation
-            .on_action(window.listener_for(&self.state, InputState::move_to_start))
-            .on_action(window.listener_for(&self.state, InputState::move_to_end))
-            .on_action(window.listener_for(&self.state, InputState::select_to_start))
-            .on_action(window.listener_for(&self.state, InputState::select_to_end))
-            // Line deletion
-            .on_action(window.listener_for(&self.state, InputState::delete_to_beginning_of_line))
-            .on_action(window.listener_for(&self.state, InputState::delete_to_end_of_line))
-            // Character palette (macOS only)
-            .on_action(window.listener_for(&self.state, InputState::show_character_palette))
-            // Multiline-only actions
-            .when(is_multiline, |this| {
-                this.on_action(window.listener_for(&self.state, InputState::up))
-                    .on_action(window.listener_for(&self.state, InputState::down))
-                    .on_action(window.listener_for(&self.state, InputState::select_up))
-                    .on_action(window.listener_for(&self.state, InputState::select_down))
-                    .map(|this| {
-                        let on_submit = self.on_submit.clone();
-                        let secondary_newline = self.secondary_newline;
-
-                        match (on_submit, secondary_newline) {
-                            (None, true) => {
-                                this.on_action(window.listener_for(
-                                    &self.state,
-                                    InputState::insert_newline_secondary,
-                                ))
-                            }
-
-                            (None, false) => this.on_action(
-                                window.listener_for(&self.state, InputState::insert_newline),
-                            ),
-
-                            (Some(on_submit), _) => this
-                                .on_action(window.listener_for(
-                                    &self.state,
-                                    InputState::insert_newline_secondary,
-                                ))
-                                .when(!self.submit_disabled, |this| {
-                                    this.on_action(move |_: &Submit, window, cx| {
-                                        on_submit(window, cx);
-                                    })
-                                }),
-                        }
-                    })
+            .map(|this| {
+                register_input_actions(
+                    this,
+                    window,
+                    &self.state,
+                    is_multiline,
+                    self.on_submit.clone(),
+                    self.secondary_newline,
+                    self.submit_disabled,
+                )
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -380,19 +294,20 @@ impl RenderOnce for Input {
             )
             .on_mouse_move(window.listener_for(&self.state, InputState::on_mouse_move))
             .on_scroll_wheel(window.listener_for(&self.state, InputState::on_scroll_wheel))
-            .when(is_multiline && !self.word_wrap, |this| {
+            .when(is_multiline && !self.multiline_wrapped, |this| {
                 let font = font.clone();
                 let line_count = state.line_count().max(1);
                 let scroll_handle = state.scroll_handle.clone();
                 let input_state = self.state.clone();
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
-                let line_clamp = self.line_clamp;
+                let multiline_clamp = self.multiline_clamp;
                 let selection_rounded = self.selection_rounded;
                 let selection_rounded_smoothing = self.selection_rounded_smoothing;
+                let selection_precise = self.selection_precise;
                 let debug_interior_corners = self.debug_interior_corners;
 
-                let needs_scroll = line_count > line_clamp;
+                let needs_scroll = multiline_clamp.map_or(false, |clamp| line_count > clamp);
 
                 let list = uniform_list(
                     self.id.clone(),
@@ -403,20 +318,13 @@ impl RenderOnce for Input {
                         let selected_range = state.selected_range.clone();
                         let cursor_offset = state.cursor_offset();
 
-                        let mut line_offsets: Vec<(usize, usize)> = Vec::new();
-                        let mut start = 0;
-                        for line in value.split('\n') {
-                            let end = start + line.len();
-                            line_offsets.push((start, end));
-                            start = end + 1;
-                        }
+                        let line_offsets = crate::utils::compute_line_offsets(&value);
 
                         visible_range
                             .map(|line_idx| {
                                 let (line_start, line_end) =
                                     line_offsets.get(line_idx).copied().unwrap_or((0, 0));
 
-                                // Get adjacent line offsets for corner radius computation
                                 let prev_line_offsets = if line_idx > 0 {
                                     line_offsets.get(line_idx - 1).copied()
                                 } else {
@@ -444,6 +352,7 @@ impl RenderOnce for Input {
                                     selection_rounded_smoothing,
                                     prev_line_offsets,
                                     next_line_offsets,
+                                    selection_precise,
                                     debug_interior_corners,
                                 }
                             })
@@ -459,7 +368,7 @@ impl RenderOnce for Input {
                 })
                 .h(multiline_height(
                     line_height,
-                    line_clamp.min(line_count).max(1),
+                    multiline_clamp.map_or(1, |c| c.min(line_count)).max(1),
                     scale_factor,
                 ));
 
@@ -468,7 +377,7 @@ impl RenderOnce for Input {
                     child: list.into_any_element(),
                 })
             })
-            .when(is_multiline && self.word_wrap, |this| {
+            .when(is_multiline && self.multiline_wrapped, |this| {
                 let font = font.clone();
 
                 // Cache render params on state (needed for UniformListInputElement's
@@ -501,8 +410,9 @@ impl RenderOnce for Input {
                     placeholder: self.placeholder.clone(),
                     selection_rounded: self.selection_rounded,
                     selection_rounded_smoothing: self.selection_rounded_smoothing,
+                    selection_precise: self.selection_precise,
                     debug_interior_corners: self.debug_interior_corners,
-                    line_clamp: self.line_clamp,
+                    multiline_clamp: self.multiline_clamp,
                     scale_factor,
                     style: element_style,
                     children: Vec::new(),
@@ -522,15 +432,90 @@ impl RenderOnce for Input {
                     cursor_visible,
                     selection_rounded: self.selection_rounded,
                     selection_rounded_smoothing: self.selection_rounded_smoothing,
+                    selection_precise: self.selection_precise,
                 })
             })
     }
 }
 
+fn register_input_actions<E>(
+    element: E,
+    window: &mut Window,
+    state: &Entity<InputState>,
+    is_multiline: bool,
+    on_submit: Option<OnEnterFn>,
+    secondary_newline: bool,
+    submit_disabled: bool,
+) -> E
+where
+    E: InteractiveElement + FluentBuilder,
+{
+    element
+        .on_action(window.listener_for(state, InputState::backspace))
+        .on_action(window.listener_for(state, InputState::delete))
+        .on_action(window.listener_for(state, InputState::left))
+        .on_action(window.listener_for(state, InputState::right))
+        .on_action(window.listener_for(state, InputState::home))
+        .on_action(window.listener_for(state, InputState::end))
+        .on_action(window.listener_for(state, InputState::select_left))
+        .on_action(window.listener_for(state, InputState::select_right))
+        .on_action(window.listener_for(state, InputState::select_to_start_of_line))
+        .on_action(window.listener_for(state, InputState::select_to_end_of_line))
+        .on_action(window.listener_for(state, InputState::select_all))
+        .on_action(window.listener_for(state, InputState::copy))
+        .on_action(window.listener_for(state, InputState::cut))
+        .on_action(window.listener_for(state, InputState::paste))
+        .on_action(window.listener_for(state, InputState::undo))
+        .on_action(window.listener_for(state, InputState::redo))
+        .on_action(window.listener_for(state, InputState::move_to_previous_word))
+        .on_action(window.listener_for(state, InputState::move_to_next_word))
+        .on_action(window.listener_for(state, InputState::select_to_previous_word_start))
+        .on_action(window.listener_for(state, InputState::select_to_next_word_end))
+        .on_action(window.listener_for(state, InputState::delete_to_previous_word_start))
+        .on_action(window.listener_for(state, InputState::delete_to_next_word_end))
+        .on_action(window.listener_for(state, InputState::move_to_start_of_line))
+        .on_action(window.listener_for(state, InputState::move_to_end_of_line))
+        .on_action(window.listener_for(state, InputState::move_to_start))
+        .on_action(window.listener_for(state, InputState::move_to_end))
+        .on_action(window.listener_for(state, InputState::select_to_start))
+        .on_action(window.listener_for(state, InputState::select_to_end))
+        .on_action(window.listener_for(state, InputState::delete_to_beginning_of_line))
+        .on_action(window.listener_for(state, InputState::delete_to_end_of_line))
+        .on_action(window.listener_for(state, InputState::show_character_palette))
+        .when(is_multiline, |this| {
+            this.on_action(window.listener_for(state, InputState::up))
+                .on_action(window.listener_for(state, InputState::down))
+                .on_action(window.listener_for(state, InputState::select_up))
+                .on_action(window.listener_for(state, InputState::select_down))
+                .map(|this| {
+                    let on_submit = on_submit.clone();
+
+                    match (on_submit, secondary_newline) {
+                        (None, true) => this.on_action(
+                            window.listener_for(state, InputState::insert_newline_secondary),
+                        ),
+
+                        (None, false) => {
+                            this.on_action(window.listener_for(state, InputState::insert_newline))
+                        }
+
+                        (Some(on_submit), _) => this
+                            .on_action(
+                                window.listener_for(state, InputState::insert_newline_secondary),
+                            )
+                            .when(!submit_disabled, |this| {
+                                this.on_action(move |_: &Submit, window, cx| {
+                                    on_submit(window, cx);
+                                })
+                            }),
+                    }
+                })
+        })
+}
+
 /// Registers default key bindings for text input. Call once at app startup.
 pub fn init(cx: &mut App) {
     cx.bind_keys([
-        // Basic navigation (universal)
         KeyBinding::new("backspace", Backspace, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("left", Left, None),
@@ -541,14 +526,12 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("end", End, None),
         KeyBinding::new("enter", Submit, None),
         KeyBinding::new("shift-enter", SecondarySubmit, None),
-        // Basic selection (universal)
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-up", SelectUp, None),
         KeyBinding::new("shift-down", SelectDown, None),
         KeyBinding::new("shift-home", SelectToStartOfLine, None),
         KeyBinding::new("shift-end", SelectToEndOfLine, None),
-        // Clipboard & Undo (macOS: cmd, other: ctrl)
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-a", SelectAll, None),
         #[cfg(target_os = "macos")]
@@ -573,7 +556,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-z", Undo, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-y", Redo, None),
-        // Word navigation (macOS: alt, other: ctrl)
         #[cfg(target_os = "macos")]
         KeyBinding::new("alt-left", MoveToPreviousWord, None),
         #[cfg(target_os = "macos")]
@@ -590,7 +572,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-shift-left", SelectToPreviousWordStart, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-shift-right", SelectToNextWordEnd, None),
-        // Word deletion (macOS: alt, other: ctrl)
         #[cfg(target_os = "macos")]
         KeyBinding::new("alt-backspace", DeleteToPreviousWordStart, None),
         #[cfg(target_os = "macos")]
@@ -599,7 +580,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-backspace", DeleteToPreviousWordStart, None),
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-delete", DeleteToNextWordEnd, None),
-        // Line navigation (macOS only)
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-left", MoveToStartOfLine, None),
         #[cfg(target_os = "macos")]
@@ -616,7 +596,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-shift-a", SelectToStartOfLine, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("ctrl-shift-e", SelectToEndOfLine, None),
-        // Document navigation (macOS only)
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-up", MoveToStart, None),
         #[cfg(target_os = "macos")]
@@ -625,12 +604,10 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-shift-up", SelectToStart, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-shift-down", SelectToEnd, None),
-        // Line deletion (macOS only)
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-backspace", DeleteToBeginningOfLine, None),
         #[cfg(target_os = "macos")]
         KeyBinding::new("cmd-delete", DeleteToEndOfLine, None),
-        // Character palette (macOS only)
         #[cfg(target_os = "macos")]
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, None),
     ]);
@@ -648,5 +625,85 @@ pub fn init(cx: &mut App) {
 impl Focusable for Input {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.state.read(cx).focus_handle.clone()
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod builder_tests {
+    use super::*;
+    use gpui::{AppContext as _, TestAppContext, px};
+
+    #[gpui::test]
+    fn test_selection_precise_default_false(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        cx.update(|_cx| {
+            let input = Input::new("test", state);
+            assert!(
+                !input.selection_precise,
+                "selection_precise should default to false"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_selection_precise_setter(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        cx.update(|_cx| {
+            let input = Input::new("test", state).selection_precise();
+            assert!(
+                input.selection_precise,
+                "selection_precise should be true after calling .selection_precise()"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_selection_precise_in_builder_chain(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        cx.update(|_cx| {
+            let input = Input::new("test", state)
+                .selection_color(gpui::hsla(0.6, 1., 0.5, 0.3))
+                .selection_rounded(px(4.))
+                .selection_precise()
+                .placeholder("Enter text...");
+            assert!(input.selection_precise);
+            assert!(input.selection_color.is_some());
+            assert!(input.selection_rounded.is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn test_is_selecting_default_false(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        state.read_with(cx, |state, _| {
+            assert!(!state.is_selecting, "is_selecting should default to false");
+        });
+    }
+
+    #[gpui::test]
+    fn test_is_selecting_set_on_mouse_down_cleared_on_mouse_up(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+
+        // Simulate mouse down — is_selecting should become true
+        state.update(cx, |state, _cx| {
+            state.is_selecting = true;
+        });
+        state.read_with(cx, |state, _| {
+            assert!(
+                state.is_selecting,
+                "is_selecting should be true after mouse down"
+            );
+        });
+
+        // Simulate mouse up — is_selecting should become false
+        state.update(cx, |state, _cx| {
+            state.is_selecting = false;
+        });
+        state.read_with(cx, |state, _| {
+            assert!(
+                !state.is_selecting,
+                "is_selecting should be false after mouse up"
+            );
+        });
     }
 }

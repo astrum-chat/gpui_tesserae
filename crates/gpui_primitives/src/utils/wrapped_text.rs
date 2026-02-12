@@ -1,11 +1,14 @@
 use gpui::{
-    Bounds, Font, Hsla, Pixels, Point, ScrollStrategy, SharedString, UniformListScrollHandle,
+    Bounds, Font, Hsla, Pixels, Point, ScrollStrategy, SharedString, Size, UniformListScrollHandle,
     Window, WrappedLine, px,
 };
 use smallvec::SmallVec;
 
 use crate::input::{VisibleLineInfo, VisualLineInfo};
-use crate::utils::{build_visual_lines_from_wrap_boundaries, create_text_run};
+use crate::utils::{
+    WIDTH_WRAP_BASE_MARGIN, build_visual_lines_from_wrap_boundaries, create_text_run,
+    multiline_height,
+};
 
 /// Shapes text with wrapping and builds visual line info.
 ///
@@ -54,6 +57,73 @@ pub fn shape_and_build_visual_lines(
     (wrapped_lines.into_vec(), visual_lines)
 }
 
+/// Result of measuring wrapped text layout.
+#[allow(dead_code)]
+pub struct WrappedMeasureResult {
+    /// The wrapped line objects from text shaping.
+    pub wrapped_lines: Vec<WrappedLine>,
+    /// Visual line info mapping visual lines to byte ranges.
+    pub visual_lines: Vec<VisualLineInfo>,
+    /// The maximum unwrapped line width across all lines.
+    pub max_line_width: Pixels,
+    /// The total number of visual lines (minimum 1).
+    pub visual_line_count: usize,
+    /// The computed element size (width, height).
+    pub size: Size<Pixels>,
+}
+
+/// Measures wrapped text layout: shapes text, wraps at the given width, and computes
+/// the element size based on visible lines and multiline clamp.
+///
+/// Used by both `WrappedTextElement` and `WrappedTextInputElement` measure callbacks
+/// to avoid duplicating the core wrapping + sizing logic.
+#[allow(dead_code)]
+pub fn measure_wrapped_text(
+    width: Pixels,
+    line_height: Pixels,
+    font_size: Pixels,
+    font: Font,
+    text_color: Hsla,
+    text: &SharedString,
+    multiline_clamp: Option<usize>,
+    scale_factor: f32,
+    known_width: bool,
+    window: &Window,
+) -> WrappedMeasureResult {
+    let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
+
+    let (wrapped_lines, visual_lines) =
+        shape_and_build_visual_lines(text, wrap_width, font_size, font, text_color, window);
+
+    let visual_line_count = visual_lines.len().max(1);
+
+    let max_line_width = wrapped_lines
+        .iter()
+        .map(|line| line.unwrapped_layout.width)
+        .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+
+    let visible_lines = multiline_clamp
+        .map_or(1, |c| c.min(visual_line_count))
+        .max(1);
+    let height = multiline_height(line_height, visible_lines, scale_factor);
+
+    let result_width = if known_width {
+        width
+    } else {
+        use crate::extensions::WindowExt;
+        let content_width = window.round(max_line_width) + WIDTH_WRAP_BASE_MARGIN;
+        content_width.min(width)
+    };
+
+    WrappedMeasureResult {
+        wrapped_lines,
+        visual_lines,
+        max_line_width,
+        visual_line_count,
+        size: gpui::size(result_width, height),
+    }
+}
+
 /// Scrolls a uniform_list to make the cursor visible.
 ///
 /// Shared logic for both `InputState` and `SelectableTextState`.
@@ -61,7 +131,7 @@ pub fn ensure_cursor_visible_in_scroll(
     cursor_offset: usize,
     is_wrapped: bool,
     precomputed_visual_lines: &[VisualLineInfo],
-    line_clamp: usize,
+    multiline_clamp: Option<usize>,
     scroll_handle: &UniformListScrollHandle,
     offset_to_line: impl FnOnce(usize) -> usize,
     line_count: impl FnOnce() -> usize,
@@ -77,7 +147,7 @@ pub fn ensure_cursor_visible_in_scroll(
         (cursor_line, line_count())
     };
 
-    if total_lines > line_clamp {
+    if multiline_clamp.map_or(false, |clamp| total_lines > clamp) {
         scroll_handle.scroll_to_item(target_line, ScrollStrategy::Center);
     }
 }

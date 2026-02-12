@@ -6,13 +6,12 @@ pub fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-/// Provides text navigation methods for working with multi-line text.
+/// Text navigation methods for working with multi-line text.
 /// Implemented as a trait to keep navigation logic separate from core state.
 pub trait TextNavigation {
-    /// Returns the current text value.
     fn value(&self) -> SharedString;
 
-    /// Returns the number of lines in the text (minimum 1 for empty text).
+    /// Minimum 1 for empty text.
     fn line_count(&self) -> usize {
         let value = self.value();
         if value.is_empty() {
@@ -22,7 +21,6 @@ pub trait TextNavigation {
         }
     }
 
-    /// Returns the byte offset where the given line starts.
     fn line_start_offset(&self, line: usize) -> usize {
         let value = self.value();
         let mut offset = 0;
@@ -35,7 +33,7 @@ pub trait TextNavigation {
         value.len()
     }
 
-    /// Returns the byte offset where the given line ends (before the newline).
+    /// End is before the newline character.
     fn line_end_offset(&self, line: usize) -> usize {
         let start = self.line_start_offset(line);
         let value = self.value();
@@ -45,7 +43,6 @@ pub trait TextNavigation {
             .unwrap_or(value.len())
     }
 
-    /// Converts a byte offset to (line, column) coordinates.
     fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
         let value = self.value();
         let mut line = 0;
@@ -64,14 +61,12 @@ pub trait TextNavigation {
         (line, offset.saturating_sub(line_start))
     }
 
-    /// Returns the (start, end) byte offsets of the line containing the given offset.
-    /// End is positioned before the newline character (or at text end for last line).
+    /// End is before the newline character (or at text end for last line).
     fn line_range_at(&self, offset: usize) -> (usize, usize) {
         let (line, _) = self.offset_to_line_col(offset);
         (self.line_start_offset(line), self.line_end_offset(line))
     }
 
-    /// Converts (line, column) coordinates to a byte offset.
     /// Clamps the column to the line length if it exceeds it.
     fn line_col_to_offset(&self, line: usize, col: usize) -> usize {
         let line_start = self.line_start_offset(line);
@@ -80,7 +75,6 @@ pub trait TextNavigation {
         line_start + col.min(line_len)
     }
 
-    /// Returns the byte offset of the previous grapheme boundary.
     fn previous_boundary(&self, offset: usize) -> usize {
         self.value()
             .grapheme_indices(true)
@@ -89,7 +83,6 @@ pub trait TextNavigation {
             .unwrap_or(0)
     }
 
-    /// Returns the byte offset of the next grapheme boundary.
     fn next_boundary(&self, offset: usize) -> usize {
         self.value()
             .grapheme_indices(true)
@@ -97,7 +90,6 @@ pub trait TextNavigation {
             .unwrap_or(self.value().len())
     }
 
-    /// Returns the byte offset of the start of the word containing the given offset.
     fn word_start(&self, offset: usize) -> usize {
         let value = self.value();
         if value.is_empty() || offset == 0 {
@@ -127,7 +119,6 @@ pub trait TextNavigation {
         0
     }
 
-    /// Returns the byte offset of the end of the word containing the given offset.
     fn word_end(&self, offset: usize) -> usize {
         let value = self.value();
         if value.is_empty() || offset >= value.len() {

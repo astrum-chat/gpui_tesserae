@@ -5,8 +5,8 @@ use gpui::{
 use crate::input::state::InputState;
 use crate::utils::TextNavigation;
 
+#[allow(missing_docs)]
 impl InputState {
-    /// Converts a mouse position to a text offset for single-line inputs.
     pub fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
         if self.value().is_empty() {
             return 0;
@@ -34,6 +34,18 @@ impl InputState {
         line.closest_index_for_x(x_in_text)
     }
 
+    fn position_to_index(&self, position: Point<Pixels>) -> usize {
+        if self.is_multiline {
+            if let Some(line_height) = self.line_height {
+                self.index_for_multiline_position(position, line_height)
+            } else {
+                self.index_for_mouse_position(position)
+            }
+        } else {
+            self.index_for_mouse_position(position)
+        }
+    }
+
     fn select_to_inner(&mut self, offset: usize, scroll: bool, cx: &mut Context<Self>) {
         crate::utils::apply_selection_change(
             &mut self.selected_range,
@@ -44,6 +56,7 @@ impl InputState {
         if scroll {
             // Ensure cursor remains visible when selecting
             self.reset_manual_scroll();
+            self.scroll_to_cursor_horizontal = true;
             if self.is_wrapped {
                 self.scroll_to_cursor_on_next_render = true;
             } else {
@@ -55,24 +68,24 @@ impl InputState {
         cx.notify()
     }
 
-    /// Extends the selection to the given offset, scrolling to keep the cursor visible.
     pub fn select_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.is_select_all = false;
         self.select_to_inner(offset, true, cx)
     }
 
-    /// Extends the selection to the given offset without scrolling.
     pub fn select_to_without_scroll(&mut self, offset: usize, cx: &mut Context<Self>) {
-        self.skip_auto_scroll_on_next_render = true;
+        self.scroll_to_cursor_on_next_render = false;
+        self.scroll_to_cursor_horizontal = false;
         self.select_to_inner(offset, false, cx)
     }
 
-    /// Selects the word at the given offset (used for double-click selection).
     pub fn select_word_at(&mut self, offset: usize, cx: &mut Context<Self>) {
         let start = self.word_start(offset);
         let end = self.word_end(start);
         self.selected_range = start..end;
         self.selection_reversed = false;
+        self.scroll_to_cursor_on_next_render = false;
+        self.scroll_to_cursor_horizontal = false;
         self.reset_cursor_blink(cx);
         cx.notify()
     }
@@ -85,14 +98,32 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         let offset = self.index_for_multiline_position(position, line_height);
-        self.select_to(offset, cx);
+        // Use select_to_without_scroll to prevent ensure_cursor_visible (vertical)
+        // from fighting with our explicit scroll_up/down_one_line calls.
+        // But opt in to horizontal scroll so cursor stays visible during drag.
+        self.select_to_without_scroll(offset, cx);
+        self.scroll_to_cursor_horizontal = true;
 
         if self.is_selecting {
             if let Some(bounds) = &self.last_bounds {
-                if position.y < bounds.top() {
-                    self.scroll_up_one_line();
-                } else if position.y > bounds.bottom() {
-                    self.scroll_down_one_line();
+                if let Some(interval_ms) = crate::utils::auto_scroll_vertical_interval(
+                    position.y,
+                    bounds.top(),
+                    bounds.bottom(),
+                ) {
+                    let now = std::time::Instant::now();
+                    let should_scroll = self
+                        .last_scroll_time
+                        .map_or(true, |t| now.duration_since(t).as_millis() > interval_ms);
+
+                    if should_scroll {
+                        if position.y < bounds.top() {
+                            self.scroll_up_one_line();
+                        } else {
+                            self.scroll_down_one_line();
+                        }
+                        self.last_scroll_time = Some(now);
+                    }
                 }
             }
         }
@@ -127,7 +158,7 @@ impl InputState {
         }
     }
 
-    /// Converts a mouse position to a text offset for multiline inputs, handling wrapped and non-wrapped modes.
+    /// Converts a mouse position to a byte offset in multiline mode.
     pub fn index_for_multiline_position(
         &self,
         position: Point<Pixels>,
@@ -150,7 +181,7 @@ impl InputState {
         )
     }
 
-    /// Handles mouse down: starts selection, supports click/double-click/triple-click and shift-extend.
+    /// Handles mouse down: click to place cursor, double-click to select word, triple-click to select line.
     pub fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -159,15 +190,7 @@ impl InputState {
     ) {
         self.is_selecting = true;
 
-        let index = if self.is_multiline {
-            if let Some(line_height) = self.line_height {
-                self.index_for_multiline_position(event.position, line_height)
-            } else {
-                self.index_for_mouse_position(event.position)
-            }
-        } else {
-            self.index_for_mouse_position(event.position)
-        };
+        let index = self.position_to_index(event.position);
 
         if event.click_count >= 3 {
             // Select line at click position
@@ -183,7 +206,6 @@ impl InputState {
         }
     }
 
-    /// Handles mouse up: ends the current selection drag.
     pub fn on_mouse_up(
         &mut self,
         _: &MouseUpEvent,
@@ -193,7 +215,6 @@ impl InputState {
         self.is_selecting = false;
     }
 
-    /// Handles mouse move: extends selection while dragging.
     pub fn on_mouse_move(
         &mut self,
         event: &MouseMoveEvent,
@@ -201,15 +222,7 @@ impl InputState {
         cx: &mut Context<Self>,
     ) {
         if self.is_selecting {
-            let index = if self.is_multiline {
-                if let Some(line_height) = self.line_height {
-                    self.index_for_multiline_position(event.position, line_height)
-                } else {
-                    self.index_for_mouse_position(event.position)
-                }
-            } else {
-                self.index_for_mouse_position(event.position)
-            };
+            let index = self.position_to_index(event.position);
             self.select_to(index, cx);
         }
     }

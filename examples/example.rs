@@ -91,7 +91,8 @@ impl Render for Main {
                         |_window, cx| InputState::new(cx).initial_value("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."),
                     ),
                 )
-                .word_wrap(true)
+                //.multiline()
+                .multiline_wrapped()
                 .w(px(300.))
                 .max_w_full()
                 .disabled(self.checkbox_checked || self.switch_checked),
@@ -107,11 +108,14 @@ impl Render for Main {
                     .alpha(0.3);
 
                 SelectableText::new("selectable-text", self.selectable_text_state.clone())
+                    .multiline()
+                    .multiline_wrapped()
                     .w(px(300.))
                     .max_w_full()
                     .selection_color(selection_color)
                     .selection_rounded(px(6.))
                     .selection_rounded_smoothing(1.)
+                //.selection_precise()
             })
     }
 }
@@ -165,7 +169,8 @@ fn main() {
 
                     let selectable_text_state = cx.new(|cx| {
                         let mut state = SelectableTextState::new(cx);
-                        state.text("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.");
+                        state.text("Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.");
                         state
                     });
 

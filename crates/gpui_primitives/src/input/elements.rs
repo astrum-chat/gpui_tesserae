@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, App, AvailableSpace, Bounds, DispatchPhase, Element, ElementId,
-    ElementInputHandler, Entity, Font, GlobalElementId, Hsla, InspectorElementId, IntoElement,
-    LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, TextRun,
-    UnderlineStyle, Window, point, px, relative, size,
+    AnyElement, App, AvailableSpace, Bounds, CursorStyle, DispatchPhase, Element, ElementId,
+    ElementInputHandler, Entity, Font, GlobalElementId, Hitbox, HitboxBehavior, Hsla,
+    InspectorElementId, IntoElement, LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine,
+    SharedString, Style, TextRun, UnderlineStyle, Window, point, px, size,
 };
 
 use crate::extensions::WindowExt;
@@ -12,37 +12,28 @@ use crate::input::state::InputState;
 use crate::input::{TransformTextFn, VisibleLineInfo};
 use crate::utils::{
     SelectionShape, TextNavigation, build_selection_shape, compute_selection_shape,
-    compute_selection_x_bounds, create_text_run, make_cursor_quad, selection_config_from_options,
+    create_text_run, make_cursor_quad, request_line_layout, selection_config_from_options,
 };
 use crate::utils::{WIDTH_WRAP_BASE_MARGIN, multiline_height};
 
-/// Helper: shapes a line from text slice, then computes selection x-bounds via shared util.
-fn shape_and_compute_selection_bounds(
-    full_value: &str,
-    line_start: usize,
-    line_end: usize,
-    selected_range: &Range<usize>,
-    font: &Font,
-    font_size: Pixels,
+fn resolve_display_text(
+    content: &str,
+    is_placeholder_line: bool,
+    placeholder: &SharedString,
+    placeholder_color: Hsla,
     text_color: Hsla,
-    window: &mut Window,
-) -> Option<(Pixels, Pixels)> {
-    let line_content = &full_value[line_start..line_end];
-    let run = create_text_run(font.clone(), text_color, line_content.len());
-    let shaped =
-        window
-            .text_system()
-            .shape_line(line_content.to_string().into(), font_size, &[run], None);
-    compute_selection_x_bounds(
-        &shaped,
-        selected_range,
-        line_start,
-        line_end,
-        font,
-        font_size,
-        text_color,
-        window,
-    )
+    transform: Option<&TransformTextFn>,
+) -> (SharedString, Hsla) {
+    if content.is_empty() && is_placeholder_line {
+        (placeholder.clone(), placeholder_color)
+    } else if content.is_empty() {
+        (SharedString::default(), text_color)
+    } else if let Some(transform) = transform {
+        let transformed: String = content.chars().map(|c| transform(c)).collect();
+        (transformed.into(), text_color)
+    } else {
+        (content.to_string().into(), text_color)
+    }
 }
 
 /// Handles text shaping, cursor positioning, selection rendering, and horizontal scrolling for single-line inputs.
@@ -59,6 +50,7 @@ pub(crate) struct TextElement {
     pub cursor_visible: bool,
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
+    pub selection_precise: bool,
 }
 
 pub(crate) struct PrepaintState {
@@ -66,6 +58,7 @@ pub(crate) struct PrepaintState {
     pub cursor: Option<PaintQuad>,
     pub selection: Option<SelectionShape>,
     pub scroll_offset: Pixels,
+    pub container_hitbox: Option<Hitbox>,
 }
 
 impl IntoElement for TextElement {
@@ -95,11 +88,7 @@ impl Element for TextElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-
-        (window.request_layout(style, [], cx), ())
+        request_line_layout(self.line_height, window, cx)
     }
 
     fn prepaint(
@@ -116,14 +105,14 @@ impl Element for TextElement {
         let cursor = self.input.read(cx).cursor_offset();
         let marked_range = self.input.read(cx).marked_range.clone();
 
-        let (display_text, text_color) = if content.is_empty() {
-            (self.placeholder.clone(), self.placeholder_text_color)
-        } else if let Some(transform) = &self.transform_text {
-            let transformed: String = content.chars().map(|c| transform(c)).collect();
-            (transformed.into(), self.text_color)
-        } else {
-            (content, self.text_color)
-        };
+        let (display_text, text_color) = resolve_display_text(
+            &content,
+            true,
+            &self.placeholder,
+            self.placeholder_text_color,
+            self.text_color,
+            self.transform_text.as_ref(),
+        );
 
         let run = create_text_run(self.font.clone(), text_color, display_text.len());
 
@@ -165,7 +154,12 @@ impl Element for TextElement {
         let scroll_offset = self.input.update(cx, |input, _cx| {
             input.last_text_width = text_width;
             input.last_bounds = Some(bounds);
-            input.ensure_cursor_visible_horizontal(cursor_x, container_width)
+            if input.scroll_to_cursor_horizontal {
+                input.scroll_to_cursor_horizontal = false;
+                input.ensure_cursor_visible_horizontal(cursor_x, container_width)
+            } else {
+                input.horizontal_scroll_offset
+            }
         });
 
         let (selection, cursor_quad) = if selected_range.is_empty() {
@@ -180,7 +174,10 @@ impl Element for TextElement {
             )
         } else {
             let selection_start_x = window.round(line.x_for_index(selected_range.start));
-            let selection_end_x = window.round(line.x_for_index(selected_range.end));
+            let mut selection_end_x = window.round(line.x_for_index(selected_range.end));
+            if !self.selection_precise && selected_range.end >= line.len() {
+                selection_end_x = line.width.max(bounds.size.width);
+            }
 
             let config = selection_config_from_options(
                 self.selection_rounded,
@@ -200,11 +197,14 @@ impl Element for TextElement {
             (Some(selection_shape), None)
         };
 
+        let container_hitbox = Some(window.insert_hitbox(bounds, HitboxBehavior::Normal));
+
         PrepaintState {
             line: Some(line),
             cursor: cursor_quad,
             selection,
             scroll_offset,
+            container_hitbox,
         }
     }
 
@@ -232,6 +232,12 @@ impl Element for TextElement {
                 }
             });
         });
+
+        if self.input.read(cx).is_selecting {
+            if let Some(hitbox) = &prepaint.container_hitbox {
+                window.set_cursor_style(CursorStyle::IBeam, hitbox);
+            }
+        }
 
         window.handle_input(
             &focus_handle,
@@ -292,6 +298,7 @@ pub(crate) struct LineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
+    pub selection_precise: bool,
     pub debug_interior_corners: bool,
 }
 
@@ -329,11 +336,7 @@ impl Element for LineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-
-        (window.request_layout(style, [], cx), ())
+        request_line_layout(self.line_height, window, cx)
     }
 
     fn prepaint(
@@ -368,15 +371,14 @@ impl Element for LineElement {
             full_value[self.line_start_offset..self.line_end_offset].to_string()
         };
 
-        let (display_text, text_color): (SharedString, Hsla) =
-            if is_actually_empty && self.line_index == 0 {
-                (self.placeholder.clone(), self.placeholder_text_color)
-            } else if let Some(transform) = &self.transform_text {
-                let transformed: String = line_content.chars().map(|c| transform(c)).collect();
-                (transformed.into(), self.text_color)
-            } else {
-                (line_content.clone().into(), self.text_color)
-            };
+        let (display_text, text_color) = resolve_display_text(
+            &line_content,
+            is_actually_empty && self.line_index == 0,
+            &self.placeholder,
+            self.placeholder_text_color,
+            self.text_color,
+            self.transform_text.as_ref(),
+        );
 
         let run = create_text_run(self.font.clone(), text_color, display_text.len());
 
@@ -434,37 +436,30 @@ impl Element for LineElement {
                     input.last_text_width = text_width;
                 }
                 input.last_bounds = Some(bounds);
-                input.ensure_cursor_visible_horizontal(cursor_x, container_width)
+                if input.scroll_to_cursor_horizontal {
+                    input.scroll_to_cursor_horizontal = false;
+                    input.ensure_cursor_visible_horizontal(cursor_x, container_width)
+                } else {
+                    input.horizontal_scroll_offset
+                }
             })
         };
 
-        let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            // Compute adjacent line selection bounds for corner radius
-            let prev_line_bounds = self.prev_line_offsets.and_then(|(start, end)| {
-                shape_and_compute_selection_bounds(
-                    &full_value,
-                    start,
-                    end,
-                    &self.selected_range,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                )
-            });
+        let content_width = Some(self.input.read(cx).last_text_width);
 
-            let next_line_bounds = self.next_line_offsets.and_then(|(start, end)| {
-                shape_and_compute_selection_bounds(
+        let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
+            let (prev_line_bounds, next_line_bounds) =
+                crate::utils::compute_adjacent_line_selection_bounds(
                     &full_value,
-                    start,
-                    end,
+                    self.prev_line_offsets,
+                    self.next_line_offsets,
                     &self.selected_range,
+                    self.selection_rounded,
                     &self.font,
                     self.font_size,
                     self.text_color,
                     window,
-                )
-            });
+                );
 
             let selection_shape = compute_selection_shape(
                 &line,
@@ -477,11 +472,16 @@ impl Element for LineElement {
                 self.text_color,
                 self.highlight_text_color,
                 scroll_offset,
+                false, // not wrapped — non-wrapped multiline mode
+                self.selection_precise,
+                content_width,
                 window,
                 self.selection_rounded,
                 self.selection_rounded_smoothing,
                 prev_line_bounds,
+                self.prev_line_offsets.map(|(_, end)| end),
                 next_line_bounds,
+                self.next_line_offsets.map(|(_, end)| end),
                 self.debug_interior_corners,
             );
 
@@ -530,11 +530,11 @@ impl Element for LineElement {
             });
         });
 
-        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            if let Some(selection) = prepaint.selection.take() {
-                selection.paint(window);
-            }
+        if let Some(selection) = prepaint.selection.take() {
+            selection.paint(window);
+        }
 
+        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             let text_origin = point(bounds.origin.x - prepaint.scroll_offset, bounds.origin.y);
             line.paint(
                 text_origin,
@@ -575,6 +575,7 @@ pub(crate) struct WrappedLineElement {
     pub selection_rounded_smoothing: Option<f32>,
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
+    pub selection_precise: bool,
     pub debug_interior_corners: bool,
 }
 
@@ -611,11 +612,7 @@ impl Element for WrappedLineElement {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut style = Style::default();
-        style.size.width = relative(1.).into();
-        style.size.height = self.line_height.into();
-
-        (window.request_layout(style, [], cx), ())
+        request_line_layout(self.line_height, window, cx)
     }
 
     fn prepaint(
@@ -664,16 +661,14 @@ impl Element for WrappedLineElement {
                 };
             } else {
                 let segment = &value[info.start_offset..info.end_offset];
-                let text: SharedString = if let Some(transform) = &self.transform_text {
-                    segment
-                        .chars()
-                        .map(|c| transform(c))
-                        .collect::<String>()
-                        .into()
-                } else {
-                    segment.to_string().into()
-                };
-                (text, self.text_color)
+                resolve_display_text(
+                    segment,
+                    false,
+                    &self.placeholder,
+                    self.placeholder_text_color,
+                    self.text_color,
+                    self.transform_text.as_ref(),
+                )
             };
 
         let run = create_text_run(self.font.clone(), text_color, display_text.len());
@@ -697,32 +692,18 @@ impl Element for WrappedLineElement {
             self.selected_range.start < line_end && self.selected_range.end > line_start;
 
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
-            // Compute adjacent line selection bounds for corner radius
-            let prev_line_bounds = self.prev_visual_line_offsets.and_then(|(start, end)| {
-                shape_and_compute_selection_bounds(
+            let (prev_line_bounds, next_line_bounds) =
+                crate::utils::compute_adjacent_line_selection_bounds(
                     &value,
-                    start,
-                    end,
+                    self.prev_visual_line_offsets,
+                    self.next_visual_line_offsets,
                     &self.selected_range,
+                    self.selection_rounded,
                     &self.font,
                     self.font_size,
                     self.text_color,
                     window,
-                )
-            });
-
-            let next_line_bounds = self.next_visual_line_offsets.and_then(|(start, end)| {
-                shape_and_compute_selection_bounds(
-                    &value,
-                    start,
-                    end,
-                    &self.selected_range,
-                    &self.font,
-                    self.font_size,
-                    self.text_color,
-                    window,
-                )
-            });
+                );
 
             let selection_shape = compute_selection_shape(
                 &line,
@@ -735,11 +716,16 @@ impl Element for WrappedLineElement {
                 self.text_color,
                 self.highlight_text_color,
                 Pixels::ZERO,
+                true, // wrapped mode
+                self.selection_precise,
+                None,
                 window,
                 self.selection_rounded,
                 self.selection_rounded_smoothing,
                 prev_line_bounds,
+                self.prev_visual_line_offsets.map(|(_, end)| end),
                 next_line_bounds,
+                self.next_visual_line_offsets.map(|(_, end)| end),
                 self.debug_interior_corners,
             );
 
@@ -829,7 +815,7 @@ impl IntoElement for UniformListInputElement {
 
 impl Element for UniformListInputElement {
     type RequestLayoutState = ();
-    type PrepaintState = ();
+    type PrepaintState = Hitbox;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -900,6 +886,8 @@ impl Element for UniformListInputElement {
         }
 
         self.child.prepaint(window, cx);
+
+        window.insert_hitbox(bounds, HitboxBehavior::Normal)
     }
 
     fn paint(
@@ -908,7 +896,7 @@ impl Element for UniformListInputElement {
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
-        _prepaint: &mut Self::PrepaintState,
+        prepaint: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
@@ -934,6 +922,10 @@ impl Element for UniformListInputElement {
                 }
             });
         });
+
+        if self.input.read(cx).is_selecting {
+            window.set_cursor_style(CursorStyle::IBeam, prepaint);
+        }
 
         self.input.update(cx, |input, _cx| {
             input.visible_lines_info.clear();
@@ -970,8 +962,9 @@ pub(crate) struct WrappedTextInputElement {
     pub placeholder: SharedString,
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
+    pub selection_precise: bool,
     pub debug_interior_corners: bool,
-    pub line_clamp: usize,
+    pub multiline_clamp: Option<usize>,
     pub scale_factor: f32,
     pub style: Style,
     /// Created during prepaint, painted during paint.
@@ -980,6 +973,7 @@ pub(crate) struct WrappedTextInputElement {
 
 pub(crate) struct WrappedTextInputPrepaintState {
     child_prepaints: Vec<WrappedLinePrepaintState>,
+    container_hitbox: Hitbox,
 }
 
 impl IntoElement for WrappedTextInputElement {
@@ -1011,7 +1005,7 @@ impl Element for WrappedTextInputElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let state = self.input.clone();
         let line_height = self.line_height;
-        let line_clamp = self.line_clamp;
+        let multiline_clamp = self.multiline_clamp;
         let scale_factor = self.scale_factor;
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -1029,7 +1023,7 @@ impl Element for WrappedTextInputElement {
                 let Some(width) = width else {
                     // No definite width available - use existing visual lines as fallback
                     let count = state.read(cx).precomputed_visual_lines.len().max(1);
-                    let visible = line_clamp.min(count).max(1);
+                    let visible = multiline_clamp.map_or(1, |c| c.min(count)).max(1);
                     let height = multiline_height(line_height, visible, scale_factor);
                     return size(Pixels::ZERO, height);
                 };
@@ -1066,7 +1060,9 @@ impl Element for WrappedTextInputElement {
                     }
                 });
 
-                let visible_lines = line_clamp.min(visual_line_count).max(1);
+                let visible_lines = multiline_clamp
+                    .map_or(1, |c| c.min(visual_line_count))
+                    .max(1);
                 let height = multiline_height(line_height, visible_lines, scale_factor);
 
                 // If Taffy gave us a known width (user set explicit w()), use it.
@@ -1132,6 +1128,7 @@ impl Element for WrappedTextInputElement {
                 selection_rounded_smoothing: self.selection_rounded_smoothing,
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
+                selection_precise: self.selection_precise,
                 debug_interior_corners: self.debug_interior_corners,
             });
         }
@@ -1154,7 +1151,11 @@ impl Element for WrappedTextInputElement {
             child_prepaints.push(prepaint_state);
         }
 
-        WrappedTextInputPrepaintState { child_prepaints }
+        let container_hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        WrappedTextInputPrepaintState {
+            child_prepaints,
+            container_hitbox,
+        }
     }
 
     fn paint(
@@ -1192,6 +1193,10 @@ impl Element for WrappedTextInputElement {
             });
         });
 
+        if self.input.read(cx).is_selecting {
+            window.set_cursor_style(CursorStyle::IBeam, &prepaint.container_hitbox);
+        }
+
         let vertical_scroll_offset = self.input.read(cx).vertical_scroll_offset;
 
         self.input.update(cx, |input, _cx| {
@@ -1199,7 +1204,10 @@ impl Element for WrappedTextInputElement {
         });
 
         // Paint children with content mask for clipping
-        let visible_lines = self.line_clamp.min(self.children.len()).max(1);
+        let visible_lines = self
+            .multiline_clamp
+            .map_or(1, |c| c.min(self.children.len()))
+            .max(1);
         let clip_bounds = Bounds {
             origin: bounds.origin,
             size: gpui::Size {

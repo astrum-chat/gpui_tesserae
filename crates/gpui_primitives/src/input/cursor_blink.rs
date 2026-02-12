@@ -10,8 +10,8 @@ pub struct CursorBlink {
     epoch: usize,
 }
 
+#[allow(missing_docs)]
 impl CursorBlink {
-    /// Creates a new cursor blink state with the cursor initially visible.
     pub fn new() -> Self {
         Self {
             visible: true,
@@ -19,7 +19,6 @@ impl CursorBlink {
         }
     }
 
-    /// Returns whether the cursor should currently be visible.
     pub fn visible(&self) -> bool {
         self.visible
     }

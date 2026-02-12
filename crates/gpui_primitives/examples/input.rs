@@ -96,7 +96,7 @@ impl ExampleApp {
             "Line Clamped (3 lines)",
             "Shows max 3 lines, scrolls after",
             styled_input("clamped", self.clamped_input.clone())
-                .line_clamp(3)
+                .multiline_clamp(3)
                 .placeholder("Limited to 3 visible lines..."),
         )
     }
@@ -107,7 +107,7 @@ impl ExampleApp {
             "Text wraps at container width",
             styled_input("wrapped", self.wrapped_input.clone())
                 .multiline()
-                .word_wrap(true)
+                .multiline_wrapped()
                 .placeholder("Long text will wrap to the next line...")
                 .min_h(px(100.)),
         )
@@ -119,7 +119,7 @@ impl ExampleApp {
             "Enter does nothing, Shift+Enter for newline",
             styled_input("chat", self.chat_input.clone())
                 .multiline()
-                .word_wrap(true)
+                .multiline_wrapped()
                 .placeholder("Type a message... (Shift+Enter for newline)")
                 .secondary_newline()
                 .min_h(px(80.)),
