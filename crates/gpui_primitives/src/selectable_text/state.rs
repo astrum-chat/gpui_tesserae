@@ -9,9 +9,8 @@ use gpui::{
 
 use crate::utils::{
     TextNavigation, WIDTH_WRAP_BASE_MARGIN, apply_selection_change, auto_scroll_horizontal,
-    auto_scroll_vertical_interval, clamp_vertical_scroll, compute_max_visual_line_width,
-    ensure_cursor_visible_in_scroll, ensure_cursor_visible_wrapped, index_for_multiline_position,
-    shape_and_build_visual_lines,
+    auto_scroll_vertical_interval, clamp_vertical_scroll, ensure_cursor_visible_in_scroll,
+    ensure_cursor_visible_wrapped, index_for_multiline_position, shape_and_build_visual_lines,
 };
 
 pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
@@ -79,7 +78,6 @@ pub struct SelectableTextState {
     pub(crate) last_bounds: Option<Bounds<Pixels>>,
     pub is_select_all: bool,
     pub(crate) measured_max_line_width: Option<Pixels>,
-    pub(crate) max_wrapped_line_width: Option<Pixels>,
     pub(crate) is_constrained: bool,
     was_focused: bool,
     pub(crate) last_font: Option<Font>,
@@ -119,7 +117,6 @@ impl SelectableTextState {
             last_bounds: None,
             is_select_all: false,
             measured_max_line_width: None,
-            max_wrapped_line_width: None,
             is_constrained: false,
             was_focused: false,
             last_font: None,
@@ -165,7 +162,6 @@ impl SelectableTextState {
         self.precomputed_wrapped_lines.clear();
         self.needs_wrap_recompute = true;
         self.measured_max_line_width = None;
-        self.max_wrapped_line_width = None;
         self.precomputed_at_width = None;
         self.horizontal_scroll_offset = Pixels::ZERO;
         self.last_text_width = Pixels::ZERO;
@@ -217,12 +213,6 @@ impl SelectableTextState {
             .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
         self.measured_max_line_width = Some(max_line_width);
 
-        self.max_wrapped_line_width = Some(compute_max_visual_line_width(
-            &visual_lines,
-            &wrapped_lines,
-            &text,
-        ));
-
         self.precomputed_visual_lines = visual_lines;
         self.precomputed_wrapped_lines = wrapped_lines;
 
@@ -256,12 +246,6 @@ impl SelectableTextState {
             .map(|line| line.unwrapped_layout.width)
             .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
         self.measured_max_line_width = Some(max_line_width);
-
-        self.max_wrapped_line_width = Some(compute_max_visual_line_width(
-            &visual_lines,
-            &wrapped_lines,
-            &text,
-        ));
 
         self.precomputed_at_width = Some(wrap_width);
         self.precomputed_visual_lines = visual_lines;

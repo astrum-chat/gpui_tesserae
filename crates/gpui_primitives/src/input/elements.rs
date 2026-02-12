@@ -447,21 +447,12 @@ impl Element for LineElement {
 
         let content_width = Some(self.input.read(cx).last_text_width);
 
-        // For select-all, bump the range end so selected_range.end > line_end
-        // triggers the extend-to-edge logic in compute_selection_shape.
-        let is_select_all = self.input.read(cx).is_select_all;
-        let shape_range = if is_select_all {
-            self.selected_range.start..self.selected_range.end + 1
-        } else {
-            self.selected_range.clone()
-        };
-
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
                 &full_value,
                 self.prev_line_offsets,
                 self.next_line_offsets,
-                &shape_range,
+                &self.selected_range,
                 self.selection_rounded,
                 &self.font,
                 self.font_size,
@@ -472,7 +463,7 @@ impl Element for LineElement {
             let selection_shape = compute_selection_shape(
                 &line,
                 bounds,
-                &shape_range,
+                &self.selected_range,
                 self.line_start_offset,
                 self.line_end_offset,
                 &self.font,
@@ -697,21 +688,12 @@ impl Element for WrappedLineElement {
         let selection_intersects =
             self.selected_range.start < line_end && self.selected_range.end > line_start;
 
-        // For select-all, bump the range end so selected_range.end > line_end
-        // triggers the extend-to-edge logic in compute_selection_shape.
-        let is_select_all = self.input.read(cx).is_select_all;
-        let shape_range = if is_select_all {
-            self.selected_range.start..self.selected_range.end + 1
-        } else {
-            self.selected_range.clone()
-        };
-
         let (selection, cursor) = if !self.selected_range.is_empty() && selection_intersects {
             let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
                 &value,
                 self.prev_visual_line_offsets,
                 self.next_visual_line_offsets,
-                &shape_range,
+                &self.selected_range,
                 self.selection_rounded,
                 &self.font,
                 self.font_size,
@@ -722,7 +704,7 @@ impl Element for WrappedLineElement {
             let selection_shape = compute_selection_shape(
                 &line,
                 bounds,
-                &shape_range,
+                &self.selected_range,
                 line_start,
                 line_end,
                 &self.font,

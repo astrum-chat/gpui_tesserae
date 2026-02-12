@@ -462,41 +462,6 @@ pub fn compute_line_offsets(text: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
-/// Computes the maximum visual line width across all wrapped visual lines.
-/// Each visual line's width is measured using x_for_index on the unwrapped layout,
-/// converting from the visual line's byte offsets to local offsets within its logical line.
-pub fn compute_max_visual_line_width(
-    visual_lines: &[VisualLineInfo],
-    wrapped_lines: &[WrappedLine],
-    text: &str,
-) -> Pixels {
-    let line_starts: Vec<usize> = {
-        let mut starts = vec![0usize];
-        for (i, b) in text.as_bytes().iter().enumerate() {
-            if *b == b'\n' {
-                starts.push(i + 1);
-            }
-        }
-        starts
-    };
-
-    let mut max_width = Pixels::ZERO;
-    for vl in visual_lines {
-        let line_start = line_starts.get(vl.wrapped_line_index).copied().unwrap_or(0);
-        let local_start = vl.start_offset.saturating_sub(line_start);
-        let local_end = vl.end_offset.saturating_sub(line_start);
-        if let Some(wl) = wrapped_lines.get(vl.wrapped_line_index) {
-            let start_x = wl.unwrapped_layout.x_for_index(local_start);
-            let end_x = wl.unwrapped_layout.x_for_index(local_end);
-            let w = end_x - start_x;
-            if w > max_width {
-                max_width = w;
-            }
-        }
-    }
-    max_width
-}
-
 /// Determines if trailing whitespace should be shown in selection highlighting.
 pub fn should_show_trailing_whitespace(
     selected_range: &Range<usize>,

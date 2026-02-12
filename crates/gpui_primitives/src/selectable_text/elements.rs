@@ -12,8 +12,8 @@ use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
     SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_adjacent_line_selection_bounds,
-    compute_max_visual_line_width, compute_selection_shape, create_text_run, multiline_height,
-    request_line_layout, shape_and_build_visual_lines,
+    compute_selection_shape, create_text_run, multiline_height, request_line_layout,
+    shape_and_build_visual_lines,
 };
 
 /// Paints alternating colored rectangles for each character's measured bounds.
@@ -167,19 +167,11 @@ impl Element for LineElement {
         let state = self.state.read(cx);
         let scroll_offset = state.horizontal_scroll_offset;
         let content_width = state.measured_max_line_width;
-        // For select-all/triple-click, bump the range end so selected_range.end > line_end
-        // triggers the extend-to-edge logic in compute_selection_shape.
-        let shape_range = if state.is_select_all {
-            self.selected_range.start..self.selected_range.end + 1
-        } else {
-            self.selected_range.clone()
-        };
-
         let (prev_line_bounds, next_line_bounds) = compute_adjacent_line_selection_bounds(
             &full_value,
             self.prev_line_offsets,
             self.next_line_offsets,
-            &shape_range,
+            &self.selected_range,
             self.selection_rounded,
             &self.font,
             self.font_size,
@@ -190,7 +182,7 @@ impl Element for LineElement {
         let selection = compute_selection_shape(
             &line,
             bounds,
-            &shape_range,
+            &self.selected_range,
             self.line_start_offset,
             self.line_end_offset,
             &self.font,
@@ -341,13 +333,6 @@ impl Element for WrappedLineElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let state = self.state.read(cx);
-        // For select-all/triple-click, bump the range end so selected_range.end > line_end
-        // triggers the extend-to-edge logic in compute_selection_shape.
-        let shape_range = if state.is_select_all {
-            self.selected_range.start..self.selected_range.end + 1
-        } else {
-            self.selected_range.clone()
-        };
 
         let visual_info = state
             .precomputed_visual_lines
@@ -375,7 +360,7 @@ impl Element for WrappedLineElement {
             &value,
             self.prev_visual_line_offsets,
             self.next_visual_line_offsets,
-            &shape_range,
+            &self.selected_range,
             self.selection_rounded,
             &self.font,
             self.font_size,
@@ -386,7 +371,7 @@ impl Element for WrappedLineElement {
         let selection = compute_selection_shape(
             &line,
             bounds,
-            &shape_range,
+            &self.selected_range,
             info.start_offset,
             info.end_offset,
             &self.font,
@@ -642,12 +627,8 @@ impl Element for WrappedTextElement {
                     .map(|line| line.unwrapped_layout.width)
                     .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
 
-                let max_wrapped_width =
-                    compute_max_visual_line_width(&visual_lines, &wrapped_lines, &text);
-
                 state.update(cx, |state, _cx| {
                     state.measured_max_line_width = Some(max_line_width);
-                    state.max_wrapped_line_width = Some(max_wrapped_width);
                     state.precomputed_at_width = Some(wrap_width);
                     state.precomputed_visual_lines = visual_lines;
                     state.precomputed_wrapped_lines = wrapped_lines;
@@ -697,18 +678,6 @@ impl Element for WrappedTextElement {
         let actual_line_count = self.state.read(cx).precomputed_visual_lines.len().max(1);
         let visual_lines = self.state.read(cx).precomputed_visual_lines.clone();
 
-        // In auto-width mode with a single visual line (no wrapping), use
-        // max wrapped line width for selection edge so selection doesn't
-        // extend past the text to the full unwrapped container width.
-        let content_width_for_selection = {
-            let state = self.state.read(cx);
-            if state.using_auto_width && actual_line_count == 1 {
-                state.max_wrapped_line_width
-            } else {
-                None
-            }
-        };
-
         self.children.clear();
         self.children.reserve(actual_line_count);
 
@@ -738,7 +707,7 @@ impl Element for WrappedTextElement {
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
                 selection_precise: self.selection_precise,
-                content_width: content_width_for_selection,
+                content_width: None,
                 debug_character_bounds: self.debug_character_bounds,
                 debug_interior_corners: self.debug_interior_corners,
             });
