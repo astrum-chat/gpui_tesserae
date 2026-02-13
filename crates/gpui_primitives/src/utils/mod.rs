@@ -1,6 +1,7 @@
 //! Shared utilities for primitive UI components.
 
 mod color;
+#[cfg(feature = "squircle")]
 mod concave_squircle;
 mod rendering;
 mod selection_shape;

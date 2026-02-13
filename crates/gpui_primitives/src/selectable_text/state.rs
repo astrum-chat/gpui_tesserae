@@ -579,7 +579,9 @@ impl SelectableTextState {
         self.is_select_all = false;
         let offset = self.index_for_multiline_position(position, line_height);
         self.select_to_without_scroll(offset, cx);
-        self.scroll_to_cursor_horizontal = true;
+        if !self.is_wrapped {
+            self.scroll_to_cursor_horizontal = true;
+        }
 
         if self.is_selecting {
             if let Some(bounds) = &self.last_bounds {
@@ -616,6 +618,13 @@ impl SelectableTextState {
             return Pixels::ZERO;
         }
 
+        // Don't scroll when content fits within the container.
+        let content_width = self.measured_max_line_width.unwrap_or(Pixels::ZERO);
+        if content_width <= container_width {
+            self.horizontal_scroll_offset = Pixels::ZERO;
+            return Pixels::ZERO;
+        }
+
         self.horizontal_scroll_offset = auto_scroll_horizontal(
             self.horizontal_scroll_offset,
             cursor_x,
@@ -642,7 +651,8 @@ impl SelectableTextState {
         if self.is_wrapped {
             let line_height = self.line_height.unwrap_or(gpui::px(16.0));
             self.vertical_scroll_offset = self.vertical_scroll_offset + line_height;
-            self.clamp_vertical_scroll();
+            // Don't clamp here — precomputed_visual_lines may be stale.
+            // The measure callback will clamp with the correct line count.
         } else {
             let line_count = self.line_count();
             if let Some(last) = self.visible_lines_info.last() {

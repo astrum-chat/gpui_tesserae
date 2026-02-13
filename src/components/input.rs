@@ -23,6 +23,7 @@ use crate::{
 
 struct InputStyles {
     gap: Option<DefiniteLength>,
+    margin: Edges<Option<Length>>,
     padding: Edges<Option<DefiniteLength>>,
     inner_padding: Edges<Option<DefiniteLength>>,
     corner_radii: Corners<Option<Pixels>>,
@@ -38,6 +39,7 @@ impl Default for InputStyles {
     fn default() -> Self {
         Self {
             gap: None,
+            margin: Edges::default(),
             padding: Edges::default(),
             inner_padding: Edges::default(),
             corner_radii: Corners::default(),
@@ -331,6 +333,37 @@ impl Input {
         self
     }
 
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        let margin = margin.into();
+        self.style.margin = Edges::all(Some(margin));
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.top = Some(margin.into());
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.bottom = Some(margin.into());
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.left = Some(margin.into());
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.right = Some(margin.into());
+        self
+    }
+
     /// Sets uniform outer padding for all sides.
     pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
         let padding = padding.into();
@@ -516,6 +549,10 @@ impl RenderOnce for Input {
             .id(self.id.clone())
             .w(self.style.width)
             .min_h_auto()
+            .when_some(self.style.margin.top, |this, v| this.mt(v))
+            .when_some(self.style.margin.bottom, |this, v| this.mb(v))
+            .when_some(self.style.margin.left, |this, v| this.ml(v))
+            .when_some(self.style.margin.right, |this, v| this.mr(v))
             .when_some(self.style.min_width, |this, v| this.min_w(v))
             .when_some(self.style.min_height, |this, v| this.min_h(v))
             .when_some(self.style.max_width, |this, v| this.max_w(v))

@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    App, ElementId, InteractiveElement, IntoElement, Length, MouseButton, ParentElement,
+    App, Edges, ElementId, InteractiveElement, IntoElement, Length, MouseButton, ParentElement,
     RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
     prelude::FluentBuilder, px, radians, relative,
 };
@@ -19,6 +19,7 @@ use crate::{
 };
 
 struct SelectStyles {
+    margin: Edges<Option<Length>>,
     width: Length,
     min_width: Option<Length>,
     min_height: Option<Length>,
@@ -31,6 +32,7 @@ struct SelectStyles {
 impl Default for SelectStyles {
     fn default() -> Self {
         Self {
+            margin: Edges::default(),
             width: Length::Auto,
             min_width: None,
             min_height: None,
@@ -179,6 +181,37 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> Select<V, I> {
         self
     }
 
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        let margin = margin.into();
+        self.style.margin = Edges::all(Some(margin));
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.top = Some(margin.into());
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.bottom = Some(margin.into());
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.left = Some(margin.into());
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.right = Some(margin.into());
+        self
+    }
+
     /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
@@ -286,6 +319,10 @@ impl<V: 'static, I: SelectItem<Value = V> + 'static> RenderOnce for Select<V, I>
             })
             .w(self.style.width)
             .h_auto()
+            .when_some(self.style.margin.top, |this, v| this.mt(v))
+            .when_some(self.style.margin.bottom, |this, v| this.mb(v))
+            .when_some(self.style.margin.left, |this, v| this.ml(v))
+            .when_some(self.style.margin.right, |this, v| this.mr(v))
             .when_some(self.style.min_width, |this, v| this.min_w(v))
             .when_some(self.style.min_height, |this, v| this.min_h(v))
             .when_some(self.style.max_width, |this, v| this.max_w(v))

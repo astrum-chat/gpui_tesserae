@@ -180,6 +180,7 @@ pub fn compute_selection_x_bounds(
 
 /// Computes a full selection shape for a line, combining x-bounds, corner radius, and shape building.
 /// Returns the main selection shape plus any interior (concave) corner patches.
+#[cfg_attr(not(feature = "debug"), allow(unused_variables))]
 pub fn compute_selection_shape(
     line: &ShapedLine,
     bounds: Bounds<Pixels>,
@@ -298,23 +299,39 @@ pub fn compute_selection_shape(
         clamped_prev,
         clamped_next,
         config.corner_radius,
-        config.corner_smoothing,
+        {
+            #[cfg(feature = "squircle")]
+            {
+                config.corner_smoothing
+            }
+            #[cfg(not(feature = "squircle"))]
+            {
+                None
+            }
+        },
         window.scale_factor(),
         bounds.left(),
         bounds.top(),
         bounds.bottom(),
         bounds.size.height,
         scroll_offset,
-        if debug_interior_corners {
-            // DEBUG: red interior corners for visibility
-            gpui::Hsla {
-                h: 0.0,
-                s: 1.0,
-                l: 0.5,
-                a: 1.0,
+        {
+            #[cfg(feature = "debug")]
+            if debug_interior_corners {
+                // DEBUG: red interior corners for visibility
+                gpui::Hsla {
+                    h: 0.0,
+                    s: 1.0,
+                    l: 0.5,
+                    a: 1.0,
+                }
+            } else {
+                highlight_color
             }
-        } else {
-            highlight_color
+            #[cfg(not(feature = "debug"))]
+            {
+                highlight_color
+            }
         },
     );
 

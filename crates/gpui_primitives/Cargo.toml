@@ -7,11 +7,15 @@ edition = "2024"
 gpui = { workspace = true }
 smallvec = { workspace = true }
 unicode-segmentation = { workspace = true }
-figma_squircle = "0.1"
-lyon = { version = "1.0.16", features = ["extra"] }
+
+# Squircle feature.
+figma_squircle = { version = "0.1", optional = true }
+lyon = { version = "1.0.16", features = ["extra"], optional = true }
 
 [features]
 default = []
+debug = []
+squircle = ["dep:figma_squircle", "dep:lyon"]
 test-support = ["gpui/test-support"]
 
 [dev-dependencies]

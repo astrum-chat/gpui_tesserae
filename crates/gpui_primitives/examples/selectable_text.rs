@@ -1,97 +1,146 @@
-use futures_timer::Delay;
 use gpui::{
-    App, AppContext as _, Application, Bounds, Context, Entity, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Window, WindowBounds, WindowOptions, div, px, rgb, size,
+    App, AppContext as _, Application, Bounds, Entity, Hsla, InteractiveElement, IntoElement,
+    Overflow, ParentElement, Render, Styled, Window, WindowBounds, WindowOptions, div,
+    prelude::FluentBuilder, px, rgb, size,
 };
 use gpui_primitives::selectable_text::{self, SelectableText, SelectableTextState};
-use std::time::Duration;
+
+const SELECTION_COLOR: Hsla = Hsla {
+    h: 0.72,
+    s: 0.8,
+    l: 0.65,
+    a: 0.3,
+};
 
 struct ExampleApp {
-    wrapped_state: Entity<SelectableTextState>,
-    text_index: usize,
+    basic: Entity<SelectableTextState>,
+    multiline: Entity<SelectableTextState>,
+    clamped: Entity<SelectableTextState>,
+    wrapped: Entity<SelectableTextState>,
+    styled: Entity<SelectableTextState>,
+    precise: Entity<SelectableTextState>,
+}
+
+fn label(text: &str) -> impl IntoElement {
+    div()
+        .text_color(rgb(0x6c7086))
+        .text_size(px(12.))
+        .child(text.to_string())
+}
+
+fn container() -> gpui::Div {
+    div()
+        .bg(rgb(0x313244))
+        .p(px(12.))
+        .rounded_md()
+        .w(px(400.))
+        .max_w_full()
+        .flex_shrink_0()
 }
 
 impl Render for ExampleApp {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().flex().bg(rgb(0x1e1e2e)).p_4().child(
+    fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().size_full().flex().bg(rgb(0x1e1e2e)).child(
             div()
+                .id("main")
+                .map(|mut this| {
+                    this.style().overflow.y = Some(Overflow::Scroll);
+                    this
+                })
                 .w_full()
                 .flex()
                 .flex_col()
-                .gap_4()
+                .p_4()
+                .gap_3()
+                .text_color(rgb(0xcdd6f4))
+                .text_size(px(14.))
+                .font_family("Geist")
+                // Title
                 .child(
                     div()
-                        .flex()
-                        .text_color(rgb(0xcdd6f4))
                         .text_size(px(18.))
-                        .child("Selectable Text w_auto Example (Streaming)"),
+                        .pb_2()
+                        .child("SelectableText Examples"),
                 )
+                // 1. Basic single-line
+                .child(label("Basic single-line"))
                 .child(
-                    div()
-                        .flex()
-                        .text_color(rgb(0x6c7086))
-                        .text_size(px(12.))
-                        .child("Wrapped mode (w_auto):"),
+                    container().child(
+                        SelectableText::new("basic", self.basic.clone())
+                            .selection_color(SELECTION_COLOR),
+                    ),
                 )
+                // 2. Multiline
+                .child(label("Multiline"))
                 .child(
-                    div()
-                        .id("bob")
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .items_end()
-                        .child(
-                            div().flex().flex_row().max_w_full().min_w_auto().child(
-                                div()
-                                    .id("nigel")
-                                    .max_w_full()
-                                    .min_w_auto()
-                                    .h_auto()
-                                    .flex()
-                                    .flex_row()
-                                    .bg(rgb(0x313244))
-                                    .p(px(15.))
-                                    .rounded_md()
-                                    .child(
-                                        SelectableText::new(
-                                            "wrapped-text",
-                                            self.wrapped_state.clone(),
-                                        )
-                                        .max_w_full()
-                                        .min_w_auto()
-                                        .w_auto()
-                                        .multiline_clamp(5)
-                                        .multiline_wrapped()
-                                        //.debug_wrapping(true)
-                                        .text_color(rgb(0xcdd6f4))
-                                        .text_size(px(16.))
-                                        .line_height(px(24.))
-                                        .font_family("Geist")
-                                        .selection_rounded(px(4.))
-                                        .selection_rounded_smoothing(0.6),
-                                    ),
-                            ),
-                        ),
+                    container().child(
+                        SelectableText::new("multiline", self.multiline.clone())
+                            .multiline()
+                            .selection_color(SELECTION_COLOR),
+                    ),
+                )
+                // 3. Multiline clamped (scroll after 3 lines)
+                .child(label("Multiline clamped (3 lines, scroll for more)"))
+                .child(
+                    container().child(
+                        SelectableText::new("clamped", self.clamped.clone())
+                            .multiline_clamp(3)
+                            .selection_color(SELECTION_COLOR),
+                    ),
+                )
+                // 4. Multiline wrapped
+                .child(label("Multiline wrapped (4 lines visible)"))
+                .child(
+                    container().child(
+                        SelectableText::new("wrapped", self.wrapped.clone())
+                            .multiline_clamp(4)
+                            .multiline_wrapped()
+                            .selection_color(SELECTION_COLOR),
+                    ),
+                )
+                // 5. Selection styling
+                .child(label("Custom selection styling (rounded)"))
+                .child(
+                    container().child(
+                        SelectableText::new("styled", self.styled.clone())
+                            .multiline()
+                            .multiline_wrapped()
+                            .selection_color(SELECTION_COLOR)
+                            .selection_rounded(px(6.)),
+                    ),
+                )
+                // 6. Precise selection
+                .child(label(
+                    "Precise selection (highlight stops at last character of each line)",
+                ))
+                .child(
+                    container().child(
+                        SelectableText::new("precise", self.precise.clone())
+                            .multiline()
+                            .multiline_wrapped()
+                            .selection_color(SELECTION_COLOR)
+                            .selection_rounded(px(4.))
+                            .selection_precise(),
+                    ),
                 ),
         )
     }
 }
 
-const WRAPPED_TEXT: &str = r#"Here's an essay about cabbages:
-
-Cabbages: A Humble yet Remarkable Vegetable
-
-Cabbages are a versatile and nutritious vegetable that have played a significant role in human nutrition and agriculture for thousands of years. From ancient civilizations to modern kitchens, this leafy green has remained a staple food across cultures worldwide.
-
-The origins of cabbage can be traced back to Europe and the Mediterranean region, where wild varieties first grew along coastal cliffs. Ancient Greeks and Romans cultivated cabbage not only for food but also for its perceived medicinal properties.
-
-Nutritionally, cabbages are exceptional. They are low in calories while being incredibly rich in essential nutrients including vitamin C, vitamin K, and dietary fiber. Red cabbage contains anthocyanins, powerful antioxidants that give it its distinctive purple color."#;
+fn make_state(cx: &mut App, text: impl Into<gpui::SharedString>) -> Entity<SelectableTextState> {
+    let text = text.into();
+    cx.new(|cx| {
+        let mut s = SelectableTextState::new(cx);
+        s.text(text);
+        s
+    })
+}
 
 fn main() {
     Application::new().run(|cx: &mut App| {
         selectable_text::init(cx);
 
-        let bounds = Bounds::centered(None, size(px(800.), px(400.)), cx);
+        let bounds = Bounds::centered(None, size(px(600.), px(700.)), cx);
 
         cx.open_window(
             WindowOptions {
@@ -99,43 +148,20 @@ fn main() {
                 ..Default::default()
             },
             |_window, cx| {
-                let wrapped_state = cx.new(|cx| {
-                    let mut state = SelectableTextState::new(cx);
-                    state.text(""); // Start with empty text
-                    state
-                });
+                let basic = make_state(cx, "Hello, world! Try selecting this text.");
+                let multiline = make_state(cx, "Line one\nLine two\nLine three\nLine four");
+                let clamped = make_state(cx, "First line\nSecond line\nThird line\nFourth line\nFifth line\nSixth line");
+                let wrapped = make_state(cx, "Cabbages are a versatile and nutritious vegetable that have played a significant role in human nutrition and agriculture for thousands of years. From ancient civilizations to modern kitchens, this leafy green has remained a staple food across cultures worldwide.");
+                let styled = make_state(cx, "Select this text to see rounded selection highlights.\n\nThe corners use a smooth curve for a polished look.");
+                let precise = make_state(cx, "Select across lines here. The highlight stops at the last selected character.\n\nIt does not extend to the container edge like the default behavior.");
 
-                cx.new(|cx| {
-                    let app = ExampleApp {
-                        wrapped_state: wrapped_state.clone(),
-                        text_index: 0,
-                    };
-
-                    // Stream text in chunks of 4-8 characters with delay between chunks
-                    cx.spawn(async move |this, cx| {
-                        let chars: Vec<char> = WRAPPED_TEXT.chars().collect();
-                        let mut i = 0;
-                        while i < chars.len() {
-                            // Add 4-8 characters at a time
-                            let chunk_size = 4 + (i % 5); // varies between 4-8
-                            i = (i + chunk_size).min(chars.len());
-                            let text: String = chars[..i].iter().collect();
-                            let _ = cx.update(|cx| {
-                                wrapped_state.update(cx, |state, _cx| {
-                                    state.text(&text);
-                                });
-                                let _ = this.update(cx, |app: &mut ExampleApp, cx| {
-                                    app.text_index = i;
-                                    cx.notify();
-                                });
-                            });
-                            // Delay between chunks
-                            Delay::new(Duration::from_millis(100)).await;
-                        }
-                    })
-                    .detach();
-
-                    app
+                cx.new(|_cx| ExampleApp {
+                    basic,
+                    multiline,
+                    clamped,
+                    wrapped,
+                    styled,
+                    precise,
                 })
             },
         )

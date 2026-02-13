@@ -3,8 +3,7 @@ use std::ops::Range;
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, CursorStyle, DispatchPhase, Element, ElementId,
     Entity, Font, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
-    LayoutId, MouseMoveEvent, PaintQuad, Pixels, ShapedLine, SharedString, Style, Window, point,
-    px, size,
+    LayoutId, MouseMoveEvent, Pixels, ShapedLine, SharedString, Style, Window, point, px, size,
 };
 
 use crate::extensions::WindowExt;
@@ -17,6 +16,7 @@ use crate::utils::{
 };
 
 /// Paints alternating colored rectangles for each character's measured bounds.
+#[cfg(feature = "debug")]
 fn paint_character_bounds(
     line: &ShapedLine,
     bounds: Bounds<Pixels>,
@@ -53,7 +53,7 @@ fn paint_character_bounds(
             size(x_end - x_start, bounds.size.height),
         );
 
-        window.paint_quad(PaintQuad {
+        window.paint_quad(gpui::PaintQuad {
             bounds: char_bounds,
             corner_radii: gpui::Corners::default(),
             background: colors[i % 2].into(),
@@ -82,7 +82,9 @@ pub(crate) struct LineElement {
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
     pub selection_precise: bool,
+    #[cfg(feature = "debug")]
     pub debug_character_bounds: bool,
+    #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
 }
 
@@ -144,7 +146,7 @@ impl Element for LineElement {
             .shape_line(display_text, self.font_size, &[run], None);
 
         if self.measured_width.is_none() {
-            let line_width = window.round(line.width);
+            let line_width = window.ceil(line.width);
             self.state.update(cx, |state, cx| {
                 let current_max = state.measured_max_line_width.unwrap_or(Pixels::ZERO);
                 if line_width > current_max {
@@ -200,7 +202,16 @@ impl Element for LineElement {
             self.prev_line_offsets.map(|(_, end)| end),
             next_line_bounds,
             self.next_line_offsets.map(|(_, end)| end),
-            self.debug_interior_corners,
+            {
+                #[cfg(feature = "debug")]
+                {
+                    self.debug_interior_corners
+                }
+                #[cfg(not(feature = "debug"))]
+                {
+                    false
+                }
+            },
         );
 
         let text_hitbox = if line.width > Pixels::ZERO {
@@ -241,15 +252,14 @@ impl Element for LineElement {
             });
         });
 
-        let debug_chars = self.debug_character_bounds;
-        let char_count = self.line_end_offset - self.line_start_offset;
-
         if let Some(selection) = prepaint.selection.take() {
             selection.paint(window);
         }
 
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            if debug_chars {
+            #[cfg(feature = "debug")]
+            if self.debug_character_bounds {
+                let char_count = self.line_end_offset - self.line_start_offset;
                 paint_character_bounds(&line, bounds, char_count, window);
             }
 
@@ -283,7 +293,9 @@ pub(crate) struct WrappedLineElement {
     pub next_visual_line_offsets: Option<(usize, usize)>,
     pub selection_precise: bool,
     pub content_width: Option<Pixels>,
+    #[cfg(feature = "debug")]
     pub debug_character_bounds: bool,
+    #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
 }
 
@@ -389,7 +401,16 @@ impl Element for WrappedLineElement {
             self.prev_visual_line_offsets.map(|(_, end)| end),
             next_line_bounds,
             self.next_visual_line_offsets.map(|(_, end)| end),
-            self.debug_interior_corners,
+            {
+                #[cfg(feature = "debug")]
+                {
+                    self.debug_interior_corners
+                }
+                #[cfg(not(feature = "debug"))]
+                {
+                    false
+                }
+            },
         );
 
         let text_hitbox = if line.width > Pixels::ZERO {
@@ -427,6 +448,7 @@ impl Element for WrappedLineElement {
             window.set_cursor_style(CursorStyle::IBeam, hitbox);
         }
 
+        #[cfg(feature = "debug")]
         if self.debug_character_bounds {
             let char_count = self
                 .state
@@ -483,8 +505,11 @@ pub(crate) struct WrappedTextElement {
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
     pub selection_precise: bool,
+    #[cfg(feature = "debug")]
     pub debug_character_bounds: bool,
+    #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
+    #[cfg(feature = "debug")]
     pub debug_wrapping: bool,
     pub multiline_clamp: Option<usize>,
     pub scale_factor: f32,
@@ -499,6 +524,7 @@ pub(crate) struct WrappedTextPrepaintState {
 }
 
 impl WrappedTextElement {
+    #[cfg(feature = "debug")]
     fn paint_debug_overlays(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         if !self.debug_wrapping {
             return;
@@ -627,21 +653,27 @@ impl Element for WrappedTextElement {
                     .map(|line| line.unwrapped_layout.width)
                     .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
 
+                // Taffy may call this callback twice per frame at different
+                // widths (once unconstrained, once at the actual container
+                // width). Always store visual lines — the last call wins and
+                // will have the authoritative width. Do NOT clamp scroll here;
+                // the wider call would clamp against fewer lines and destroy
+                // the user's scroll position before the narrower call runs.
+                // Scroll clamping is deferred to prepaint, which runs after
+                // all measure callbacks have completed.
+
+                // DEBUG: only for "styled" element
+                if text.starts_with("Select this text") {
+                    eprintln!("DEBUG measure: width={width:?} wrap={wrap_width:?} lines={visual_line_count} known_w={:?} avail={:?}",
+                        known_dimensions.width, available_space.width);
+                }
+
                 state.update(cx, |state, _cx| {
                     state.measured_max_line_width = Some(max_line_width);
                     state.precomputed_at_width = Some(wrap_width);
                     state.precomputed_visual_lines = visual_lines;
                     state.precomputed_wrapped_lines = wrapped_lines;
                     state.cached_wrap_width = Some(width);
-
-                    // Clamp vertical scroll after updating visual lines — the number
-                    // of lines may have changed, making the old offset out of range.
-                    state.clamp_vertical_scroll();
-
-                    if state.scroll_to_cursor_on_next_render {
-                        state.scroll_to_cursor_on_next_render = false;
-                        state.ensure_cursor_visible();
-                    }
                 });
 
                 let visible_lines = multiline_clamp
@@ -676,6 +708,17 @@ impl Element for WrappedTextElement {
         // Wrapping was already computed in the measure callback with the correct width.
         // Create children with the exact count needed.
         let actual_line_count = self.state.read(cx).precomputed_visual_lines.len().max(1);
+        // DEBUG: only for "styled" element
+        {
+            let text = self.state.read(cx).get_text();
+            if text.starts_with("Select this text") {
+                let expected_h = self.line_height * actual_line_count as f32;
+                eprintln!(
+                    "DEBUG prepaint: bounds_h={:?} expected_h={:?} lines={actual_line_count} clamp={:?}",
+                    bounds.size.height, expected_h, self.multiline_clamp
+                );
+            }
+        }
         let visual_lines = self.state.read(cx).precomputed_visual_lines.clone();
 
         self.children.clear();
@@ -708,10 +751,24 @@ impl Element for WrappedTextElement {
                 next_visual_line_offsets,
                 selection_precise: self.selection_precise,
                 content_width: None,
+                #[cfg(feature = "debug")]
                 debug_character_bounds: self.debug_character_bounds,
+                #[cfg(feature = "debug")]
                 debug_interior_corners: self.debug_interior_corners,
             });
         }
+
+        // Clamp scroll and handle scroll-to-cursor here in prepaint,
+        // AFTER all measure callbacks have completed. The measure callback
+        // may run twice at different widths (dual-call problem); only now
+        // do we have the final authoritative visual line count.
+        self.state.update(cx, |state, _cx| {
+            state.clamp_vertical_scroll();
+            if state.scroll_to_cursor_on_next_render {
+                state.scroll_to_cursor_on_next_render = false;
+                state.ensure_cursor_visible();
+            }
+        });
 
         let vertical_scroll_offset = self.state.read(cx).vertical_scroll_offset;
         let mut child_prepaints = Vec::with_capacity(actual_line_count);
@@ -821,6 +878,7 @@ impl Element for WrappedTextElement {
             },
         );
 
+        #[cfg(feature = "debug")]
         self.paint_debug_overlays(bounds, window, cx);
 
         self.state.update(cx, |state, _cx| {
@@ -832,6 +890,7 @@ impl Element for WrappedTextElement {
 pub(crate) struct UniformListElement {
     pub state: Entity<SelectableTextState>,
     pub child: AnyElement,
+    #[cfg(feature = "debug")]
     pub debug_wrapping: bool,
     pub font: Font,
     pub font_size: Pixels,
@@ -839,6 +898,7 @@ pub(crate) struct UniformListElement {
 }
 
 impl UniformListElement {
+    #[cfg(feature = "debug")]
     fn paint_debug_overlays(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         if !self.debug_wrapping {
             return;
@@ -1062,6 +1122,7 @@ impl Element for UniformListElement {
         });
 
         self.child.paint(window, cx);
+        #[cfg(feature = "debug")]
         self.paint_debug_overlays(bounds, window, cx);
 
         self.state.update(cx, |state, _cx| {

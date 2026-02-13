@@ -168,6 +168,36 @@ impl Toggle {
         self
     }
 
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        self.base = self.base.m(margin);
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.base = self.base.mt(margin);
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.base = self.base.mb(margin);
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.base = self.base.ml(margin);
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.base = self.base.mr(margin);
+        self
+    }
+
     /// Sets uniform padding for all sides.
     pub fn p(mut self, padding: impl Into<DefiniteLength>) -> Self {
         self.base = self.base.p(padding);

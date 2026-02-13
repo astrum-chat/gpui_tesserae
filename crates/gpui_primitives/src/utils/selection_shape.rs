@@ -3,12 +3,15 @@
 //! This module provides types and functions for rendering text selection highlights,
 //! supporting both simple rectangular selections and smooth squircle-style corners.
 
+#[cfg(feature = "squircle")]
 use figma_squircle::{FigmaSquircleParams, get_svg_path};
 use gpui::{
     BorderStyle, Bounds, Corners, Edges, Hsla, PaintQuad, Path, PathBuilder, Pixels, Window, fill,
     point, px,
 };
+#[cfg(feature = "squircle")]
 use lyon::extra::parser::{ParserOptions, PathParser, Source};
+#[cfg(feature = "squircle")]
 use lyon::path::Path as LyonPath;
 
 /// Configuration for selection shape rendering.
@@ -18,6 +21,7 @@ pub struct SelectionShapeConfig {
     pub corner_radius: Pixels,
     /// Corner smoothing factor (0.0 = standard rounded rect, 1.0 = full squircle).
     /// When Some and > 0, uses squircle rendering instead of PaintQuad.
+    #[cfg(feature = "squircle")]
     pub corner_smoothing: Option<f32>,
 }
 
@@ -31,11 +35,13 @@ impl SelectionShapeConfig {
     pub fn rounded(radius: Pixels) -> Self {
         Self {
             corner_radius: radius,
+            #[cfg(feature = "squircle")]
             corner_smoothing: None,
         }
     }
 
     /// Creates a squircle selection with smoothing.
+    #[cfg(feature = "squircle")]
     pub fn squircle(radius: Pixels, smoothing: f32) -> Self {
         Self {
             corner_radius: radius,
@@ -45,7 +51,14 @@ impl SelectionShapeConfig {
 
     /// Returns true if this config uses squircle rendering.
     pub fn uses_squircle(&self) -> bool {
-        self.corner_smoothing.map_or(false, |s| s > 0.0) && self.corner_radius > Pixels::ZERO
+        #[cfg(feature = "squircle")]
+        {
+            self.corner_smoothing.map_or(false, |s| s > 0.0) && self.corner_radius > Pixels::ZERO
+        }
+        #[cfg(not(feature = "squircle"))]
+        {
+            false
+        }
     }
 }
 
@@ -208,6 +221,7 @@ pub fn selection_config_from_options(
     smoothing: Option<f32>,
 ) -> SelectionShapeConfig {
     match (radius, smoothing) {
+        #[cfg(feature = "squircle")]
         (Some(r), Some(s)) if r > Pixels::ZERO && s > 0.0 => SelectionShapeConfig::squircle(r, s),
         (Some(r), _) if r > Pixels::ZERO => SelectionShapeConfig::rounded(r),
         _ => SelectionShapeConfig::rectangle(),
@@ -276,25 +290,35 @@ pub(crate) fn build_selection_primitive(
         }
     }
 
-    let smoothing = config.corner_smoothing.unwrap_or(0.0);
-    let selection_bounds = Bounds::from_corners(
-        point(bounds.left() + start_x - scroll_offset, bounds.top()),
-        point(bounds.left() + end_x - scroll_offset, bounds.bottom()),
-    );
+    #[cfg(feature = "squircle")]
+    {
+        let smoothing = config.corner_smoothing.unwrap_or(0.0);
+        let selection_bounds = Bounds::from_corners(
+            point(bounds.left() + start_x - scroll_offset, bounds.top()),
+            point(bounds.left() + end_x - scroll_offset, bounds.bottom()),
+        );
 
-    match build_squircle_path(selection_bounds, corners, smoothing, highlight_color) {
-        Some(primitive) => primitive,
-        None => SelectionPrimitive::Quad(make_selection_quad_rounded(
-            bounds,
-            start_x,
-            end_x,
-            scroll_offset,
-            highlight_color,
-            corners,
-        )),
+        match build_squircle_path(selection_bounds, corners, smoothing, highlight_color) {
+            Some(primitive) => primitive,
+            None => SelectionPrimitive::Quad(make_selection_quad_rounded(
+                bounds,
+                start_x,
+                end_x,
+                scroll_offset,
+                highlight_color,
+                corners,
+            )),
+        }
+    }
+    // Unreachable without squircle feature since uses_squircle() returns false,
+    // but needed for exhaustiveness.
+    #[cfg(not(feature = "squircle"))]
+    {
+        unreachable!()
     }
 }
 
+#[cfg(feature = "squircle")]
 fn build_squircle_path(
     bounds: Bounds<Pixels>,
     corners: Corners<Pixels>,
@@ -367,10 +391,13 @@ fn build_concave_corner_path(
         return None;
     }
 
-    let smoothing = corner_smoothing.unwrap_or(0.0);
+    #[cfg(not(feature = "squircle"))]
+    let _ = corner_smoothing;
 
     // When smoothing > 0, use the concave squircle path for consistency with exterior corners.
-    if smoothing > 0.0 {
+    #[cfg(feature = "squircle")]
+    if corner_smoothing.is_some_and(|s| s > 0.0) {
+        let smoothing = corner_smoothing.unwrap();
         use crate::utils::concave_squircle::{self, ConcaveCorner};
         let corner = match position {
             ConcaveCornerPosition::TopRight => ConcaveCorner::TopRight,
@@ -383,7 +410,7 @@ fn build_concave_corner_path(
         return Some(SelectionPrimitive::Path { path, fill_color });
     }
 
-    // Hot path: simple circular bezier approximation (smoothing == 0).
+    // Circular bezier approximation (smoothing == 0).
     let kx = rx * KAPPA;
     let ky = ry * KAPPA;
     let mut builder = PathBuilder::fill();
@@ -467,8 +494,16 @@ pub(crate) fn compute_interior_corner_patches(
         return Vec::new();
     }
 
-    // Patch size = diameter (radius * 2), clamped to line_height - radius.
-    let patch_size = (radius * 2.0).min(line_height - radius).max(Pixels::ZERO);
+    // With corner smoothing, the squircle path needs a larger patch (diameter).
+    // Without smoothing, the circular bezier patch should match the exterior radius.
+    #[cfg(feature = "squircle")]
+    let patch_size = if corner_smoothing.is_some_and(|s| s > 0.0) {
+        (radius * 2.0).min(line_height - radius).max(Pixels::ZERO)
+    } else {
+        radius.min(line_height - radius).max(Pixels::ZERO)
+    };
+    #[cfg(not(feature = "squircle"))]
+    let patch_size = radius.min(line_height - radius).max(Pixels::ZERO);
     if patch_size <= Pixels::ZERO {
         return Vec::new();
     }
@@ -597,6 +632,7 @@ pub(crate) fn compute_interior_corner_patches(
     patches
 }
 
+#[cfg(feature = "squircle")]
 fn parse_svg_path(svg_path: &str) -> Option<LyonPath> {
     let mut builder = LyonPath::builder();
     PathParser::new()
@@ -609,6 +645,7 @@ fn parse_svg_path(svg_path: &str) -> Option<LyonPath> {
     Some(builder.build())
 }
 
+#[cfg(feature = "squircle")]
 fn lyon_to_gpui(lyon_path: LyonPath, origin_x: Pixels, origin_y: Pixels) -> Option<Path<Pixels>> {
     let mut builder = PathBuilder::fill();
 

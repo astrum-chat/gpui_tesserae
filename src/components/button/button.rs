@@ -26,6 +26,7 @@ use crate::{
 
 struct ButtonStyles {
     justify_content: JustifyContent,
+    margin: Edges<Option<Length>>,
     padding: Edges<Option<DefiniteLength>>,
     corner_radii: Corners<Option<Pixels>>,
     icon_rotate: Radians,
@@ -40,6 +41,7 @@ impl Default for ButtonStyles {
     fn default() -> Self {
         Self {
             justify_content: JustifyContent::Center,
+            margin: Edges::default(),
             padding: Edges::default(),
             corner_radii: Corners::default(),
             icon_rotate: Radians(0.),
@@ -226,6 +228,37 @@ impl Button {
     /// Sets the bottom-right corner radius.
     pub fn rounded_br(mut self, rounded: impl Into<Pixels>) -> Self {
         self.style.corner_radii.bottom_right = Some(rounded.into());
+        self
+    }
+
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        let margin = margin.into();
+        self.style.margin = Edges::all(Some(margin));
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.top = Some(margin.into());
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.bottom = Some(margin.into());
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.left = Some(margin.into());
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.style.margin.right = Some(margin.into());
         self
     }
 
@@ -497,6 +530,10 @@ impl RenderOnce for Button {
             })
             .w(self.style.width)
             .h_auto()
+            .when_some(self.style.margin.top, |this, v| this.mt(v))
+            .when_some(self.style.margin.bottom, |this, v| this.mb(v))
+            .when_some(self.style.margin.left, |this, v| this.ml(v))
+            .when_some(self.style.margin.right, |this, v| this.mr(v))
             .when_some(self.style.min_width, |this, v| this.min_w(v))
             .when_some(self.style.min_height, |this, v| this.min_h(v))
             .when_some(self.style.max_width, |this, v| this.max_w(v))

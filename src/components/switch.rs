@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    App, CursorStyle, ElementId, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, div, ease_out_quint,
-    prelude::FluentBuilder, px,
+    App, CursorStyle, Edges, ElementId, Entity, FocusHandle, InteractiveElement, IntoElement,
+    Length, ParentElement, RenderOnce, StatefulInteractiveElement, Styled, Window, div,
+    ease_out_quint, prelude::FluentBuilder, px,
 };
 use gpui_squircle::{SquircleStyled, squircle};
 use gpui_transitions::Lerp;
@@ -31,6 +31,7 @@ pub struct Switch {
     on_hover: Option<Box<dyn Fn(&bool, &mut gpui::Window, &mut gpui::App) + 'static>>,
     mouse_handlers: MouseHandlers<bool>,
     mouse_behavior: MouseBehavior,
+    margin: Edges<Option<Length>>,
 }
 
 impl Switch {
@@ -46,7 +47,39 @@ impl Switch {
             on_hover: None,
             mouse_handlers: MouseHandlers::new(),
             mouse_behavior: MouseBehavior::default(),
+            margin: Edges::default(),
         }
+    }
+
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        let margin = margin.into();
+        self.margin = Edges::all(Some(margin));
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.top = Some(margin.into());
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.bottom = Some(margin.into());
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.left = Some(margin.into());
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.right = Some(margin.into());
+        self
     }
 
     /// Sets the focus handle for keyboard navigation.
@@ -229,6 +262,10 @@ impl RenderOnce for Switch {
             .min_w(width)
             .h(height)
             .min_h(height)
+            .when_some(self.margin.top, |this, v| this.mt(v))
+            .when_some(self.margin.bottom, |this, v| this.mb(v))
+            .when_some(self.margin.left, |this, v| this.ml(v))
+            .when_some(self.margin.right, |this, v| this.mr(v))
             .opacity(*disabled_transition.evaluate(window, cx))
             .child(
                 FocusRing::new(self.id.with_suffix("focus_ring"), focus_handle.clone())

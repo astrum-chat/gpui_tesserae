@@ -300,6 +300,7 @@ pub(crate) struct LineElement {
     pub prev_line_offsets: Option<(usize, usize)>,
     pub next_line_offsets: Option<(usize, usize)>,
     pub selection_precise: bool,
+    #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
 }
 
@@ -481,7 +482,16 @@ impl Element for LineElement {
                 self.prev_line_offsets.map(|(_, end)| end),
                 next_line_bounds,
                 self.next_line_offsets.map(|(_, end)| end),
-                self.debug_interior_corners,
+                {
+                    #[cfg(feature = "debug")]
+                    {
+                        self.debug_interior_corners
+                    }
+                    #[cfg(not(feature = "debug"))]
+                    {
+                        false
+                    }
+                },
             );
 
             (selection_shape, None)
@@ -575,6 +585,7 @@ pub(crate) struct WrappedLineElement {
     pub prev_visual_line_offsets: Option<(usize, usize)>,
     pub next_visual_line_offsets: Option<(usize, usize)>,
     pub selection_precise: bool,
+    #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
 }
 
@@ -722,7 +733,16 @@ impl Element for WrappedLineElement {
                 self.prev_visual_line_offsets.map(|(_, end)| end),
                 next_line_bounds,
                 self.next_visual_line_offsets.map(|(_, end)| end),
-                self.debug_interior_corners,
+                {
+                    #[cfg(feature = "debug")]
+                    {
+                        self.debug_interior_corners
+                    }
+                    #[cfg(not(feature = "debug"))]
+                    {
+                        false
+                    }
+                },
             );
 
             (selection_shape, None)
@@ -959,6 +979,7 @@ pub(crate) struct WrappedTextInputElement {
     pub selection_rounded: Option<Pixels>,
     pub selection_rounded_smoothing: Option<f32>,
     pub selection_precise: bool,
+    #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
     pub multiline_clamp: Option<usize>,
     pub scale_factor: f32,
@@ -1125,6 +1146,7 @@ impl Element for WrappedTextInputElement {
                 prev_visual_line_offsets,
                 next_visual_line_offsets,
                 selection_precise: self.selection_precise,
+                #[cfg(feature = "debug")]
                 debug_interior_corners: self.debug_interior_corners,
             });
         }

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, CornersRefinement, ElementId, FocusHandle, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Pixels, RenderOnce, Styled, div, ease_out_quint,
+    AnyElement, CornersRefinement, Edges, ElementId, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, Length, ParentElement, Pixels, RenderOnce, Styled, div, ease_out_quint,
     prelude::FluentBuilder, px, relative,
 };
 use gpui_squircle::{SquircleStyled, squircle};
@@ -41,6 +41,7 @@ pub struct ChatBubble {
     anchor: ChatBubbleAnchor,
     children: SmallVec<[AnyElement; 2]>,
     focus_handle: Option<FocusHandle>,
+    margin: Edges<Option<Length>>,
 }
 
 impl ChatBubble {
@@ -52,7 +53,39 @@ impl ChatBubble {
             anchor: ChatBubbleAnchor::default(),
             children: SmallVec::new(),
             focus_handle: None,
+            margin: Edges::default(),
         }
+    }
+
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        let margin = margin.into();
+        self.margin = Edges::all(Some(margin));
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.top = Some(margin.into());
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.bottom = Some(margin.into());
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.left = Some(margin.into());
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.right = Some(margin.into());
+        self
     }
 
     /// Sets the anchor position, which determines which corner has reduced radius.
@@ -108,6 +141,10 @@ impl RenderOnce for ChatBubble {
         div()
             .max_w(relative(0.75))
             .h_auto()
+            .when_some(self.margin.top, |this, v| this.mt(v))
+            .when_some(self.margin.bottom, |this, v| this.mb(v))
+            .when_some(self.margin.left, |this, v| this.ml(v))
+            .when_some(self.margin.right, |this, v| this.mr(v))
             .flex()
             .flex_col()
             .flex_grow()

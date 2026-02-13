@@ -47,10 +47,12 @@ pub struct Input {
     placeholder_text_color: Option<Hsla>,
     selection_color: Option<Hsla>,
     selection_rounded: Option<gpui::Pixels>,
+    #[cfg(feature = "squircle")]
     selection_rounded_smoothing: Option<f32>,
     selection_precise: bool,
     transform_text: Option<TransformTextFn>,
     map_text: Option<MapTextFn>,
+    #[cfg(feature = "debug")]
     debug_interior_corners: bool,
     style: StyleRefinement,
 }
@@ -77,10 +79,12 @@ impl Input {
             placeholder_text_color: None,
             selection_color: None,
             selection_rounded: None,
+            #[cfg(feature = "squircle")]
             selection_rounded_smoothing: None,
             selection_precise: false,
             transform_text: None,
             map_text: None,
+            #[cfg(feature = "debug")]
             debug_interior_corners: false,
             style: StyleRefinement::default(),
         }
@@ -185,6 +189,7 @@ impl Input {
     ///
     /// This only has an effect when `selection_rounded` is also set to a value > 0.
     /// When smoothing is 0 or unset, the faster PaintQuad rendering path is used.
+    #[cfg(feature = "squircle")]
     pub fn selection_rounded_smoothing(mut self, smoothing: f32) -> Self {
         self.selection_rounded_smoothing = Some(smoothing.clamp(0.0, 1.0));
         self
@@ -202,6 +207,7 @@ impl Input {
 
     /// Enables debug visualization of interior (concave) selection corners.
     /// When enabled, interior corner patches are painted red instead of the selection color.
+    #[cfg(feature = "debug")]
     pub fn debug_interior_corners(mut self, enabled: bool) -> Self {
         self.debug_interior_corners = enabled;
         self
@@ -303,8 +309,12 @@ impl RenderOnce for Input {
                 let placeholder = self.placeholder.clone();
                 let multiline_clamp = self.multiline_clamp;
                 let selection_rounded = self.selection_rounded;
+                #[cfg(feature = "squircle")]
                 let selection_rounded_smoothing = self.selection_rounded_smoothing;
+                #[cfg(not(feature = "squircle"))]
+                let selection_rounded_smoothing: Option<f32> = None;
                 let selection_precise = self.selection_precise;
+                #[cfg(feature = "debug")]
                 let debug_interior_corners = self.debug_interior_corners;
 
                 let needs_scroll = multiline_clamp.map_or(false, |clamp| line_count > clamp);
@@ -353,6 +363,7 @@ impl RenderOnce for Input {
                                     prev_line_offsets,
                                     next_line_offsets,
                                     selection_precise,
+                                    #[cfg(feature = "debug")]
                                     debug_interior_corners,
                                 }
                             })
@@ -409,8 +420,12 @@ impl RenderOnce for Input {
                     cursor_visible,
                     placeholder: self.placeholder.clone(),
                     selection_rounded: self.selection_rounded,
+                    #[cfg(feature = "squircle")]
                     selection_rounded_smoothing: self.selection_rounded_smoothing,
+                    #[cfg(not(feature = "squircle"))]
+                    selection_rounded_smoothing: None,
                     selection_precise: self.selection_precise,
+                    #[cfg(feature = "debug")]
                     debug_interior_corners: self.debug_interior_corners,
                     multiline_clamp: self.multiline_clamp,
                     scale_factor,
@@ -431,7 +446,10 @@ impl RenderOnce for Input {
                     transform_text: self.transform_text,
                     cursor_visible,
                     selection_rounded: self.selection_rounded,
+                    #[cfg(feature = "squircle")]
                     selection_rounded_smoothing: self.selection_rounded_smoothing,
+                    #[cfg(not(feature = "squircle"))]
+                    selection_rounded_smoothing: None,
                     selection_precise: self.selection_precise,
                 })
             })

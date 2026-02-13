@@ -1,5 +1,5 @@
 use gpui::{
-    Hsla, IntoElement, Length, Radians, RenderOnce, SharedString, SizeRefinement, Styled,
+    Edges, Hsla, IntoElement, Length, Radians, RenderOnce, SharedString, SizeRefinement, Styled,
     Transformation, prelude::FluentBuilder, px, relative, svg,
 };
 
@@ -24,6 +24,7 @@ pub struct Icon {
     rotate: Radians,
     color: Option<Hsla>,
     style: IconStyle,
+    margin: Edges<Option<Length>>,
 }
 
 impl Icon {
@@ -35,7 +36,39 @@ impl Icon {
             rotate: Radians(0.),
             color: None,
             style: IconStyle::default(),
+            margin: Edges::default(),
         }
+    }
+
+    /// Sets uniform margin for all sides.
+    pub fn m(mut self, margin: impl Into<Length>) -> Self {
+        let margin = margin.into();
+        self.margin = Edges::all(Some(margin));
+        self
+    }
+
+    /// Sets top margin.
+    pub fn mt(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.top = Some(margin.into());
+        self
+    }
+
+    /// Sets bottom margin.
+    pub fn mb(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.bottom = Some(margin.into());
+        self
+    }
+
+    /// Sets left margin.
+    pub fn ml(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.left = Some(margin.into());
+        self
+    }
+
+    /// Sets right margin.
+    pub fn mr(mut self, margin: impl Into<Length>) -> Self {
+        self.margin.right = Some(margin.into());
+        self
     }
 
     /// Sets uniform width and height for the icon.
@@ -156,6 +189,10 @@ impl RenderOnce for Icon {
             .min_w(width)
             .h(height)
             .min_h(height)
+            .when_some(self.margin.top, |this, v| this.mt(v))
+            .when_some(self.margin.bottom, |this, v| this.mb(v))
+            .when_some(self.margin.left, |this, v| this.ml(v))
+            .when_some(self.margin.right, |this, v| this.mr(v))
             .with_transformation(Transformation::rotate(self.rotate))
             .when_some(self.color, |this, color| this.text_color(color))
             .when_some(self.style.flex_grow, |mut this, value| {

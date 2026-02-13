@@ -101,10 +101,14 @@ pub struct SelectableText {
     multiline_wrapped: bool,
     selection_color: Option<Hsla>,
     selection_rounded: Option<Pixels>,
+    #[cfg(feature = "squircle")]
     selection_rounded_smoothing: Option<f32>,
     selection_precise: bool,
+    #[cfg(feature = "debug")]
     debug_wrapping: bool,
+    #[cfg(feature = "debug")]
     debug_character_bounds: bool,
+    #[cfg(feature = "debug")]
     debug_interior_corners: bool,
     style: StyleRefinement,
 }
@@ -125,10 +129,14 @@ impl SelectableText {
             multiline_wrapped: false,
             selection_color: None,
             selection_rounded: None,
+            #[cfg(feature = "squircle")]
             selection_rounded_smoothing: None,
             selection_precise: false,
+            #[cfg(feature = "debug")]
             debug_wrapping: false,
+            #[cfg(feature = "debug")]
             debug_character_bounds: false,
+            #[cfg(feature = "debug")]
             debug_interior_corners: false,
             style: StyleRefinement::default(),
         }
@@ -173,6 +181,7 @@ impl SelectableText {
     ///
     /// This only has an effect when `selection_rounded` is also set to a value > 0.
     /// When smoothing is 0 or unset, the faster PaintQuad rendering path is used.
+    #[cfg(feature = "squircle")]
     pub fn selection_rounded_smoothing(mut self, smoothing: f32) -> Self {
         self.selection_rounded_smoothing = Some(smoothing.clamp(0.0, 1.0));
         self
@@ -188,11 +197,13 @@ impl SelectableText {
         self
     }
 
+    #[cfg(feature = "debug")]
     pub fn debug_wrapping(mut self, enabled: bool) -> Self {
         self.debug_wrapping = enabled;
         self
     }
 
+    #[cfg(feature = "debug")]
     pub fn debug_character_bounds(mut self, enabled: bool) -> Self {
         self.debug_character_bounds = enabled;
         self
@@ -200,6 +211,7 @@ impl SelectableText {
 
     /// Enables debug visualization of interior (concave) selection corners.
     /// When enabled, interior corner patches are painted red instead of the selection color.
+    #[cfg(feature = "debug")]
     pub fn debug_interior_corners(mut self, enabled: bool) -> Self {
         self.debug_interior_corners = enabled;
         self
@@ -415,6 +427,14 @@ impl RenderOnce for SelectableText {
                 if !is_wrapped {
                     self.apply_auto_width(this.style(), &width_params);
                 }
+                // In wrapped mode, the parent div needs a definite width so
+                // Taffy resolves it before measuring the child. Without this,
+                // Taffy calls the measure callback twice at different widths
+                // and may use the wider call's shorter height for layout,
+                // causing content to overflow the container.
+                if is_wrapped && user_wants_auto_width {
+                    this = this.w_full();
+                }
                 this
             })
             .key_context("SelectableText")
@@ -484,8 +504,13 @@ impl SelectableText {
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
         let selection_rounded = self.selection_rounded;
+        #[cfg(feature = "squircle")]
         let selection_rounded_smoothing = self.selection_rounded_smoothing;
+        #[cfg(not(feature = "squircle"))]
+        let selection_rounded_smoothing: Option<f32> = None;
+        #[cfg(feature = "debug")]
         let debug_character_bounds = self.debug_character_bounds;
+        #[cfg(feature = "debug")]
         let debug_interior_corners = self.debug_interior_corners;
         let selection_precise = self.selection_precise;
 
@@ -528,7 +553,9 @@ impl SelectableText {
                             prev_line_offsets,
                             next_line_offsets,
                             selection_precise,
+                            #[cfg(feature = "debug")]
                             debug_character_bounds,
+                            #[cfg(feature = "debug")]
                             debug_interior_corners,
                         }
                     })
@@ -562,6 +589,7 @@ impl SelectableText {
         container.child(UniformListElement {
             state: self.state.clone(),
             child: list.into_any_element(),
+            #[cfg(feature = "debug")]
             debug_wrapping: self.debug_wrapping,
             font: params.font.clone(),
             font_size: params.font_size,
@@ -610,10 +638,16 @@ impl SelectableText {
             font: font.clone(),
             selected_range,
             selection_rounded: self.selection_rounded,
+            #[cfg(feature = "squircle")]
             selection_rounded_smoothing: self.selection_rounded_smoothing,
+            #[cfg(not(feature = "squircle"))]
+            selection_rounded_smoothing: None,
             selection_precise: self.selection_precise,
+            #[cfg(feature = "debug")]
             debug_character_bounds: self.debug_character_bounds,
+            #[cfg(feature = "debug")]
             debug_interior_corners: self.debug_interior_corners,
+            #[cfg(feature = "debug")]
             debug_wrapping: self.debug_wrapping,
             multiline_clamp: self.multiline_clamp,
             scale_factor,
