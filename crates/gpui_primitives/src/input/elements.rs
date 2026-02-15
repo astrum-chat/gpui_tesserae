@@ -176,7 +176,7 @@ impl Element for TextElement {
         } else {
             let selection_start_x = window.round(line.x_for_index(selected_range.start));
             let mut selection_end_x = window.round(line.x_for_index(selected_range.end));
-            if !self.selection_precise && selected_range.end >= line.len() {
+            if !self.selection_precise && selected_range.end > line.len() {
                 selection_end_x = window.round(line.width.max(bounds.size.width));
             }
 
