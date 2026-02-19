@@ -1,10 +1,10 @@
-//! Inline — a container that renders children as inline text (flowing left-to-right,
-//! wrapping at word/character boundaries) with character-level selection support.
+//! SelectableLayout — a container that renders children as inline text (flowing
+//! left-to-right, wrapping at word/character boundaries) with character-level
+//! selection support.
 //!
-//! Each child implements `InlinedChild`, providing its text content and text styling.
-//! SelectableLayout concatenates all children's text, shapes it as one wrapped text block,
-//! and paints each visual line. Optional per-child decorations (backgrounds, padding)
-//! are painted behind the text.
+//! Each child implements `InlinedChild`, providing its text content and styling.
+//! The layout concatenates all children's text, shapes it as one wrapped text
+//! block, and paints each visual line with optional per-child decorations.
 
 mod state;
 
@@ -28,12 +28,10 @@ use crate::utils::{
     compute_selection_corners, create_text_run, rgb_a, selection_config_from_options,
 };
 
-/// Break info for line break children: amount of empty lines.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct BreakInfo {
-    /// 0 = flush to next line, n >= 1 = flush + n empty lines of gap.
+    /// 0 = flush to next line, n >= 1 = flush + n empty gap lines.
     pub amount: usize,
-    /// Font size from the line break child (reserved for future use).
     #[allow(dead_code)]
     pub font_size: Pixels,
 }
@@ -107,37 +105,32 @@ impl InlineStyles {
 }
 
 /// Trait for SelectableLayout children that provide text content and styling.
-///
-/// SelectableLayout concatenates all children's text into one string, shapes and wraps it,
-/// and paints text directly. Children no longer produce `AnyElement`s.
 pub trait InlinedChild {
     /// The text content of this child.
     fn copy_text(&self) -> SharedString;
 
-    /// The text run style for this child's text.
-    /// `len` is the byte length of this child's text (provided for convenience).
+    /// The text run style for this child's text (`len` = byte length).
     fn text_run(&self, len: usize) -> TextRun;
 
-    /// Optional per-child font size. Returns `None` to use the SelectableLayout default.
+    /// Per-child font size override. `None` uses the layout default.
     fn font_size(&self) -> Option<Pixels> {
         None
     }
 
-    /// Line break info: `None` = not a break, `Some(0)` = go to next line,
-    /// `Some(n)` = go to next line + n empty lines between.
+    /// Line break: `None` = inline, `Some(0)` = next line, `Some(n)` = next line + n gaps.
     fn line_break(&self) -> Option<usize> {
         None
     }
 
-    /// Optional decoration painted behind each text segment of this child.
+    /// Optional decoration painted behind this child's text segments.
     fn decoration(&self) -> Option<InlineStyles> {
         None
     }
 }
 
-/// Conversion trait that allows `.child("text")` by capturing SelectableLayout's default font/color.
+/// Conversion trait — allows `.child("text")` by capturing the layout's default font/color.
 pub trait IntoInlinedChild {
-    /// Convert into a boxed `InlinedChild`, using the given defaults for plain text.
+    /// Convert into a boxed `InlinedChild`.
     fn into_inlined_child(self, font: &Font, text_color: Hsla) -> Box<dyn InlinedChild>;
 }
 
@@ -157,7 +150,6 @@ impl IntoInlinedChild for &str {
     }
 }
 
-/// A line break child that forces subsequent children onto a new line.
 struct LineBreakChild {
     amount: usize,
     size: Option<Pixels>,
@@ -165,10 +157,8 @@ struct LineBreakChild {
 
 impl InlinedChild for LineBreakChild {
     fn copy_text(&self) -> SharedString {
-        // One \n for the line flush (extends the preceding content line's byte range),
-        // plus one \n per gap line.
-        let count = 1 + self.amount;
-        SharedString::from("\n".repeat(count))
+        // 1 \n for flush + 1 \n per gap line.
+        SharedString::from("\n".repeat(1 + self.amount))
     }
 
     fn text_run(&self, len: usize) -> TextRun {
@@ -191,8 +181,6 @@ impl InlinedChild for LineBreakChild {
     }
 }
 
-/// A plain text child that inherits the SelectableLayout's default font and color.
-/// Created automatically when passing `&str` or `String` to `.child()`.
 struct TextChild {
     text: String,
     font: Font,
@@ -344,7 +332,6 @@ impl RenderOnce for SelectableLayout {
             .selection_color
             .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
 
-        // Concatenate all children's text and build text runs.
         let mut combined_text = String::new();
         let mut text_runs: Vec<TextRun> = Vec::with_capacity(self.children.len());
         let mut child_byte_offsets: Vec<usize> = Vec::with_capacity(self.children.len());
@@ -370,7 +357,6 @@ impl RenderOnce for SelectableLayout {
         let combined: SharedString = combined_text.into();
         let total_len = combined.len();
 
-        // Store combined text and child info in state.
         self.state.update(cx, |state, _cx| {
             state.combined_text = combined.clone();
             state.child_byte_offsets = child_byte_offsets;
@@ -388,9 +374,6 @@ impl RenderOnce for SelectableLayout {
             .min_w_0()
             .map(|mut this: gpui::Stateful<gpui::Div>| {
                 this.style().refine(&self.style);
-                // The parent div needs a definite width so the child's
-                // relative(1.) resolves correctly. Apply w_full() when the
-                // user wants auto-width (matching SelectableText wrapped mode).
                 if user_wants_auto_width {
                     this = this.w_full();
                 }
@@ -405,7 +388,6 @@ impl RenderOnce for SelectableLayout {
         let mut element_style = Style::default();
         element_style.size.width = relative(1.).into();
 
-        // Compute effective line height: base line height + max padding_y * 2 (Block only).
         let max_padding_y = decorations
             .iter()
             .filter_map(|d| d.as_ref())
@@ -441,10 +423,6 @@ impl Focusable for SelectableLayout {
         self.state.read(cx).focus_handle.clone()
     }
 }
-
-// ---------------------------------------------------------------------------
-// SelectableLayoutElement — custom Element for inline text flow layout
-// ---------------------------------------------------------------------------
 
 struct SelectableLayoutElement {
     state: Entity<SelectableLayoutState>,
@@ -503,16 +481,163 @@ struct EffectiveLineRange {
 }
 
 struct SelectableLayoutPrepaintState {
-    /// Per-effective-line segment layout info.
     line_layouts: Vec<VisualLinePrepaint>,
-    /// Byte ranges for each effective line.
     effective_line_ranges: Vec<EffectiveLineRange>,
-    /// Per-line y offset from the top of the element bounds.
     line_y_offsets: Vec<Pixels>,
-    /// Per-line height (may differ for break gap lines vs content lines).
     line_heights: Vec<Pixels>,
-    /// Per-line hitboxes covering the total content width (text + padding).
     text_hitboxes: Vec<Hitbox>,
+}
+
+/// Accumulates effective lines during prepaint layout.
+struct LineBuilder {
+    line_layouts: Vec<VisualLinePrepaint>,
+    effective_line_ranges: Vec<EffectiveLineRange>,
+    visible_lines_info: Vec<VisibleLineInfo>,
+    text_hitboxes: Vec<Hitbox>,
+    line_y_offsets: Vec<Pixels>,
+    line_heights: Vec<Pixels>,
+    current_segments: Vec<ChildSegment>,
+    x_cursor: Pixels,
+    y_cursor: Pixels,
+}
+
+impl LineBuilder {
+    fn new() -> Self {
+        Self {
+            line_layouts: Vec::new(),
+            effective_line_ranges: Vec::new(),
+            visible_lines_info: Vec::new(),
+            text_hitboxes: Vec::new(),
+            line_y_offsets: Vec::new(),
+            line_heights: Vec::new(),
+            current_segments: Vec::new(),
+            x_cursor: Pixels::ZERO,
+            y_cursor: Pixels::ZERO,
+        }
+    }
+
+    /// Flush current segments as a completed effective line.
+    fn flush_line(
+        &mut self,
+        height: Pixels,
+        element: &SelectableLayoutElement,
+        window: &mut Window,
+        bounds: &Bounds<Pixels>,
+    ) {
+        if self.current_segments.is_empty() {
+            return;
+        }
+
+        let effective_idx = self.line_layouts.len();
+        let total_width = self.x_cursor;
+
+        let line_start = self.current_segments.first().unwrap().byte_range.start;
+        let line_end = self.current_segments.last().unwrap().byte_range.end;
+
+        let line_origin = point(bounds.origin.x, bounds.origin.y + self.y_cursor);
+        let line_bounds = Bounds {
+            origin: line_origin,
+            size: gpui::Size {
+                width: bounds.size.width,
+                height,
+            },
+        };
+
+        if total_width > Pixels::ZERO {
+            let text_bounds = Bounds {
+                origin: line_origin,
+                size: gpui::Size {
+                    width: total_width,
+                    height,
+                },
+            };
+            self.text_hitboxes
+                .push(window.insert_hitbox(text_bounds, HitboxBehavior::Normal));
+        }
+
+        // Shape a full line for hit-testing (fallback — primary uses ChildSegment layouts).
+        let max_fs = self
+            .current_segments
+            .iter()
+            .map(|s| element.child_font_sizes[s.child_idx])
+            .fold(element.font_size, |a, b| if b > a { b } else { a });
+        let full_text: SharedString = element.combined_text.as_ref()[line_start..line_end]
+            .to_string()
+            .into();
+        let full_runs = element.slice_runs_for_range(line_start, line_end);
+        let full_shaped = window
+            .text_system()
+            .shape_line(full_text, max_fs, &full_runs, None);
+
+        self.visible_lines_info.push(VisibleLineInfo {
+            line_index: effective_idx,
+            bounds: line_bounds,
+            shaped_line: full_shaped,
+        });
+
+        self.effective_line_ranges.push(EffectiveLineRange {
+            start_offset: line_start,
+            end_offset: line_end,
+        });
+
+        self.line_layouts.push(VisualLinePrepaint {
+            segments: std::mem::take(&mut self.current_segments),
+            total_width,
+        });
+
+        self.line_y_offsets.push(self.y_cursor);
+        self.line_heights.push(height);
+        self.x_cursor = Pixels::ZERO;
+    }
+
+    /// Flush current line and advance y_cursor by the given height.
+    fn flush_and_advance(
+        &mut self,
+        height: Pixels,
+        element: &SelectableLayoutElement,
+        window: &mut Window,
+        bounds: &Bounds<Pixels>,
+    ) {
+        if !self.current_segments.is_empty() {
+            self.flush_line(height, element, window, bounds);
+            self.y_cursor += height;
+        }
+    }
+
+    /// Add a gap line (empty line from a line break).
+    fn push_gap_line(
+        &mut self,
+        gap_byte: usize,
+        gap_line_h: Pixels,
+        gap_shaped: ShapedLine,
+        bounds: &Bounds<Pixels>,
+    ) {
+        let effective_idx = self.line_layouts.len();
+        let line_origin = point(bounds.origin.x, bounds.origin.y + self.y_cursor);
+        let line_bounds = Bounds {
+            origin: line_origin,
+            size: gpui::Size {
+                width: bounds.size.width,
+                height: gap_line_h,
+            },
+        };
+        self.line_layouts.push(VisualLinePrepaint {
+            segments: Vec::new(),
+            total_width: Pixels::ZERO,
+        });
+        self.effective_line_ranges.push(EffectiveLineRange {
+            start_offset: gap_byte,
+            end_offset: gap_byte + 1,
+        });
+        self.visible_lines_info.push(VisibleLineInfo {
+            line_index: effective_idx,
+            bounds: line_bounds,
+            shaped_line: gap_shaped,
+        });
+        self.line_y_offsets.push(self.y_cursor);
+        self.line_heights.push(gap_line_h);
+        self.y_cursor += gap_line_h;
+    }
 }
 
 impl IntoElement for SelectableLayoutElement {
@@ -550,7 +675,6 @@ impl Element for SelectableLayoutElement {
         let effective_line_height = self.effective_line_height;
         let style = self.style.clone();
 
-        // Per-child decoration info for overflow wrapping simulation: (padding_x, is_block).
         let child_decoration_info: Vec<(Pixels, bool)> = self
             .decorations
             .iter()
@@ -577,9 +701,6 @@ impl Element for SelectableLayoutElement {
                     return size(Pixels::ZERO, effective_line_height * cached_count as f32);
                 };
 
-                // Shape consecutive same-font-size children together so word
-                // wrapping flows naturally across child boundaries (e.g. bold
-                // text followed by normal text on the same line).
                 let child_count = child_byte_offsets.len();
                 let visual_lines = if combined_text.is_empty() {
                     vec![VisualLineInfo {
@@ -591,9 +712,6 @@ impl Element for SelectableLayoutElement {
                 } else {
                     let mut vlines = Vec::new();
 
-                    // Build groups of consecutive non-break children with the
-                    // same font size. Each group is shaped as a single
-                    // shape_text call with multiple TextRuns.
                     let mut group_start_child: Option<usize> = None;
                     let mut group_fs = Pixels::ZERO;
 
@@ -630,7 +748,6 @@ impl Element for SelectableLayoutElement {
                             .to_string()
                             .into();
 
-                        // Build text runs for all children in the group.
                         let mut runs = Vec::new();
                         for ci in start..end_child {
                             if child_line_break[ci].is_some() {
@@ -655,7 +772,6 @@ impl Element for SelectableLayoutElement {
                             return;
                         }
 
-                        // Use the max Block padding in the group for wrap width.
                         let max_pad = (start..end_child)
                             .filter(|ci| child_line_break[*ci].is_none())
                             .map(|ci| {
@@ -687,7 +803,6 @@ impl Element for SelectableLayoutElement {
 
                     for child_idx in 0..child_count {
                         if child_line_break[child_idx].is_some() {
-                            // Flush any pending group before the break.
                             flush_group(
                                 &mut group_start_child,
                                 group_fs,
@@ -722,14 +837,10 @@ impl Element for SelectableLayoutElement {
                             group_start_child = Some(child_idx);
                             group_fs = fs;
                         } else if fs > group_fs {
-                            // Track the max font size in the group for
-                            // shape_text wrapping (conservative — no line
-                            // will be wider than expected).
                             group_fs = fs;
                         }
                     }
 
-                    // Flush final group.
                     flush_group(
                         &mut group_start_child,
                         group_fs,
@@ -757,9 +868,6 @@ impl Element for SelectableLayoutElement {
                     vlines
                 };
 
-                // Simulate overflow wrapping to compute total height.
-                // Content lines use effective_line_height. Break gaps use
-                // amount * (line_height + break_font_size).
                 let mut total_height = Pixels::ZERO;
                 let mut x_cursor = Pixels::ZERO;
                 let mut max_x_cursor = Pixels::ZERO;
@@ -780,8 +888,6 @@ impl Element for SelectableLayoutElement {
                         }
                     };
 
-                // Process children in child order so breaks appear at the correct
-                // position between the text children they separate.
                 for (child_idx, &child_start) in child_byte_offsets.iter().enumerate() {
                     if let Some(ref brk) = child_line_break[child_idx] {
                         flush_content_line(
@@ -810,7 +916,6 @@ impl Element for SelectableLayoutElement {
                             continue;
                         }
 
-                        // Intra-child visual line boundary (word-wrap or newline).
                         if child_seg_count > 0 {
                             flush_content_line(
                                 &mut total_height,
@@ -860,21 +965,14 @@ impl Element for SelectableLayoutElement {
                     &mut has_segments,
                 );
 
-                // Ensure at least one line height.
                 if total_height < effective_line_height {
                     total_height = effective_line_height;
                 }
 
-                // Store visual lines for prepaint to consume.
                 state.update(cx, |state, _cx| {
                     state.precomputed_visual_lines = visual_lines;
                 });
 
-                // Always return the intrinsic content width (widest line)
-                // plus a small margin to prevent subpixel feedback loops.
-                // The parent div carries user constraints (w_full, max_w, etc.)
-                // and Taffy will clamp accordingly. This matches
-                // WrappedTextElement which always returns content_width + margin.
                 size(max_x_cursor + WIDTH_WRAP_BASE_MARGIN, total_height)
             }
         });
@@ -895,8 +993,6 @@ impl Element for SelectableLayoutElement {
         let child_count = child_byte_offsets.len();
         let total_len = self.combined_text.len();
         let container_width = bounds.size.width;
-
-        // Read precomputed visual lines from measure callback.
         let visual_lines = self.state.read(cx).precomputed_visual_lines.clone();
 
         // Phase 1: Split visual lines by child to produce pending items.
@@ -910,17 +1006,13 @@ impl Element for SelectableLayoutElement {
             },
             Break {
                 info: BreakInfo,
-                /// Byte offset where this break child's text starts in the combined string.
                 byte_start: usize,
-                /// True for real LineBreakChild breaks, false for synthetic
-                /// intra-child word-wrap boundaries.
                 is_line_break_child: bool,
             },
         }
 
         let mut pending_items: Vec<PendingItem> = Vec::new();
 
-        // Process children in child order so breaks are interleaved correctly.
         for (child_idx, &child_start) in child_byte_offsets.iter().enumerate() {
             if let Some(brk) = self.child_line_break[child_idx] {
                 pending_items.push(PendingItem::Break {
@@ -937,16 +1029,7 @@ impl Element for SelectableLayoutElement {
                 total_len
             };
 
-            let decoration = &self.decorations[child_idx];
-            let is_block = decoration
-                .as_ref()
-                .map_or(false, |d| d.display == DecorationDisplay::Block);
-            let padding_x = if is_block {
-                decoration.as_ref().map_or(Pixels::ZERO, |d| d.padding_x)
-            } else {
-                Pixels::ZERO
-            };
-
+            let padding_x = self.block_padding_x(child_idx);
             let seg_font_size = self.child_font_sizes[child_idx];
 
             let mut child_seg_count = 0usize;
@@ -957,9 +1040,7 @@ impl Element for SelectableLayoutElement {
                     continue;
                 }
 
-                // If this child already produced a segment from a previous visual
-                // line, the boundary between them is a word-wrap or newline break
-                // — insert a flush-to-next-line break.
+                // Intra-child visual line boundary → synthetic flush break.
                 if child_seg_count > 0 {
                     pending_items.push(PendingItem::Break {
                         info: BreakInfo {
@@ -976,13 +1057,11 @@ impl Element for SelectableLayoutElement {
                 let display_text: SharedString = segment_text.to_string().into();
                 let mut seg_run = self.text_runs[child_idx].clone();
                 seg_run.len = segment_text.len();
-                let seg_runs = vec![seg_run];
 
                 let shaped =
                     window
                         .text_system()
-                        .shape_line(display_text, seg_font_size, &seg_runs, None);
-
+                        .shape_line(display_text, seg_font_size, &[seg_run], None);
                 let child_width = shaped.width + padding_x * 2.0;
 
                 pending_items.push(PendingItem::Segment {
@@ -995,17 +1074,9 @@ impl Element for SelectableLayoutElement {
             }
         }
 
-        // Phase 2: Lay out pending items into effective lines with per-line y offsets.
-        let mut line_layouts: Vec<VisualLinePrepaint> = Vec::new();
-        let mut effective_line_ranges: Vec<EffectiveLineRange> = Vec::new();
-        let mut visible_lines_info: Vec<VisibleLineInfo> = Vec::new();
-        let mut text_hitboxes: Vec<Hitbox> = Vec::new();
-        let mut line_y_offsets: Vec<Pixels> = Vec::new();
-        let mut line_heights: Vec<Pixels> = Vec::new();
+        // Phase 2: Lay out pending items into effective lines.
+        let mut lb = LineBuilder::new();
 
-        let mut current_segments: Vec<ChildSegment> = Vec::new();
-        let mut x_cursor = Pixels::ZERO;
-        let mut y_cursor = Pixels::ZERO;
         for item in pending_items {
             match item {
                 PendingItem::Break {
@@ -1013,43 +1084,18 @@ impl Element for SelectableLayoutElement {
                     byte_start,
                     is_line_break_child,
                 } => {
-                    // Flush current content line if any.
-                    if !current_segments.is_empty() {
-                        self.flush_effective_line_at_y(
-                            &mut current_segments,
-                            &mut x_cursor,
-                            y_cursor,
-                            self.effective_line_height,
-                            &mut line_layouts,
-                            &mut effective_line_ranges,
-                            &mut visible_lines_info,
-                            &mut text_hitboxes,
-                            &mut line_y_offsets,
-                            &mut line_heights,
-                            window,
-                            &bounds,
-                        );
-                        // For real LineBreakChild breaks, extend the content line's
-                        // byte range to include the flush \n (at byte_start). This
-                        // way, selecting to the end of the content line includes the
-                        // \n, causing the gap line below to appear selected.
-                        // Synthetic breaks (intra-child word-wrap) don't have real
-                        // \n bytes, so skip this.
-                        if is_line_break_child {
-                            if let Some(last_range) = effective_line_ranges.last_mut() {
-                                last_range.end_offset = byte_start + 1;
-                            }
+                    lb.flush_and_advance(self.effective_line_height, self, window, &bounds);
+
+                    // For real breaks, extend the preceding content line to include
+                    // the flush \n so selection visually spans the gap.
+                    if is_line_break_child {
+                        if let Some(last_range) = lb.effective_line_ranges.last_mut() {
+                            last_range.end_offset = byte_start + 1;
                         }
-                        y_cursor += self.effective_line_height;
                     }
-                    // Add gap lines for amount >= 1.
-                    // The break child's text is "\n".repeat(1 + amount).
-                    // The first \n (at byte_start) is the flush — not a gap line.
-                    // Each subsequent \n (byte_start+1, byte_start+2, ...) is a gap line.
+
+                    // Add gap lines (each owns one \n byte after the flush \n).
                     if brk.amount > 0 {
-                        let gap_line_h = self.line_height;
-                        // Shape a space for hit-testing, like SelectableText
-                        // does for empty lines.
                         let gap_shaped = window.text_system().shape_line(
                             SharedString::from(" "),
                             self.font_size,
@@ -1057,36 +1103,12 @@ impl Element for SelectableLayoutElement {
                             None,
                         );
                         for gap_i in 0..brk.amount {
-                            let effective_idx = line_layouts.len();
-                            let line_origin = point(bounds.origin.x, bounds.origin.y + y_cursor);
-                            let line_bounds = Bounds {
-                                origin: line_origin,
-                                size: gpui::Size {
-                                    width: bounds.size.width,
-                                    height: gap_line_h,
-                                },
-                            };
-                            line_layouts.push(VisualLinePrepaint {
-                                segments: Vec::new(),
-                                total_width: Pixels::ZERO,
-                            });
-                            // Each gap line owns one \n byte. The first \n
-                            // (at byte_start) is the flush character that extends
-                            // the preceding content line's range. Gap lines start
-                            // at byte_start + 1.
-                            let gap_byte = byte_start + 1 + gap_i;
-                            effective_line_ranges.push(EffectiveLineRange {
-                                start_offset: gap_byte,
-                                end_offset: gap_byte + 1,
-                            });
-                            visible_lines_info.push(VisibleLineInfo {
-                                line_index: effective_idx,
-                                bounds: line_bounds,
-                                shaped_line: gap_shaped.clone(),
-                            });
-                            line_y_offsets.push(y_cursor);
-                            line_heights.push(gap_line_h);
-                            y_cursor += gap_line_h;
+                            lb.push_gap_line(
+                                byte_start + 1 + gap_i,
+                                self.line_height,
+                                gap_shaped.clone(),
+                                &bounds,
+                            );
                         }
                     }
                 }
@@ -1097,81 +1119,48 @@ impl Element for SelectableLayoutElement {
                     padding_x,
                     child_width,
                 } => {
-                    // Overflow wrap: flush current line if this segment won't fit.
-                    if x_cursor > Pixels::ZERO
-                        && x_cursor + child_width > container_width + WIDTH_WRAP_BASE_MARGIN
+                    // Overflow wrap: flush if this segment won't fit.
+                    if lb.x_cursor > Pixels::ZERO
+                        && lb.x_cursor + child_width > container_width + WIDTH_WRAP_BASE_MARGIN
                     {
-                        self.flush_effective_line_at_y(
-                            &mut current_segments,
-                            &mut x_cursor,
-                            y_cursor,
-                            self.effective_line_height,
-                            &mut line_layouts,
-                            &mut effective_line_ranges,
-                            &mut visible_lines_info,
-                            &mut text_hitboxes,
-                            &mut line_y_offsets,
-                            &mut line_heights,
-                            window,
-                            &bounds,
-                        );
-                        y_cursor += self.effective_line_height;
+                        lb.flush_and_advance(self.effective_line_height, self, window, &bounds);
                     }
 
-                    let child_x = x_cursor;
-                    let text_x = child_x + padding_x;
-
-                    current_segments.push(ChildSegment {
+                    let child_x = lb.x_cursor;
+                    lb.current_segments.push(ChildSegment {
                         shaped_line,
-                        x_offset: text_x,
+                        x_offset: child_x + padding_x,
                         child_x,
                         child_width,
                         child_idx,
                         byte_range,
                     });
-
-                    x_cursor += child_width;
+                    lb.x_cursor += child_width;
                 }
             }
         }
 
         // Flush remaining segments.
-        if !current_segments.is_empty() {
-            self.flush_effective_line_at_y(
-                &mut current_segments,
-                &mut x_cursor,
-                y_cursor,
-                self.effective_line_height,
-                &mut line_layouts,
-                &mut effective_line_ranges,
-                &mut visible_lines_info,
-                &mut text_hitboxes,
-                &mut line_y_offsets,
-                &mut line_heights,
-                window,
-                &bounds,
-            );
-        }
+        lb.flush_line(self.effective_line_height, self, window, &bounds);
 
-        // If no lines were produced, add an empty one.
-        if line_layouts.is_empty() {
-            line_layouts.push(VisualLinePrepaint {
+        // Ensure at least one empty line.
+        if lb.line_layouts.is_empty() {
+            lb.line_layouts.push(VisualLinePrepaint {
                 segments: Vec::new(),
                 total_width: Pixels::ZERO,
             });
-            effective_line_ranges.push(EffectiveLineRange {
+            lb.effective_line_ranges.push(EffectiveLineRange {
                 start_offset: 0,
                 end_offset: 0,
             });
-            let line_origin = point(bounds.origin.x, bounds.origin.y);
             let line_bounds = Bounds {
-                origin: line_origin,
+                origin: point(bounds.origin.x, bounds.origin.y),
                 size: gpui::Size {
                     width: bounds.size.width,
                     height: self.effective_line_height,
                 },
             };
-            visible_lines_info.push(VisibleLineInfo {
+            lb.visible_lines_info.push(VisibleLineInfo {
                 line_index: 0,
                 bounds: line_bounds,
                 shaped_line: window.text_system().shape_line(
@@ -1181,28 +1170,29 @@ impl Element for SelectableLayoutElement {
                     None,
                 ),
             });
-            line_y_offsets.push(Pixels::ZERO);
-            line_heights.push(self.effective_line_height);
+            lb.line_y_offsets.push(Pixels::ZERO);
+            lb.line_heights.push(self.effective_line_height);
         }
 
-        // Store visible line info and segment layouts in state for hit-testing.
-        let line_byte_ranges: Vec<(usize, usize)> = effective_line_ranges
+        // Store in state for hit-testing.
+        let line_byte_ranges: Vec<(usize, usize)> = lb
+            .effective_line_ranges
             .iter()
             .map(|r| (r.start_offset, r.end_offset))
             .collect();
         self.state.update(cx, |state, _cx| {
-            state.visible_lines_info = visible_lines_info;
-            state.line_layouts = line_layouts.clone();
+            state.visible_lines_info = lb.visible_lines_info;
+            state.line_layouts = lb.line_layouts.clone();
             state.line_byte_ranges = line_byte_ranges;
             state.last_bounds = Some(bounds);
         });
 
         SelectableLayoutPrepaintState {
-            line_layouts,
-            effective_line_ranges,
-            line_y_offsets,
-            line_heights,
-            text_hitboxes,
+            line_layouts: lb.line_layouts,
+            effective_line_ranges: lb.effective_line_ranges,
+            line_y_offsets: lb.line_y_offsets,
+            line_heights: lb.line_heights,
+            text_hitboxes: lb.text_hitboxes,
         }
     }
 
@@ -1218,7 +1208,6 @@ impl Element for SelectableLayoutElement {
     ) {
         let selected_range = self.state.read(cx).selected_range.clone();
 
-        // Global mouse move handler — fires even when cursor leaves the element/window.
         let state = self.state.clone();
         window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _window, cx| {
             if phase == gpui::DispatchPhase::Capture {
@@ -1253,18 +1242,13 @@ impl Element for SelectableLayoutElement {
                 },
             };
 
-            // Vertical offset to center text within the line height slot.
             let text_y_offset = (line_h - self.line_height) / 2.0;
-
-            // Paint decorations behind text, connecting across lines like selections.
             let scale_factor = window.scale_factor();
             for seg in &line_layout.segments {
                 if let Some(decoration) = &self.decorations[seg.child_idx] {
                     let dec_height = self.line_height + decoration.padding_y * 2.0;
                     let dec_y = line_origin.y + (line_h - dec_height) / 2.0;
 
-                    // Block decorations use the allocated child space;
-                    // Overlay decorations are centered on the text.
                     let (dec_x, dec_width) = if decoration.display == DecorationDisplay::Block {
                         (seg.child_x, seg.child_width)
                     } else {
@@ -1272,8 +1256,6 @@ impl Element for SelectableLayoutElement {
                         (seg.x_offset - decoration.padding_x, w)
                     };
 
-                    // Round decoration x positions to device pixels so quad edges
-                    // and interior corner patches align exactly.
                     let round = |v: Pixels| -> Pixels {
                         let dp = v * scale_factor;
                         px(f32::from(dp).round() / scale_factor)
@@ -1281,7 +1263,6 @@ impl Element for SelectableLayoutElement {
                     let this_start_x = round(dec_x);
                     let this_end_x = round(dec_x + dec_width).min(line_bounds.size.width);
 
-                    // Find the same child's decoration x-range on adjacent lines.
                     let prev_dec = if idx > 0 {
                         Self::decoration_x_range_for_child(
                             &prepaint.line_layouts[idx - 1],
@@ -1303,7 +1284,6 @@ impl Element for SelectableLayoutElement {
                         None
                     };
 
-                    // Use the max corner radius for interior corner patch logic.
                     let radius = decoration
                         .corner_radius
                         .top_left
@@ -1311,10 +1291,6 @@ impl Element for SelectableLayoutElement {
                         .max(decoration.corner_radius.bottom_left)
                         .max(decoration.corner_radius.bottom_right);
 
-                    // A corner is only squared if the step is large enough for an
-                    // interior corner patch to actually render. The patch needs
-                    // step >= radius/2 + MIN_INTERIOR_CORNER_STEP (2px), so use
-                    // that as the probe threshold.
                     let probe = compute_selection_corners(
                         this_start_x,
                         this_end_x,
@@ -1346,10 +1322,8 @@ impl Element for SelectableLayoutElement {
                         },
                     };
 
-                    // When the decoration continues to an adjacent line, extend the
-                    // quad to fill the full line height on that edge so interior
-                    // corner patches (which start at the quad edge) connect
-                    // seamlessly with no gap.
+                    // Extend quad to full line height at edges where decoration
+                    // continues to an adjacent line (for seamless patch connection).
                     let extended_top = if prev_dec.is_some() {
                         line_bounds.origin.y
                     } else {
@@ -1369,7 +1343,6 @@ impl Element for SelectableLayoutElement {
                         },
                     };
 
-                    // Paint decoration background, using squircle path when available.
                     let mut used_squircle = false;
                     #[cfg(feature = "squircle")]
                     if let Some(smoothing) = decoration.corner_smoothing {
@@ -1396,9 +1369,6 @@ impl Element for SelectableLayoutElement {
                         });
                     }
 
-                    // Paint interior corner patches to fill gaps at connection points.
-                    // Use the extended decoration bounds so patches start exactly
-                    // at the painted quad edges (not the line bounds).
                     #[cfg(feature = "squircle")]
                     let smoothing = decoration.corner_smoothing;
                     #[cfg(not(feature = "squircle"))]
@@ -1424,7 +1394,6 @@ impl Element for SelectableLayoutElement {
                 }
             }
 
-            // Paint selection behind text.
             if !selected_range.is_empty() {
                 self.paint_line_selection(
                     idx,
@@ -1438,17 +1407,11 @@ impl Element for SelectableLayoutElement {
                 );
             }
 
-            // Paint each child segment's text at its offset position.
             for seg in &line_layout.segments {
-                // Use a line height that accommodates the segment's font metrics so
-                // that decorations (strikethrough, underline) are positioned correctly
-                // even when the segment's font is larger than the base line height.
+                // Accommodate larger font metrics for correct strikethrough/underline.
                 let seg_line_height = self
                     .line_height
                     .max(seg.shaped_line.ascent + seg.shaped_line.descent);
-                // Shift origin upward to compensate for extra internal padding that
-                // paint_line adds when line_height > base line_height, keeping the
-                // glyphs at the same vertical position.
                 let y_adjust = (self.line_height - seg_line_height) / 2.0;
                 let seg_origin = point(
                     line_origin.x + seg.x_offset,
@@ -1473,90 +1436,15 @@ impl Element for SelectableLayoutElement {
 }
 
 impl SelectableLayoutElement {
-    /// Flush the current set of segments as a completed effective line at a specific y offset.
-    fn flush_effective_line_at_y(
-        &self,
-        segments: &mut Vec<ChildSegment>,
-        x_cursor: &mut Pixels,
-        y_offset: Pixels,
-        height: Pixels,
-        line_layouts: &mut Vec<VisualLinePrepaint>,
-        effective_line_ranges: &mut Vec<EffectiveLineRange>,
-        visible_lines_info: &mut Vec<VisibleLineInfo>,
-        text_hitboxes: &mut Vec<Hitbox>,
-        line_y_offsets: &mut Vec<Pixels>,
-        line_heights: &mut Vec<Pixels>,
-        window: &mut Window,
-        bounds: &Bounds<Pixels>,
-    ) {
-        if segments.is_empty() {
-            return;
-        }
-
-        let effective_idx = line_layouts.len();
-        let total_width = *x_cursor;
-
-        let line_start = segments.first().unwrap().byte_range.start;
-        let line_end = segments.last().unwrap().byte_range.end;
-
-        let line_origin = point(bounds.origin.x, bounds.origin.y + y_offset);
-        let line_bounds = Bounds {
-            origin: line_origin,
-            size: gpui::Size {
-                width: bounds.size.width,
-                height,
-            },
-        };
-
-        if total_width > Pixels::ZERO {
-            let text_bounds = Bounds {
-                origin: line_origin,
-                size: gpui::Size {
-                    width: total_width,
-                    height,
-                },
-            };
-            text_hitboxes.push(window.insert_hitbox(text_bounds, HitboxBehavior::Normal));
-        }
-
-        // Shape a full line for hit-testing from the byte range spanning all segments.
-        // Use the max font size across segments (hit-testing primarily uses per-segment
-        // ChildSegment layouts, so the full-line shape is a fallback).
-        let full_text: SharedString = self.combined_text.as_ref()[line_start..line_end]
-            .to_string()
-            .into();
-        let full_runs = self.slice_runs_for_range(line_start, line_end);
-        let max_fs = segments
-            .iter()
-            .map(|s| self.child_font_sizes[s.child_idx])
-            .fold(self.font_size, |a, b| if b > a { b } else { a });
-        let full_shaped = window
-            .text_system()
-            .shape_line(full_text, max_fs, &full_runs, None);
-
-        visible_lines_info.push(VisibleLineInfo {
-            line_index: effective_idx,
-            bounds: line_bounds,
-            shaped_line: full_shaped,
-        });
-
-        effective_line_ranges.push(EffectiveLineRange {
-            start_offset: line_start,
-            end_offset: line_end,
-        });
-
-        line_layouts.push(VisualLinePrepaint {
-            segments: std::mem::take(segments),
-            total_width,
-        });
-
-        line_y_offsets.push(y_offset);
-        line_heights.push(height);
-
-        *x_cursor = Pixels::ZERO;
+    /// Get the Block padding_x for a child, or zero if not Block.
+    fn block_padding_x(&self, child_idx: usize) -> Pixels {
+        self.decorations[child_idx]
+            .as_ref()
+            .filter(|d| d.display == DecorationDisplay::Block)
+            .map_or(Pixels::ZERO, |d| d.padding_x)
     }
 
-    /// Slice the global text runs to produce runs for a byte range of the combined text.
+    /// Slice the global text runs to produce runs for a byte sub-range.
     fn slice_runs_for_range(&self, start: usize, end: usize) -> Vec<TextRun> {
         if start >= end {
             return vec![create_text_run(self.font.clone(), self.text_color, 0)];
@@ -1567,7 +1455,6 @@ impl SelectableLayoutElement {
 
         for run in &self.text_runs {
             let run_end = run_offset + run.len;
-            // Does this run overlap with [start, end)?
             if run_end > start && run_offset < end {
                 let overlap_start = start.max(run_offset);
                 let overlap_end = end.min(run_end);
@@ -1588,8 +1475,7 @@ impl SelectableLayoutElement {
         result
     }
 
-    /// Map a byte offset in the combined text to an x position relative to the line origin,
-    /// accounting for per-child segment offsets (decoration padding).
+    /// Map a byte offset to an x position relative to the line origin.
     fn x_for_byte_offset(segments: &[ChildSegment], byte_offset: usize) -> Pixels {
         for seg in segments {
             if byte_offset >= seg.byte_range.start && byte_offset <= seg.byte_range.end {
@@ -1597,196 +1483,14 @@ impl SelectableLayoutElement {
                 return seg.x_offset + seg.shaped_line.x_for_index(local);
             }
         }
-        // Offset is past all segments — return the end of the last segment.
-        if let Some(last) = segments.last() {
-            last.x_offset + last.shaped_line.width
-        } else {
-            Pixels::ZERO
-        }
+        segments
+            .last()
+            .map_or(Pixels::ZERO, |s| s.x_offset + s.shaped_line.width)
     }
 
-    /// Paint the selection highlight for a single effective line.
-    fn paint_line_selection(
-        &self,
-        line_idx: usize,
-        line_layout: &VisualLinePrepaint,
-        line_range: &EffectiveLineRange,
-        line_bounds: &Bounds<Pixels>,
-        selected_range: &Range<usize>,
-        all_line_ranges: &[EffectiveLineRange],
-        all_line_layouts: &[VisualLinePrepaint],
-        window: &mut Window,
-    ) {
-        // Intersect selection with this effective line's byte range.
-        let sel_start = selected_range.start.max(line_range.start_offset);
-        let sel_end = selected_range.end.min(line_range.end_offset);
-
-        let is_gap_line = line_layout.segments.is_empty();
-
-        if sel_start >= sel_end {
-            return;
-        }
-
-        let x_start = if is_gap_line {
-            Pixels::ZERO
-        } else {
-            Self::x_for_byte_offset(&line_layout.segments, sel_start)
-        };
-        let mut x_end = if is_gap_line {
-            Pixels::ZERO
-        } else {
-            Self::x_for_byte_offset(&line_layout.segments, sel_end)
-        };
-
-        // Trailing whitespace indicator: show that selection continues past this line.
-        let last_seg_end = line_layout.segments.last().map_or(0, |s| s.byte_range.end);
-        let extends_past = selected_range.end > line_range.end_offset || sel_end > last_seg_end;
-
-        // Compute space width for trailing whitespace indicator.
-        let space_width = if self.selection_precise {
-            let space_line = window.text_system().shape_line(
-                SharedString::from(" "),
-                self.font_size,
-                &[create_text_run(self.font.clone(), self.text_color, 1)],
-                None,
-            );
-            space_line.width
-        } else {
-            Pixels::ZERO
-        };
-
-        if extends_past || is_gap_line {
-            if self.selection_precise {
-                // Precise mode: add one space-character width (matching SelectableText).
-                x_end += space_width;
-            } else {
-                // Non-precise: extend to container edge.
-                x_end = line_bounds.size.width;
-            }
-        }
-
-        // Clamp to container right edge to prevent overflow.
-        x_end = x_end.min(line_bounds.size.width);
-
-        let sel_bounds = Bounds {
-            origin: point(line_bounds.origin.x + x_start, line_bounds.origin.y),
-            size: gpui::Size {
-                width: x_end - x_start,
-                height: line_bounds.size.height,
-            },
-        };
-
-        #[cfg(feature = "squircle")]
-        let selection_rounded_smoothing = self.selection_rounded_smoothing;
-        #[cfg(not(feature = "squircle"))]
-        let selection_rounded_smoothing: Option<f32> = None;
-        let config =
-            selection_config_from_options(self.selection_rounded, selection_rounded_smoothing);
-        let scale_factor = window.scale_factor();
-
-        let this_start_x = x_start;
-        let this_end_x = x_end;
-
-        let prev_row_sel = if line_idx > 0 {
-            Self::line_selection_x_range_from_range(
-                &all_line_ranges[line_idx - 1],
-                &all_line_layouts[line_idx - 1],
-                selected_range,
-                self.selection_precise,
-                line_bounds.size.width,
-                space_width,
-            )
-        } else {
-            None
-        };
-        let next_row_sel = if line_idx + 1 < all_line_ranges.len() {
-            Self::line_selection_x_range_from_range(
-                &all_line_ranges[line_idx + 1],
-                &all_line_layouts[line_idx + 1],
-                selected_range,
-                self.selection_precise,
-                line_bounds.size.width,
-                space_width,
-            )
-        } else {
-            None
-        };
-
-        let corners = compute_selection_corners(
-            this_start_x,
-            this_end_x,
-            prev_row_sel,
-            next_row_sel,
-            config.corner_radius,
-            scale_factor,
-        );
-
-        let selection_prim = build_selection_primitive(
-            *line_bounds,
-            this_start_x,
-            this_end_x,
-            Pixels::ZERO,
-            self.selection_color,
-            &config,
-            corners,
-        );
-        selection_prim.paint(window);
-
-        // Paint interior corner patches.
-        let corner_smoothing = {
-            #[cfg(feature = "squircle")]
-            {
-                config.corner_smoothing
-            }
-            #[cfg(not(feature = "squircle"))]
-            {
-                None
-            }
-        };
-        let patches = compute_interior_corner_patches(
-            this_start_x,
-            this_end_x,
-            prev_row_sel,
-            next_row_sel,
-            config.corner_radius,
-            corner_smoothing,
-            scale_factor,
-            line_bounds.origin.x,
-            sel_bounds.origin.y,
-            sel_bounds.origin.y + sel_bounds.size.height,
-            line_bounds.size.height,
-            Pixels::ZERO,
-            self.selection_color,
-        );
-        for patch in patches {
-            patch.paint(window);
-        }
-    }
-
-    /// Find the decoration x-range (start_x, end_x) for a given child on a line.
-    fn decoration_x_range_for_child(
-        line_layout: &VisualLinePrepaint,
-        child_idx: usize,
-        decorations: &[Option<InlineStyles>],
-    ) -> Option<(Pixels, Pixels)> {
-        let seg = line_layout
-            .segments
-            .iter()
-            .find(|s| s.child_idx == child_idx)?;
-        let decoration = decorations[child_idx].as_ref()?;
-
-        let (dec_x, dec_width) = if decoration.display == DecorationDisplay::Block {
-            (seg.child_x, seg.child_width)
-        } else {
-            let w = seg.shaped_line.width + decoration.padding_x * 2.0;
-            (seg.x_offset - decoration.padding_x, w)
-        };
-
-        Some((dec_x, dec_x + dec_width))
-    }
-
-    /// Compute (start_x, end_x) of the selection on the given effective line.
-    fn line_selection_x_range_from_range(
+    /// Compute the selection x-range `(start_x, end_x)` for an effective line,
+    /// or `None` if the selection doesn't intersect this line.
+    fn selection_x_range(
         line_range: &EffectiveLineRange,
         line_layout: &VisualLinePrepaint,
         selected_range: &Range<usize>,
@@ -1795,7 +1499,6 @@ impl SelectableLayoutElement {
         space_width: Pixels,
     ) -> Option<(Pixels, Pixels)> {
         let is_gap = line_layout.segments.is_empty();
-
         let sel_start = selected_range.start.max(line_range.start_offset);
         let sel_end = selected_range.end.min(line_range.end_offset);
 
@@ -1825,10 +1528,148 @@ impl SelectableLayoutElement {
             }
         }
 
-        // Clamp to container right edge to prevent overflow.
         x_end = x_end.min(container_width);
-
         Some((x_start, x_end))
+    }
+
+    /// Paint the selection highlight for a single effective line.
+    fn paint_line_selection(
+        &self,
+        line_idx: usize,
+        line_layout: &VisualLinePrepaint,
+        line_range: &EffectiveLineRange,
+        line_bounds: &Bounds<Pixels>,
+        selected_range: &Range<usize>,
+        all_line_ranges: &[EffectiveLineRange],
+        all_line_layouts: &[VisualLinePrepaint],
+        window: &mut Window,
+    ) {
+        let space_width = if self.selection_precise {
+            window
+                .text_system()
+                .shape_line(
+                    SharedString::from(" "),
+                    self.font_size,
+                    &[create_text_run(self.font.clone(), self.text_color, 1)],
+                    None,
+                )
+                .width
+        } else {
+            Pixels::ZERO
+        };
+
+        let Some((x_start, x_end)) = Self::selection_x_range(
+            line_range,
+            line_layout,
+            selected_range,
+            self.selection_precise,
+            line_bounds.size.width,
+            space_width,
+        ) else {
+            return;
+        };
+
+        let sel_bounds = Bounds {
+            origin: point(line_bounds.origin.x + x_start, line_bounds.origin.y),
+            size: gpui::Size {
+                width: x_end - x_start,
+                height: line_bounds.size.height,
+            },
+        };
+
+        #[cfg(feature = "squircle")]
+        let selection_rounded_smoothing = self.selection_rounded_smoothing;
+        #[cfg(not(feature = "squircle"))]
+        let selection_rounded_smoothing: Option<f32> = None;
+        let config =
+            selection_config_from_options(self.selection_rounded, selection_rounded_smoothing);
+        let scale_factor = window.scale_factor();
+
+        let adj_sel = |idx: usize| {
+            Self::selection_x_range(
+                &all_line_ranges[idx],
+                &all_line_layouts[idx],
+                selected_range,
+                self.selection_precise,
+                line_bounds.size.width,
+                space_width,
+            )
+        };
+        let prev_row_sel = (line_idx > 0).then(|| adj_sel(line_idx - 1)).flatten();
+        let next_row_sel = (line_idx + 1 < all_line_ranges.len())
+            .then(|| adj_sel(line_idx + 1))
+            .flatten();
+
+        let corners = compute_selection_corners(
+            x_start,
+            x_end,
+            prev_row_sel,
+            next_row_sel,
+            config.corner_radius,
+            scale_factor,
+        );
+
+        build_selection_primitive(
+            *line_bounds,
+            x_start,
+            x_end,
+            Pixels::ZERO,
+            self.selection_color,
+            &config,
+            corners,
+        )
+        .paint(window);
+
+        let corner_smoothing = {
+            #[cfg(feature = "squircle")]
+            {
+                config.corner_smoothing
+            }
+            #[cfg(not(feature = "squircle"))]
+            {
+                None
+            }
+        };
+        let patches = compute_interior_corner_patches(
+            x_start,
+            x_end,
+            prev_row_sel,
+            next_row_sel,
+            config.corner_radius,
+            corner_smoothing,
+            scale_factor,
+            line_bounds.origin.x,
+            sel_bounds.origin.y,
+            sel_bounds.origin.y + sel_bounds.size.height,
+            line_bounds.size.height,
+            Pixels::ZERO,
+            self.selection_color,
+        );
+        for patch in patches {
+            patch.paint(window);
+        }
+    }
+
+    /// Find the decoration x-range for a given child on a line.
+    fn decoration_x_range_for_child(
+        line_layout: &VisualLinePrepaint,
+        child_idx: usize,
+        decorations: &[Option<InlineStyles>],
+    ) -> Option<(Pixels, Pixels)> {
+        let seg = line_layout
+            .segments
+            .iter()
+            .find(|s| s.child_idx == child_idx)?;
+        let decoration = decorations[child_idx].as_ref()?;
+
+        let (dec_x, dec_width) = if decoration.display == DecorationDisplay::Block {
+            (seg.child_x, seg.child_width)
+        } else {
+            let w = seg.shaped_line.width + decoration.padding_x * 2.0;
+            (seg.x_offset - decoration.padding_x, w)
+        };
+
+        Some((dec_x, dec_x + dec_width))
     }
 }
 
