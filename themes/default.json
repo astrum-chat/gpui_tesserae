@@ -27,12 +27,12 @@
                 "family": "Geist Mono",
                 "line_height": "161.8034%",
                 "sizes": {
-                    "heading_xl": "1.438rem",
-                    "heading_lg": "1.313rem",
-                    "heading_md": "1.188rem",
-                    "heading_sm": "1.063rem",
-                    "body": "0.938rem",
-                    "caption": "0.813rem"
+                    "heading_xl": "1.406rem",
+                    "heading_lg": "1.156rem",
+                    "heading_md": "1.125rem",
+                    "heading_sm": "1.031rem",
+                    "body": "0.906rem",
+                    "caption": "0.781rem"
                 },
                 "weights": {
                     "heading_xl": 600,

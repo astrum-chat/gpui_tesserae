@@ -1,4 +1,5 @@
 pub use gpui_primitives::input;
+pub use gpui_primitives::selectable_layout;
 pub use gpui_primitives::selectable_text;
 
 mod focus_ring;

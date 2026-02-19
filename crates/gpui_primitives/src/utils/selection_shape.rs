@@ -74,7 +74,7 @@ pub(crate) enum SelectionPrimitive {
 }
 
 impl SelectionPrimitive {
-    fn paint(self, window: &mut Window) {
+    pub(crate) fn paint(self, window: &mut Window) {
         match self {
             SelectionPrimitive::Quad(quad) => window.paint_quad(quad),
             SelectionPrimitive::Path { path, fill_color } => {
@@ -319,7 +319,7 @@ pub(crate) fn build_selection_primitive(
 }
 
 #[cfg(feature = "squircle")]
-fn build_squircle_path(
+pub(crate) fn build_squircle_path(
     bounds: Bounds<Pixels>,
     corners: Corners<Pixels>,
     smoothing: f32,
@@ -514,12 +514,16 @@ pub(crate) fn compute_interior_corner_patches(
     // Helper: builds an interior corner patch and pushes it if the step is large enough.
     // Skips when the step is smaller than the corner radius - in that range the adjacent
     // line's rounded exterior corner already covers the visual transition.
+    //
+    // `edge` is the absolute x position of the current line's quad edge that the patch
+    // should be flush against. The patch width (rx) is subtracted from this position
+    // so the patch is always aligned to the rendered quad edge.
     fn try_push_patch(
         patches: &mut Vec<SelectionPrimitive>,
         step: Pixels,
         radius: Pixels,
         patch_size: Pixels,
-        cx: Pixels,
+        edge: Pixels,
         cy: Pixels,
         position: ConcaveCornerPosition,
         fill_color: Hsla,
@@ -541,7 +545,7 @@ pub(crate) fn compute_interior_corner_patches(
             return;
         }
         let Some(patch) = build_concave_corner_path(
-            cx,
+            edge,
             cy,
             rx,
             patch_size,
@@ -560,13 +564,13 @@ pub(crate) fn compute_interior_corner_patches(
         // Skip if no horizontal overlap.
         if this_end_x > prev_end + sp && prev_end > this_start_x - sp {
             let step = this_end_x - prev_end;
-            let cx = bounds_left + prev_end - scroll_offset;
+            let edge = bounds_left + prev_end - scroll_offset;
             try_push_patch(
                 &mut patches,
                 step,
                 radius,
                 patch_size,
-                cx,
+                edge,
                 bounds_top,
                 ConcaveCornerPosition::TopRight,
                 fill_color,
@@ -577,13 +581,13 @@ pub(crate) fn compute_interior_corner_patches(
         // Top-left interior: this line extends further left than prev line.
         if this_start_x < prev_start - sp && prev_start < this_end_x + sp {
             let step = prev_start - this_start_x;
-            let cx = bounds_left + prev_start - scroll_offset;
+            let edge = bounds_left + prev_start - scroll_offset;
             try_push_patch(
                 &mut patches,
                 step,
                 radius,
                 patch_size,
-                cx,
+                edge,
                 bounds_top,
                 ConcaveCornerPosition::TopLeft,
                 fill_color,
@@ -597,13 +601,13 @@ pub(crate) fn compute_interior_corner_patches(
         // Bottom-right interior: this line extends further right than next line.
         if this_end_x > next_end + sp && next_end > this_start_x - sp {
             let step = this_end_x - next_end;
-            let cx = bounds_left + next_end - scroll_offset;
+            let edge = bounds_left + next_end - scroll_offset;
             try_push_patch(
                 &mut patches,
                 step,
                 radius,
                 patch_size,
-                cx,
+                edge,
                 bounds_bottom,
                 ConcaveCornerPosition::BottomRight,
                 fill_color,
@@ -614,13 +618,13 @@ pub(crate) fn compute_interior_corner_patches(
         // Bottom-left interior: this line extends further left than next line.
         if this_start_x < next_start - sp && next_start < this_end_x + sp {
             let step = next_start - this_start_x;
-            let cx = bounds_left + next_start - scroll_offset;
+            let edge = bounds_left + next_start - scroll_offset;
             try_push_patch(
                 &mut patches,
                 step,
                 radius,
                 patch_size,
-                cx,
+                edge,
                 bounds_bottom,
                 ConcaveCornerPosition::BottomLeft,
                 fill_color,

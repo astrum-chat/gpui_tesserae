@@ -1,19 +1,12 @@
 use gpui::{App, Window};
 
-use crate::{
-    Assets,
-    components::select,
-    primitives::{input, selectable_text},
-    theme::ThemeExt,
-};
+use crate::{Assets, theme::ThemeExt};
 
 /// Initializes global tesserae state. Call once at application startup.
 pub fn init(cx: &mut App) {
     Assets::init_fonts(cx).expect("Could not initialize fonts!");
 
-    input::init(cx);
-    selectable_text::init(cx);
-    select::init(cx);
+    gpui_primitives::init(cx);
 }
 
 /// Initializes per-window tesserae state. Call for each new window.
