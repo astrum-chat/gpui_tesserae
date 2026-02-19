@@ -11,8 +11,8 @@ use crate::selectable_text::VisibleLineInfo;
 use crate::selectable_text::state::SelectableTextState;
 use crate::utils::{
     SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_adjacent_line_selection_bounds,
-    compute_selection_shape, create_text_run, multiline_height, request_line_layout,
-    shape_and_build_visual_lines,
+    compute_max_visual_line_width, compute_selection_shape, create_text_run, multiline_height,
+    request_line_layout, shape_and_build_visual_lines,
 };
 
 /// Paints alternating colored rectangles for each character's measured bounds.
@@ -648,10 +648,7 @@ impl Element for WrappedTextElement {
 
                 let visual_line_count = visual_lines.len().max(1);
 
-                let max_line_width = wrapped_lines
-                    .iter()
-                    .map(|line| line.unwrapped_layout.width)
-                    .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+                let max_line_width = compute_max_visual_line_width(&wrapped_lines);
 
                 // Taffy may call this callback twice per frame at different
                 // widths (once unconstrained, once at the actual container

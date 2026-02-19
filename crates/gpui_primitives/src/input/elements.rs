@@ -12,9 +12,9 @@ use crate::input::state::InputState;
 use crate::input::{TransformTextFn, VisibleLineInfo};
 use crate::utils::{
     SelectionShape, TextNavigation, WIDTH_WRAP_BASE_MARGIN, build_selection_shape,
-    compute_adjacent_line_selection_bounds, compute_selection_shape, create_text_run,
-    make_cursor_quad, multiline_height, request_line_layout, selection_config_from_options,
-    shape_and_build_visual_lines,
+    compute_adjacent_line_selection_bounds, compute_max_visual_line_width,
+    compute_selection_shape, create_text_run, make_cursor_quad, multiline_height,
+    request_line_layout, selection_config_from_options, shape_and_build_visual_lines,
 };
 
 fn resolve_display_text(
@@ -1059,10 +1059,7 @@ impl Element for WrappedTextInputElement {
 
                 let visual_line_count = visual_lines.len().max(1);
 
-                let max_line_width = wrapped_lines
-                    .iter()
-                    .map(|line| line.unwrapped_layout.width)
-                    .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+                let max_line_width = compute_max_visual_line_width(&wrapped_lines);
 
                 state.update(cx, |state, _cx| {
                     state.precomputed_at_width = Some(wrap_width);

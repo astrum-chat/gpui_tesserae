@@ -382,6 +382,47 @@ pub fn build_visual_lines_from_wrap_boundaries(
     });
 }
 
+/// Computes the maximum visual (wrapped) line width across all wrapped lines.
+/// Unlike `unwrapped_layout.width` (which gives the full unwrapped width),
+/// this uses wrap boundary positions to measure each visual line segment.
+pub fn compute_max_visual_line_width(wrapped_lines: &[WrappedLine]) -> Pixels {
+    let mut max_width = Pixels::ZERO;
+
+    for wl in wrapped_lines {
+        let boundaries = &wl.wrap_boundaries;
+
+        if boundaries.is_empty() {
+            // No wrapping — single visual line is the full width
+            let w = wl.unwrapped_layout.width;
+            if w > max_width {
+                max_width = w;
+            }
+            continue;
+        }
+
+        let layout = &wl.unwrapped_layout;
+        let mut prev_x = Pixels::ZERO;
+
+        for boundary in boundaries {
+            let byte_idx = layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix].index;
+            let x = layout.x_for_index(byte_idx);
+            let segment_width = x - prev_x;
+            if segment_width > max_width {
+                max_width = segment_width;
+            }
+            prev_x = x;
+        }
+
+        // Last segment: from last boundary to end
+        let last_width = layout.width - prev_x;
+        if last_width > max_width {
+            max_width = last_width;
+        }
+    }
+
+    max_width
+}
+
 /// Shapes an adjacent line and computes its selection x-bounds.
 /// Used to determine corner rounding for multi-line selections.
 pub fn shape_and_compute_selection_bounds(

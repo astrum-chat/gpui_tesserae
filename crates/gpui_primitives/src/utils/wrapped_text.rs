@@ -6,8 +6,8 @@ use smallvec::SmallVec;
 
 use crate::input::{VisibleLineInfo, VisualLineInfo};
 use crate::utils::{
-    WIDTH_WRAP_BASE_MARGIN, build_visual_lines_from_wrap_boundaries, create_text_run,
-    multiline_height,
+    WIDTH_WRAP_BASE_MARGIN, build_visual_lines_from_wrap_boundaries,
+    compute_max_visual_line_width, create_text_run, multiline_height,
 };
 
 /// Shapes text with wrapping and builds visual line info.
@@ -97,10 +97,7 @@ pub fn measure_wrapped_text(
 
     let visual_line_count = visual_lines.len().max(1);
 
-    let max_line_width = wrapped_lines
-        .iter()
-        .map(|line| line.unwrapped_layout.width)
-        .fold(Pixels::ZERO, |a, b| if b > a { b } else { a });
+    let max_line_width = compute_max_visual_line_width(&wrapped_lines);
 
     let visible_lines = multiline_clamp
         .map_or(1, |c| c.min(visual_line_count))
