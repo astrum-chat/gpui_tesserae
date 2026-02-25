@@ -15,6 +15,7 @@ lyon = { version = "1.0.16", features = ["extra"], optional = true }
 
 [dev-dependencies]
 futures-timer = "3"
+gpui_platform = { workspace = true }
 
 [features]
 default = []

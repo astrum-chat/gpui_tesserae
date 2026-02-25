@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext as _, Application, Bounds, Context, ElementId, Entity, InteractiveElement,
+    App, AppContext as _, Bounds, Context, ElementId, Entity, InteractiveElement,
     IntoElement, Overflow, ParentElement, Render, SharedString, Styled, Window, WindowBounds,
     WindowOptions, div, prelude::FluentBuilder, px, rgb, size,
 };
@@ -235,7 +235,7 @@ fn shortcuts_help() -> impl IntoElement {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    gpui_platform::application().run(|cx: &mut App| {
         input::init(cx);
 
         let bounds = Bounds::centered(None, size(px(700.), px(800.)), cx);

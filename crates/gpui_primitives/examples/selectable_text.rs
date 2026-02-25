@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext as _, Application, Bounds, Entity, Hsla, InteractiveElement, IntoElement,
+    App, AppContext as _, Bounds, Entity, Hsla, InteractiveElement, IntoElement,
     Overflow, ParentElement, Render, Styled, Window, WindowBounds, WindowOptions, div,
     prelude::FluentBuilder, px, rgb, size,
 };
@@ -137,7 +137,7 @@ fn make_state(cx: &mut App, text: impl Into<gpui::SharedString>) -> Entity<Selec
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    gpui_platform::application().run(|cx: &mut App| {
         selectable_text::init(cx);
 
         let bounds = Bounds::centered(None, size(px(600.), px(700.)), cx);

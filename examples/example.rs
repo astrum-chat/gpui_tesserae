@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use gpui::{
-    App, AppContext, Application, Bounds, Context, ElementId, Entity, FocusHandle, KeyBinding,
+    App, AppContext, Bounds, Context, ElementId, Entity, FocusHandle, KeyBinding,
     Menu, Rgba, SharedString, TitlebarOptions, Window, WindowBounds, WindowOptions, actions, div,
     point, prelude::*, px, size,
 };
@@ -121,7 +121,7 @@ impl Render for Main {
 }
 
 fn main() {
-    Application::new()
+    gpui_platform::application()
         .with_quit_mode(gpui::QuitMode::LastWindowClosed)
         .with_assets(assets![TesseraeAssets])
         .run(|cx: &mut App| {

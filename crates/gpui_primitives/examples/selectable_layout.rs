@@ -1,5 +1,5 @@
 use gpui::{
-    App, AppContext as _, Application, Bounds, Corners, Entity, Font, FontWeight, Hsla,
+    App, AppContext as _, Bounds, Corners, Entity, Font, FontWeight, Hsla,
     IntoElement, ParentElement, Pixels, Render, SharedString, Styled, TextRun, Window,
     WindowBounds, WindowOptions, div, px, rgb, size,
 };
@@ -340,7 +340,7 @@ impl Render for ExampleApp {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    gpui_platform::application().run(|cx: &mut App| {
         selectable_layout::init(cx);
 
         let bounds = Bounds::centered(None, size(px(550.), px(600.)), cx);

@@ -43,6 +43,8 @@ pub struct SelectableLayoutState {
     pub(crate) line_byte_ranges: Vec<(usize, usize)>,
     pub(crate) last_bounds: Option<Bounds<Pixels>>,
     was_focused: bool,
+    /// Currently hovered interactive child index (for on_hover change detection).
+    pub(crate) hovered_child: Option<usize>,
 }
 
 #[allow(missing_docs)]
@@ -63,6 +65,7 @@ impl SelectableLayoutState {
             line_byte_ranges: Vec::new(),
             last_bounds: None,
             was_focused: false,
+            hovered_child: None,
         }
     }
 

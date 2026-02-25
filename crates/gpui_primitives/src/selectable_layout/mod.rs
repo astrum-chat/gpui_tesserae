@@ -11,6 +11,7 @@ mod state;
 pub use state::{Copy, SelectAll, SelectableLayoutState};
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use gpui::{
     App, Bounds, Corners, CursorStyle, Element, ElementId, Entity, FocusHandle, Focusable, Font,
@@ -104,6 +105,13 @@ impl InlineStyles {
     }
 }
 
+/// Callback invoked when a child is clicked (single-click without drag).
+pub type ChildClickHandler = Arc<dyn Fn(&mut App) + 'static>;
+
+/// Callback invoked when hover state changes for a child.
+/// The `bool` is `true` when entering hover, `false` when leaving.
+pub type ChildHoverHandler = Arc<dyn Fn(bool, &mut App) + 'static>;
+
 /// Trait for SelectableLayout children that provide text content and styling.
 pub trait InlinedChild {
     /// The text content of this child.
@@ -124,6 +132,18 @@ pub trait InlinedChild {
 
     /// Optional decoration painted behind this child's text segments.
     fn decoration(&self) -> Option<InlineStyles> {
+        None
+    }
+
+    /// Optional click handler. When present, the child's segments show a
+    /// pointing-hand cursor and fire this callback on single-click (no drag).
+    fn on_click(&self) -> Option<ChildClickHandler> {
+        None
+    }
+
+    /// Optional hover handler, called with `true` on mouse-enter and `false` on
+    /// mouse-leave.
+    fn on_hover(&self) -> Option<ChildHoverHandler> {
         None
     }
 }
@@ -338,6 +358,10 @@ impl RenderOnce for SelectableLayout {
         let mut decorations: Vec<Option<InlineStyles>> = Vec::with_capacity(self.children.len());
         let mut child_font_sizes: Vec<Pixels> = Vec::with_capacity(self.children.len());
         let mut child_line_break: Vec<Option<BreakInfo>> = Vec::with_capacity(self.children.len());
+        let mut child_on_click: Vec<Option<ChildClickHandler>> =
+            Vec::with_capacity(self.children.len());
+        let mut child_on_hover: Vec<Option<ChildHoverHandler>> =
+            Vec::with_capacity(self.children.len());
 
         for child in &self.children {
             let text = child.copy_text();
@@ -352,6 +376,8 @@ impl RenderOnce for SelectableLayout {
                 amount,
                 font_size: child_fs,
             }));
+            child_on_click.push(child.on_click());
+            child_on_hover.push(child.on_hover());
         }
 
         let combined: SharedString = combined_text.into();
@@ -403,6 +429,8 @@ impl RenderOnce for SelectableLayout {
             decorations,
             child_font_sizes,
             child_line_break,
+            child_on_click,
+            child_on_hover,
             font: self.font,
             font_size: self.font_size,
             line_height: self.line_height,
@@ -431,6 +459,8 @@ struct SelectableLayoutElement {
     decorations: Vec<Option<InlineStyles>>,
     child_font_sizes: Vec<Pixels>,
     child_line_break: Vec<Option<BreakInfo>>,
+    child_on_click: Vec<Option<ChildClickHandler>>,
+    child_on_hover: Vec<Option<ChildHoverHandler>>,
     font: Font,
     font_size: Pixels,
     line_height: Pixels,
@@ -469,8 +499,6 @@ pub(crate) struct ChildSegment {
 pub(crate) struct VisualLinePrepaint {
     /// Child segments in order, each with its own x-offset.
     pub(crate) segments: Vec<ChildSegment>,
-    /// Total content width including all decoration padding.
-    pub(crate) total_width: Pixels,
 }
 
 /// Byte range for an effective line (derived from segments, not the text shaper).
@@ -486,6 +514,8 @@ struct SelectableLayoutPrepaintState {
     line_y_offsets: Vec<Pixels>,
     line_heights: Vec<Pixels>,
     text_hitboxes: Vec<Hitbox>,
+    /// Hitboxes for clickable/hoverable children, paired with child index.
+    interactive_hitboxes: Vec<(Hitbox, usize)>,
 }
 
 /// Accumulates effective lines during prepaint layout.
@@ -582,7 +612,6 @@ impl LineBuilder {
 
         self.line_layouts.push(VisualLinePrepaint {
             segments: std::mem::take(&mut self.current_segments),
-            total_width,
         });
 
         self.line_y_offsets.push(self.y_cursor);
@@ -623,7 +652,6 @@ impl LineBuilder {
         };
         self.line_layouts.push(VisualLinePrepaint {
             segments: Vec::new(),
-            total_width: Pixels::ZERO,
         });
         self.effective_line_ranges.push(EffectiveLineRange {
             start_offset: gap_byte,
@@ -1147,7 +1175,6 @@ impl Element for SelectableLayoutElement {
         if lb.line_layouts.is_empty() {
             lb.line_layouts.push(VisualLinePrepaint {
                 segments: Vec::new(),
-                total_width: Pixels::ZERO,
             });
             lb.effective_line_ranges.push(EffectiveLineRange {
                 start_offset: 0,
@@ -1187,12 +1214,38 @@ impl Element for SelectableLayoutElement {
             state.last_bounds = Some(bounds);
         });
 
+        // Create hitboxes for clickable/hoverable children.
+        let mut interactive_hitboxes: Vec<(Hitbox, usize)> = Vec::new();
+        for (line_idx, line_layout) in lb.line_layouts.iter().enumerate() {
+            let y_off = lb.line_y_offsets[line_idx];
+            let line_h = lb.line_heights[line_idx];
+            for seg in &line_layout.segments {
+                let is_interactive = self.child_on_click[seg.child_idx].is_some()
+                    || self.child_on_hover[seg.child_idx].is_some();
+                if is_interactive && seg.shaped_line.width > Pixels::ZERO {
+                    let seg_bounds = Bounds {
+                        origin: point(
+                            bounds.origin.x + seg.x_offset,
+                            bounds.origin.y + y_off,
+                        ),
+                        size: gpui::Size {
+                            width: seg.shaped_line.width,
+                            height: line_h,
+                        },
+                    };
+                    let hitbox = window.insert_hitbox(seg_bounds, HitboxBehavior::Normal);
+                    interactive_hitboxes.push((hitbox, seg.child_idx));
+                }
+            }
+        }
+
         SelectableLayoutPrepaintState {
             line_layouts: lb.line_layouts,
             effective_line_ranges: lb.effective_line_ranges,
             line_y_offsets: lb.line_y_offsets,
             line_heights: lb.line_heights,
             text_hitboxes: lb.text_hitboxes,
+            interactive_hitboxes,
         }
     }
 
@@ -1224,30 +1277,108 @@ impl Element for SelectableLayoutElement {
             window.set_cursor_style(CursorStyle::IBeam, hitbox);
         }
 
-        for (idx, (line_layout, line_range)) in prepaint
-            .line_layouts
-            .iter()
-            .zip(prepaint.effective_line_ranges.iter())
-            .enumerate()
-        {
-            let y_off = prepaint.line_y_offsets[idx];
-            let line_h = prepaint.line_heights[idx];
+        // Set pointing-hand cursor for interactive children (overrides IBeam).
+        for (hitbox, _child_idx) in &prepaint.interactive_hitboxes {
+            window.set_cursor_style(CursorStyle::PointingHand, hitbox);
+        }
 
-            let line_origin = point(bounds.origin.x, bounds.origin.y + y_off);
-            let line_bounds = Bounds {
-                origin: line_origin,
-                size: gpui::Size {
-                    width: bounds.size.width,
-                    height: line_h,
-                },
-            };
+        // Handle click and hover for interactive children.
+        if !prepaint.interactive_hitboxes.is_empty() {
+            let child_on_click = std::mem::take(&mut self.child_on_click);
+            let child_on_hover = std::mem::take(&mut self.child_on_hover);
+            let interactive_hitboxes: Vec<(Hitbox, usize)> =
+                std::mem::take(&mut prepaint.interactive_hitboxes);
+            let state = self.state.clone();
 
-            let text_y_offset = (line_h - self.line_height) / 2.0;
-            let scale_factor = window.scale_factor();
+            let has_any_hover = child_on_hover.iter().any(|h| h.is_some());
+
+            // Hover tracking with change detection.
+            if has_any_hover {
+                let interactive_hitboxes = interactive_hitboxes.clone();
+                let child_on_hover = child_on_hover.clone();
+                let state = state.clone();
+                window.on_mouse_event(
+                    move |_event: &gpui::MouseMoveEvent, phase, window, cx| {
+                        if phase == gpui::DispatchPhase::Capture {
+                            return;
+                        }
+                        let mut new_hovered: Option<usize> = None;
+                        for (hitbox, child_idx) in &interactive_hitboxes {
+                            if child_on_hover[*child_idx].is_some() && hitbox.is_hovered(window) {
+                                new_hovered = Some(*child_idx);
+                                break;
+                            }
+                        }
+                        let old_hovered = state.read(cx).hovered_child;
+                        if new_hovered != old_hovered {
+                            // Fire leave on old.
+                            if let Some(old) = old_hovered {
+                                if let Some(handler) = &child_on_hover[old] {
+                                    handler(false, cx);
+                                }
+                            }
+                            // Fire enter on new.
+                            if let Some(new) = new_hovered {
+                                if let Some(handler) = &child_on_hover[new] {
+                                    handler(true, cx);
+                                }
+                            }
+                            state.update(cx, |s, _| s.hovered_child = new_hovered);
+                        }
+                    },
+                );
+            }
+
+            // Click detection on mouse-up: if selection is empty (no drag), fire on_click.
+            window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, window, cx| {
+                if phase == gpui::DispatchPhase::Capture {
+                    return;
+                }
+                if event.button != MouseButton::Left {
+                    return;
+                }
+                let is_empty_selection = state.read(cx).selected_range.is_empty();
+                if !is_empty_selection {
+                    return;
+                }
+                for (hitbox, child_idx) in &interactive_hitboxes {
+                    if let Some(handler) = &child_on_click[*child_idx] {
+                        if hitbox.is_hovered(window) {
+                            handler(cx);
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
+        let scale_factor = window.scale_factor();
+
+        // Compute line bounds once for all passes.
+        let line_bounds_list: Vec<_> = (0..prepaint.line_layouts.len())
+            .map(|idx| {
+                let y_off = prepaint.line_y_offsets[idx];
+                let line_h = prepaint.line_heights[idx];
+                let line_origin = point(bounds.origin.x, bounds.origin.y + y_off);
+                Bounds {
+                    origin: line_origin,
+                    size: gpui::Size {
+                        width: bounds.size.width,
+                        height: line_h,
+                    },
+                }
+            })
+            .collect();
+
+        // Pass 1: Decoration backgrounds + decoration interior corners.
+        for (idx, line_layout) in prepaint.line_layouts.iter().enumerate() {
+            let line_bounds = line_bounds_list[idx];
+            let line_origin = line_bounds.origin;
+
             for seg in &line_layout.segments {
                 if let Some(decoration) = &self.decorations[seg.child_idx] {
                     let dec_height = self.line_height + decoration.padding_y * 2.0;
-                    let dec_y = line_origin.y + (line_h - dec_height) / 2.0;
+                    let dec_y = line_origin.y + (line_bounds.size.height - dec_height) / 2.0;
 
                     let (dec_x, dec_width) = if decoration.display == DecorationDisplay::Block {
                         (seg.child_x, seg.child_width)
@@ -1393,8 +1524,17 @@ impl Element for SelectableLayoutElement {
                     }
                 }
             }
+        }
 
-            if !selected_range.is_empty() {
+        // Pass 2: Selection highlights + selection interior corners.
+        if !selected_range.is_empty() {
+            for (idx, (line_layout, line_range)) in prepaint
+                .line_layouts
+                .iter()
+                .zip(prepaint.effective_line_ranges.iter())
+                .enumerate()
+            {
+                let line_bounds = line_bounds_list[idx];
                 self.paint_line_selection(
                     idx,
                     line_layout,
@@ -1406,6 +1546,12 @@ impl Element for SelectableLayoutElement {
                     window,
                 );
             }
+        }
+
+        // Pass 3: Text glyphs.
+        for (idx, line_layout) in prepaint.line_layouts.iter().enumerate() {
+            let line_bounds = line_bounds_list[idx];
+            let text_y_offset = (line_bounds.size.height - self.line_height) / 2.0;
 
             for seg in &line_layout.segments {
                 // Accommodate larger font metrics for correct strikethrough/underline.
@@ -1414,8 +1560,8 @@ impl Element for SelectableLayoutElement {
                     .max(seg.shaped_line.ascent + seg.shaped_line.descent);
                 let y_adjust = (self.line_height - seg_line_height) / 2.0;
                 let seg_origin = point(
-                    line_origin.x + seg.x_offset,
-                    line_origin.y + text_y_offset + y_adjust,
+                    line_bounds.origin.x + seg.x_offset,
+                    line_bounds.origin.y + text_y_offset + y_adjust,
                 );
                 let _ = seg.shaped_line.paint(
                     seg_origin,

@@ -9,6 +9,7 @@ gpui_primitives = { path = "crates/gpui_primitives" }
 
 gpui_squircle = { git = "https://github.com/astrum-chat/gpui_squircle" }
 gpui = "0.2.2"
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
 gpui_transitions = "0.1.5"
 smallvec = { version = "1.15.1", features = ["serde"] }
 unicode-segmentation = "1.12.0"
@@ -20,6 +21,7 @@ edition = "2024"
 
 [dependencies]
 gpui = { workspace = true }
+gpui_platform = { workspace = true }
 gpui_primitives = { workspace = true, features = ["squircle"] }
 smol = "2"
 gpui_transitions = { workspace = true }
