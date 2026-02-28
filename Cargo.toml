@@ -9,7 +9,7 @@ gpui_primitives = { path = "crates/gpui_primitives" }
 
 gpui_squircle = { git = "https://github.com/astrum-chat/gpui_squircle" }
 gpui = "0.2.2"
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"], rev = "e1ea899" }
 gpui_transitions = "0.1.5"
 smallvec = { version = "1.15.1", features = ["serde"] }
 unicode-segmentation = "1.12.0"
@@ -43,7 +43,7 @@ rust-embed = { version = "8.9.0", optional = true, features = ["include-exclude"
 core-text = "=21.0.0"
 
 [patch.crates-io]
-gpui = { git = "https://github.com/zed-industries/zed" }
+gpui = { git = "https://github.com/zed-industries/zed", rev = "e1ea899" }
 
 [features]
 default = ["assets", "test-support"]
