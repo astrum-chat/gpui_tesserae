@@ -67,6 +67,12 @@ impl Toggle {
         self
     }
 
+    /// Sets the gap between child elements (icon, text, positional children).
+    pub fn gap(mut self, gap: impl Into<DefiniteLength>) -> Self {
+        self.base = self.base.gap(gap);
+        self
+    }
+
     /// Sets the disabled state, preventing interaction.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.base = self.base.disabled(disabled);

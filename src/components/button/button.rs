@@ -30,6 +30,7 @@ struct ButtonStyles {
     padding: Edges<Option<DefiniteLength>>,
     corner_radii: Corners<Option<Pixels>>,
     icon_rotate: Radians,
+    gap: Option<DefiniteLength>,
     width: Length,
     min_width: Option<Length>,
     min_height: Option<Length>,
@@ -45,6 +46,7 @@ impl Default for ButtonStyles {
             padding: Edges::default(),
             corner_radii: Corners::default(),
             icon_rotate: Radians(0.),
+            gap: None,
             width: Length::Auto,
             min_width: None,
             min_height: None,
@@ -132,6 +134,12 @@ impl Button {
     /// Applies a rotation transformation to the icon.
     pub fn icon_rotate(mut self, rotate: impl Into<Radians>) -> Self {
         self.style.icon_rotate = rotate.into();
+        self
+    }
+
+    /// Sets the gap between child elements (icon, text, positional children).
+    pub fn gap(mut self, gap: impl Into<DefiniteLength>) -> Self {
+        self.style.gap = Some(gap.into());
         self
     }
 
@@ -453,6 +461,7 @@ impl RenderOnce for Button {
                 .size
                 .lg
                 .padding_needed_for_height(window, text_size, line_height);
+        let gap = self.style.gap.unwrap_or(horizontal_padding.into());
 
         let is_hover_state =
             window.use_keyed_state(self.id.with_suffix("state:hover"), cx, |_cx, _window| false);
@@ -541,7 +550,7 @@ impl RenderOnce for Button {
             .map(|this| {
                 apply_padding!(this, padding_override, vertical_padding, horizontal_padding)
             })
-            .gap(horizontal_padding)
+            .gap(gap)
             .flex()
             .flex_col()
             .opacity(*disabled_transition.evaluate(window, cx))
@@ -601,7 +610,6 @@ impl RenderOnce for Button {
                                         this.child(
                                             min_w0_wrapper()
                                                 .text_ellipsis()
-                                                .min_w_0()
                                                 .child(text)
                                                 .max_w_full()
                                                 .flex_shrink()
