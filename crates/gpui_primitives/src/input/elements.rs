@@ -981,7 +981,8 @@ pub(crate) struct WrappedTextInputElement {
     pub selection_precise: bool,
     #[cfg(feature = "debug")]
     pub debug_interior_corners: bool,
-    pub multiline_clamp: Option<usize>,
+    pub multiline_max_lines: Option<usize>,
+    pub multiline_min_lines: Option<usize>,
     pub scale_factor: f32,
     pub style: Style,
     /// Created during prepaint, painted during paint.
@@ -1022,7 +1023,8 @@ impl Element for WrappedTextInputElement {
     ) -> (LayoutId, Self::RequestLayoutState) {
         let state = self.input.clone();
         let line_height = self.line_height;
-        let multiline_clamp = self.multiline_clamp;
+        let multiline_max_lines = self.multiline_max_lines;
+        let multiline_min_lines = self.multiline_min_lines;
         let scale_factor = self.scale_factor;
         let font = self.font.clone();
         let font_size = self.font_size;
@@ -1040,7 +1042,10 @@ impl Element for WrappedTextInputElement {
                 let Some(width) = width else {
                     // No definite width available - use existing visual lines as fallback
                     let count = state.read(cx).precomputed_visual_lines.len().max(1);
-                    let visible = multiline_clamp.map_or(1, |c| c.min(count)).max(1);
+                    let visible = multiline_max_lines
+                        .map_or(1, |c| c.min(count))
+                        .max(multiline_min_lines.unwrap_or(1))
+                        .max(1);
                     let height = multiline_height(line_height, visible, scale_factor);
                     return size(Pixels::ZERO, height);
                 };
@@ -1074,8 +1079,9 @@ impl Element for WrappedTextInputElement {
                     }
                 });
 
-                let visible_lines = multiline_clamp
+                let visible_lines = multiline_max_lines
                     .map_or(1, |c| c.min(visual_line_count))
+                    .max(multiline_min_lines.unwrap_or(1))
                     .max(1);
                 let height = multiline_height(line_height, visible_lines, scale_factor);
 
@@ -1216,8 +1222,9 @@ impl Element for WrappedTextInputElement {
         });
 
         let visible_lines = self
-            .multiline_clamp
+            .multiline_max_lines
             .map_or(1, |c| c.min(self.children.len()))
+            .max(self.multiline_min_lines.unwrap_or(1))
             .max(1);
         let clip_bounds = Bounds {
             origin: bounds.origin,

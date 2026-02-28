@@ -95,7 +95,8 @@ pub struct InputState {
     pub(crate) map_text: Option<MapTextFn>,
     pub(crate) is_wrapped: bool,
     pub scroll_handle: UniformListScrollHandle,
-    pub(crate) multiline_clamp: Option<usize>,
+    pub(crate) multiline_max_lines: Option<usize>,
+    pub(crate) multiline_min_lines: Option<usize>,
     pub(crate) visible_lines_info: Vec<VisibleLineInfo>,
     pub(crate) cached_wrap_width: Option<Pixels>,
     pub(crate) precomputed_visual_lines: Vec<VisualLineInfo>,
@@ -139,7 +140,8 @@ impl InputState {
             map_text: None,
             is_wrapped: false,
             scroll_handle: UniformListScrollHandle::new(),
-            multiline_clamp: None,
+            multiline_max_lines: None,
+            multiline_min_lines: None,
             visible_lines_info: Vec::new(),
             cached_wrap_width: None,
             precomputed_visual_lines: Vec::new(),
@@ -179,11 +181,13 @@ impl InputState {
         &mut self,
         is_multiline: bool,
         line_height: Pixels,
-        multiline_clamp: Option<usize>,
+        multiline_max_lines: Option<usize>,
+        multiline_min_lines: Option<usize>,
     ) {
         self.is_multiline = is_multiline;
         self.line_height = Some(line_height);
-        self.multiline_clamp = multiline_clamp;
+        self.multiline_max_lines = multiline_max_lines;
+        self.multiline_min_lines = multiline_min_lines;
     }
 
     #[allow(dead_code)]
@@ -221,7 +225,7 @@ impl InputState {
                 self.cursor_offset(),
                 &self.precomputed_visual_lines,
                 line_height,
-                self.multiline_clamp,
+                self.multiline_max_lines,
                 self.vertical_scroll_offset,
             );
         } else {
@@ -229,7 +233,7 @@ impl InputState {
                 self.cursor_offset(),
                 self.is_wrapped,
                 &self.precomputed_visual_lines,
-                self.multiline_clamp,
+                self.multiline_max_lines,
                 &self.scroll_handle,
                 |offset| self.offset_to_line_col(offset).0,
                 || self.line_count(),
@@ -243,7 +247,7 @@ impl InputState {
             self.vertical_scroll_offset,
             line_height,
             self.precomputed_visual_lines.len(),
-            self.multiline_clamp,
+            self.multiline_max_lines,
         );
     }
 
@@ -625,11 +629,11 @@ impl InputState {
         if self.is_wrapped {
             let total_visual_lines = self.precomputed_visual_lines.len().max(1);
             let has_vertical_scroll = self
-                .multiline_clamp
+                .multiline_max_lines
                 .map_or(false, |clamp| total_visual_lines > clamp);
 
             if has_vertical_scroll && delta.y.abs() > px(0.01) {
-                let clamp = self.multiline_clamp.unwrap(); // safe: has_vertical_scroll implies Some
+                let clamp = self.multiline_max_lines.unwrap(); // safe: has_vertical_scroll implies Some
                 let max_scroll = line_height * (total_visual_lines - clamp) as f32;
                 let new_offset = (self.vertical_scroll_offset - delta.y)
                     .max(Pixels::ZERO)
@@ -646,7 +650,7 @@ impl InputState {
         }
 
         let has_vertical_scroll = self
-            .multiline_clamp
+            .multiline_max_lines
             .map_or(false, |clamp| self.line_count() > clamp);
 
         let container_width = self.last_bounds.map(|b| b.size.width).unwrap_or(px(100.0));

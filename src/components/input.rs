@@ -247,8 +247,14 @@ impl Input {
     }
 
     /// Sets the maximum number of visible lines before scrolling. Use `multiline()` for unlimited.
-    pub fn multiline_clamp(mut self, multiline_clamp: usize) -> Self {
-        self.base = self.base.multiline_clamp(multiline_clamp);
+    pub fn multiline_max_lines(mut self, max_lines: usize) -> Self {
+        self.base = self.base.multiline_max_lines(max_lines);
+        self
+    }
+
+    /// Sets the minimum number of visible lines (height = line_height * n).
+    pub fn multiline_min_lines(mut self, min_lines: usize) -> Self {
+        self.base = self.base.multiline_min_lines(min_lines);
         self
     }
 

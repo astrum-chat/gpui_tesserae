@@ -96,7 +96,7 @@ impl ExampleApp {
             "Line Clamped (3 lines)",
             "Shows max 3 lines, scrolls after",
             styled_input("clamped", self.clamped_input.clone())
-                .multiline_clamp(3)
+                .multiline_max_lines(3)
                 .placeholder("Limited to 3 visible lines..."),
         )
     }

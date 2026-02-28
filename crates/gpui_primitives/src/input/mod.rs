@@ -38,7 +38,8 @@ pub struct Input {
     id: ElementId,
     state: Entity<InputState>,
     disabled: bool,
-    multiline_clamp: Option<usize>,
+    multiline_max_lines: Option<usize>,
+    multiline_min_lines: Option<usize>,
     multiline_wrapped: bool,
     on_submit: Option<OnEnterFn>,
     submit_disabled: bool,
@@ -70,7 +71,8 @@ impl Input {
             id: id.into(),
             state,
             disabled: false,
-            multiline_clamp: None,
+            multiline_max_lines: None,
+            multiline_min_lines: None,
             multiline_wrapped: false,
             on_submit: None,
             submit_disabled: false,
@@ -91,13 +93,19 @@ impl Input {
     }
 
     /// Sets the maximum number of visible lines before scrolling. Use `multiline()` for unlimited.
-    pub fn multiline_clamp(mut self, multiline_clamp: usize) -> Self {
-        self.multiline_clamp = Some(multiline_clamp.max(1));
+    pub fn multiline_max_lines(mut self, max_lines: usize) -> Self {
+        self.multiline_max_lines = Some(max_lines.max(1));
+        self
+    }
+
+    /// Sets the minimum number of visible lines (height = line_height * n).
+    pub fn multiline_min_lines(mut self, min_lines: usize) -> Self {
+        self.multiline_min_lines = Some(min_lines.max(1));
         self
     }
 
     pub fn multiline(mut self) -> Self {
-        self.multiline_clamp = Some(usize::MAX);
+        self.multiline_max_lines = Some(usize::MAX);
         self
     }
 
@@ -229,7 +237,7 @@ impl Input {
 
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let is_multiline = self.multiline_clamp.is_some_and(|c| c > 1);
+        let is_multiline = self.multiline_max_lines.is_some_and(|c| c > 1);
 
         let params = crate::utils::compute_text_render_params(&self.style.text, window);
         let font = params.font;
@@ -240,7 +248,12 @@ impl RenderOnce for Input {
         let map_text = self.map_text.clone();
         self.state.update(cx, |state, cx| {
             state.update_focus_state(window, cx);
-            state.set_multiline_params(is_multiline, line_height, self.multiline_clamp);
+            state.set_multiline_params(
+                is_multiline,
+                line_height,
+                self.multiline_max_lines,
+                self.multiline_min_lines,
+            );
             state.map_text = map_text;
         });
 
@@ -307,7 +320,8 @@ impl RenderOnce for Input {
                 let input_state = self.state.clone();
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
-                let multiline_clamp = self.multiline_clamp;
+                let multiline_max_lines = self.multiline_max_lines;
+                let multiline_min_lines = self.multiline_min_lines;
                 let selection_rounded = self.selection_rounded;
                 #[cfg(feature = "squircle")]
                 let selection_rounded_smoothing = self.selection_rounded_smoothing;
@@ -317,7 +331,8 @@ impl RenderOnce for Input {
                 #[cfg(feature = "debug")]
                 let debug_interior_corners = self.debug_interior_corners;
 
-                let needs_scroll = multiline_clamp.map_or(false, |clamp| line_count > clamp);
+                let needs_scroll =
+                    multiline_max_lines.map_or(false, |max| line_count > max);
 
                 let list = uniform_list(
                     self.id.clone(),
@@ -379,7 +394,10 @@ impl RenderOnce for Input {
                 })
                 .h(multiline_height(
                     line_height,
-                    multiline_clamp.map_or(1, |c| c.min(line_count)).max(1),
+                    multiline_max_lines
+                        .map_or(1, |c| c.min(line_count))
+                        .max(multiline_min_lines.unwrap_or(1))
+                        .max(1),
                     scale_factor,
                 ));
 
@@ -427,7 +445,8 @@ impl RenderOnce for Input {
                     selection_precise: self.selection_precise,
                     #[cfg(feature = "debug")]
                     debug_interior_corners: self.debug_interior_corners,
-                    multiline_clamp: self.multiline_clamp,
+                    multiline_max_lines: self.multiline_max_lines,
+                    multiline_min_lines: self.multiline_min_lines,
                     scale_factor,
                     style: element_style,
                     children: Vec::new(),
