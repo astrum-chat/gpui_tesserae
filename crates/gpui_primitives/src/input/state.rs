@@ -9,8 +9,8 @@ use gpui::{
 
 use crate::input::CursorBlink;
 use crate::utils::{
-    TextNavigation, auto_scroll_horizontal, clamp_vertical_scroll, ensure_cursor_visible_in_scroll,
-    ensure_cursor_visible_wrapped, shape_and_build_visual_lines,
+    TextNavigation, auto_scroll_horizontal, ensure_cursor_visible_in_scroll,
+    shape_and_build_visual_lines,
 };
 
 pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
@@ -106,7 +106,6 @@ pub struct InputState {
     /// Deferred: scroll cursor into view after visual lines are recomputed.
     pub(crate) scroll_to_cursor_on_next_render: bool,
     pub(crate) horizontal_scroll_offset: Pixels,
-    pub(crate) vertical_scroll_offset: Pixels,
     pub(crate) last_text_width: Pixels,
     pub(crate) is_manually_scrolling: bool,
     /// Opt-in: set by navigation/editing, NOT by double-click/triple-click/select-all.
@@ -151,7 +150,6 @@ impl InputState {
             needs_wrap_recompute: false,
             scroll_to_cursor_on_next_render: false,
             horizontal_scroll_offset: Pixels::ZERO,
-            vertical_scroll_offset: Pixels::ZERO,
             last_text_width: Pixels::ZERO,
             is_manually_scrolling: false,
             scroll_to_cursor_horizontal: false,
@@ -219,35 +217,14 @@ impl InputState {
     }
 
     pub fn ensure_cursor_visible(&mut self) {
-        if self.is_wrapped {
-            let line_height = self.line_height.unwrap_or(px(16.0));
-            self.vertical_scroll_offset = ensure_cursor_visible_wrapped(
-                self.cursor_offset(),
-                &self.precomputed_visual_lines,
-                line_height,
-                self.multiline_max_lines,
-                self.vertical_scroll_offset,
-            );
-        } else {
-            ensure_cursor_visible_in_scroll(
-                self.cursor_offset(),
-                self.is_wrapped,
-                &self.precomputed_visual_lines,
-                self.multiline_max_lines,
-                &self.scroll_handle,
-                |offset| self.offset_to_line_col(offset).0,
-                || self.line_count(),
-            );
-        }
-    }
-
-    pub(crate) fn clamp_vertical_scroll(&mut self) {
-        let line_height = self.line_height.unwrap_or(px(16.0));
-        self.vertical_scroll_offset = clamp_vertical_scroll(
-            self.vertical_scroll_offset,
-            line_height,
-            self.precomputed_visual_lines.len(),
+        ensure_cursor_visible_in_scroll(
+            self.cursor_offset(),
+            self.is_wrapped,
+            &self.precomputed_visual_lines,
             self.multiline_max_lines,
+            &self.scroll_handle,
+            |offset| self.offset_to_line_col(offset).0,
+            || self.line_count(),
         );
     }
 
@@ -626,26 +603,8 @@ impl InputState {
         let line_height = self.line_height.unwrap_or(px(16.0));
         let delta = event.delta.pixel_delta(line_height);
 
+        // Wrapped mode: uniform_list handles vertical scrolling natively.
         if self.is_wrapped {
-            let total_visual_lines = self.precomputed_visual_lines.len().max(1);
-            let has_vertical_scroll = self
-                .multiline_max_lines
-                .map_or(false, |clamp| total_visual_lines > clamp);
-
-            if has_vertical_scroll && delta.y.abs() > px(0.01) {
-                let clamp = self.multiline_max_lines.unwrap(); // safe: has_vertical_scroll implies Some
-                let max_scroll = line_height * (total_visual_lines - clamp) as f32;
-                let new_offset = (self.vertical_scroll_offset - delta.y)
-                    .max(Pixels::ZERO)
-                    .min(max_scroll);
-
-                if new_offset != self.vertical_scroll_offset {
-                    self.vertical_scroll_offset = new_offset;
-                    self.is_manually_scrolling = true;
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }
             return;
         }
 

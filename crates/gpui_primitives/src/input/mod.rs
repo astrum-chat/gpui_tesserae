@@ -11,14 +11,14 @@ use std::sync::Arc;
 use gpui::{
     App, CursorStyle, ElementId, Entity, FocusHandle, Focusable, Hsla, InteractiveElement,
     IntoElement, KeyBinding, MouseButton, Overflow, ParentElement, Refineable, RenderOnce,
-    SharedString, Style, StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder,
-    relative, rgb, uniform_list,
+    SharedString, StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder, rgb,
+    uniform_list,
 };
 
 use crate::input::state::{SecondarySubmit, Submit};
 use crate::utils::{TextNavigation, multiline_height, rgb_a};
 pub use cursor_blink::CursorBlink;
-use elements::{LineElement, TextElement, UniformListInputElement, WrappedTextInputElement};
+use elements::{LineElement, TextElement, UniformListInputElement, WrappedLineElement};
 pub use state::{
     Backspace, Copy, Cut, Delete, DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd,
     DeleteToPreviousWordStart, Down, End, Home, InputState, Left, MapTextFn, MoveToEnd,
@@ -257,7 +257,17 @@ impl RenderOnce for Input {
             state.map_text = map_text;
         });
 
-        let state = self.state.read(cx);
+        let cursor_visible;
+        let scroll_handle;
+        let line_count;
+        let focus_handle;
+        {
+            let state = self.state.read(cx);
+            cursor_visible = state.cursor_visible(cx);
+            scroll_handle = state.scroll_handle.clone();
+            line_count = state.line_count().max(1);
+            focus_handle = state.focus_handle.clone();
+        }
 
         let text_color = self
             .style
@@ -271,7 +281,6 @@ impl RenderOnce for Input {
         let highlight_text_color = self
             .selection_color
             .unwrap_or_else(|| rgb_a(0x488BFF, 0.3).into());
-        let cursor_visible = state.cursor_visible(cx);
 
         div()
             .id(self.id.clone())
@@ -282,7 +291,7 @@ impl RenderOnce for Input {
             })
             .tab_index(0)
             .key_context("TextInput")
-            .when(!self.disabled, |this| this.track_focus(&state.focus_handle))
+            .when(!self.disabled, |this| this.track_focus(&focus_handle))
             .cursor(if self.disabled {
                 CursorStyle::OperationNotAllowed
             } else {
@@ -315,8 +324,7 @@ impl RenderOnce for Input {
             .on_scroll_wheel(window.listener_for(&self.state, InputState::on_scroll_wheel))
             .when(is_multiline && !self.multiline_wrapped, |this| {
                 let font = font.clone();
-                let line_count = state.line_count().max(1);
-                let scroll_handle = state.scroll_handle.clone();
+                let scroll_handle = scroll_handle.clone();
                 let input_state = self.state.clone();
                 let transform_text = self.transform_text.clone();
                 let placeholder = self.placeholder.clone();
@@ -408,48 +416,133 @@ impl RenderOnce for Input {
             })
             .when(is_multiline && self.multiline_wrapped, |this| {
                 let font = font.clone();
+                let scroll_handle = scroll_handle.clone();
+                let input_state = self.state.clone();
+                let transform_text = self.transform_text.clone();
+                let placeholder = self.placeholder.clone();
+                let multiline_max_lines = self.multiline_max_lines;
+                let multiline_min_lines = self.multiline_min_lines;
+                let selection_rounded = self.selection_rounded;
+                #[cfg(feature = "squircle")]
+                let selection_rounded_smoothing = self.selection_rounded_smoothing;
+                #[cfg(not(feature = "squircle"))]
+                let selection_rounded_smoothing: Option<f32> = None;
+                let selection_precise = self.selection_precise;
+                #[cfg(feature = "debug")]
+                let debug_interior_corners = self.debug_interior_corners;
 
-                // Cache render params on state (needed for UniformListInputElement's
-                // rewrap_at_width fallback). The measure callback handles wrapping
-                // with the actual width.
+                // Cache render params on state for width-change rewrap.
                 self.state.update(cx, |state, _cx| {
                     state.last_font = Some(font.clone());
                     state.last_font_size = Some(font_size);
                     state.last_text_color = Some(text_color);
                     state.is_wrapped = true;
-                    state.needs_wrap_recompute = false;
                 });
 
-                // The parent div keeps the user's sizing (w, max_w, etc.).
-                // The WrappedTextInputElement fills the parent at 100% width
-                // so it gets the parent's resolved width in its measure callback.
-                let mut element_style = Style::default();
-                element_style.size.width = relative(1.).into();
+                // Recompute visual lines using cached width from previous frame.
+                // On first render (no cached width), fall back to logical line count.
+                let visual_line_count = {
+                    let cached_width = self.state.read(cx).cached_wrap_width;
+                    if let Some(width) = cached_width {
+                        let wrap_width = width + crate::utils::WIDTH_WRAP_BASE_MARGIN;
+                        let text = self.state.read(cx).value();
+                        let (wrapped_lines, visual_lines) =
+                            crate::utils::shape_and_build_visual_lines(
+                                &text,
+                                wrap_width,
+                                font_size,
+                                font.clone(),
+                                text_color,
+                                window,
+                            );
+                        let count = visual_lines.len().max(1);
+                        self.state.update(cx, |state, _cx| {
+                            state.precomputed_at_width = Some(wrap_width);
+                            state.precomputed_visual_lines = visual_lines;
+                            state.precomputed_wrapped_lines = wrapped_lines;
+                            state.needs_wrap_recompute = false;
 
-                this.child(WrappedTextInputElement {
-                    input: self.state.clone(),
-                    text_color,
-                    placeholder_text_color,
-                    highlight_text_color,
+                            if state.scroll_to_cursor_on_next_render {
+                                state.scroll_to_cursor_on_next_render = false;
+                                state.ensure_cursor_visible();
+                            }
+                        });
+                        count
+                    } else {
+                        self.state.read(cx).line_count().max(1)
+                    }
+                };
+
+                let needs_scroll =
+                    multiline_max_lines.map_or(false, |max| visual_line_count > max);
+
+                let list = uniform_list(
+                    self.id.clone(),
+                    visual_line_count,
+                    move |visible_range, _window, cx| {
+                        let state = input_state.read(cx);
+                        let visual_lines = &state.precomputed_visual_lines;
+                        let selected_range = state.selected_range.clone();
+                        let cursor_offset = state.cursor_offset();
+
+                        visible_range
+                            .map(|visual_idx| {
+                                let prev_visual_line_offsets = if visual_idx > 0 {
+                                    visual_lines
+                                        .get(visual_idx - 1)
+                                        .map(|info| (info.start_offset, info.end_offset))
+                                } else {
+                                    None
+                                };
+                                let next_visual_line_offsets = visual_lines
+                                    .get(visual_idx + 1)
+                                    .map(|info| (info.start_offset, info.end_offset));
+
+                                WrappedLineElement {
+                                    input: input_state.clone(),
+                                    visual_line_index: visual_idx,
+                                    text_color,
+                                    placeholder_text_color,
+                                    highlight_text_color,
+                                    line_height,
+                                    font_size,
+                                    font: font.clone(),
+                                    transform_text: transform_text.clone(),
+                                    cursor_visible,
+                                    selected_range: selected_range.clone(),
+                                    cursor_offset,
+                                    placeholder: placeholder.clone(),
+                                    selection_rounded,
+                                    selection_rounded_smoothing,
+                                    prev_visual_line_offsets,
+                                    next_visual_line_offsets,
+                                    selection_precise,
+                                    #[cfg(feature = "debug")]
+                                    debug_interior_corners,
+                                }
+                            })
+                            .collect()
+                    },
+                )
+                .track_scroll(&scroll_handle)
+                .map(|mut list| {
+                    if !needs_scroll {
+                        list.style().overflow.y = Some(Overflow::Hidden);
+                    }
+                    list
+                })
+                .h(multiline_height(
                     line_height,
-                    font_size,
-                    font: font.clone(),
-                    transform_text: self.transform_text.clone(),
-                    cursor_visible,
-                    placeholder: self.placeholder.clone(),
-                    selection_rounded: self.selection_rounded,
-                    #[cfg(feature = "squircle")]
-                    selection_rounded_smoothing: self.selection_rounded_smoothing,
-                    #[cfg(not(feature = "squircle"))]
-                    selection_rounded_smoothing: None,
-                    selection_precise: self.selection_precise,
-                    #[cfg(feature = "debug")]
-                    debug_interior_corners: self.debug_interior_corners,
-                    multiline_max_lines: self.multiline_max_lines,
-                    multiline_min_lines: self.multiline_min_lines,
+                    multiline_max_lines
+                        .map_or(1, |c| c.min(visual_line_count))
+                        .max(multiline_min_lines.unwrap_or(1))
+                        .max(1),
                     scale_factor,
-                    style: element_style,
-                    children: Vec::new(),
+                ));
+
+                this.child(UniformListInputElement {
+                    input: self.state.clone(),
+                    child: list.into_any_element(),
                 })
             })
             .when(!is_multiline, |this| {
