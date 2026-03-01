@@ -49,10 +49,15 @@ Input::new("my-input", state)
 // Single-line (default)
 Input::new("input", state)
 
-// Enables mulitline with a maximum amount
+// Enables multiline with a maximum amount
 // of visible lines (scrolls after 5 lines).
 Input::new("input", state)
-    .multiline_clamp(5)
+    .multiline_max_lines(5)
+
+// Set a minimum height of 3 lines
+Input::new("input", state)
+    .multiline_max_lines(5)
+    .multiline_min_lines(3)
 
 // Shorthand for enabling multiline with
 // no maximum amount of visible lines.
@@ -114,7 +119,8 @@ state.update(cx, |this, _cx| { this.clear(); });
 | Method | Description |
 |---|---|
 | `placeholder(text)` | Placeholder text shown when empty |
-| `multiline_clamp(n)` | Max visible lines before scrolling |
+| `multiline_max_lines(n)` | Max visible lines before scrolling |
+| `multiline_min_lines(n)` | Minimum height in lines (requires multiline) |
 | `multiline()` | Unlimited lines with vertical scrolling |
 | `multiline_wrapped()` | Enable word wrapping (requires multiline) |
 | `on_submit(callback)` | Callback on Enter; forces Shift+Enter for newlines |
@@ -182,7 +188,7 @@ SelectableText::new("text", state)
 
 // Limit to 5 visible lines with scrolling
 SelectableText::new("text", state)
-    .multiline_clamp(5)
+    .multiline_max_lines(5)
 ```
 
 ### Builder Methods
@@ -190,7 +196,7 @@ SelectableText::new("text", state)
 | Method | Description |
 |---|---|
 | `multiline()` | Enable unlimited multiline display |
-| `multiline_clamp(n)` | Max visible lines before scrolling |
+| `multiline_max_lines(n)` | Max visible lines before scrolling |
 | `multiline_wrapped()` | Enable word wrapping (requires multiline) |
 | `selection_color(color)` | Selection highlight color |
 | `selection_rounded(px)` | Selection corner radius |

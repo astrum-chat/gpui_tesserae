@@ -9,8 +9,8 @@ use gpui::{
 
 use crate::utils::{
     TextNavigation, WIDTH_WRAP_BASE_MARGIN, apply_selection_change, auto_scroll_horizontal,
-    auto_scroll_vertical_interval, clamp_vertical_scroll, ensure_cursor_visible_in_scroll,
-    ensure_cursor_visible_wrapped, index_for_multiline_position, shape_and_build_visual_lines,
+    auto_scroll_vertical_interval, ensure_cursor_visible_in_scroll,
+    index_for_multiline_position, shape_and_build_visual_lines,
 };
 
 pub use crate::utils::{VisibleLineInfo, VisualLineInfo};
@@ -61,7 +61,7 @@ pub struct SelectableTextState {
     pub is_selecting: bool,
 
     pub scroll_handle: UniformListScrollHandle,
-    pub(crate) multiline_clamp: Option<usize>,
+    pub(crate) multiline_max_lines: Option<usize>,
     pub(crate) is_wrapped: bool,
     pub(crate) line_height: Option<Pixels>,
 
@@ -85,7 +85,6 @@ pub struct SelectableTextState {
     pub(crate) last_text_color: Option<Hsla>,
 
     pub(crate) horizontal_scroll_offset: Pixels,
-    pub(crate) vertical_scroll_offset: Pixels,
     pub(crate) last_text_width: Pixels,
     pub(crate) last_scroll_time: Option<std::time::Instant>,
     pub(crate) scroll_to_cursor_horizontal: bool,
@@ -103,7 +102,7 @@ impl SelectableTextState {
             selection_reversed: false,
             is_selecting: false,
             scroll_handle: UniformListScrollHandle::new(),
-            multiline_clamp: None,
+            multiline_max_lines: None,
             is_wrapped: false,
             line_height: None,
             cached_wrap_width: None,
@@ -123,7 +122,6 @@ impl SelectableTextState {
             last_font_size: None,
             last_text_color: None,
             horizontal_scroll_offset: Pixels::ZERO,
-            vertical_scroll_offset: Pixels::ZERO,
             last_text_width: Pixels::ZERO,
             last_scroll_time: None,
             scroll_to_cursor_horizontal: false,
@@ -174,10 +172,10 @@ impl SelectableTextState {
     pub(crate) fn set_multiline_params(
         &mut self,
         line_height: Pixels,
-        multiline_clamp: Option<usize>,
+        multiline_max_lines: Option<usize>,
     ) {
         self.line_height = Some(line_height);
-        self.multiline_clamp = multiline_clamp;
+        self.multiline_max_lines = multiline_max_lines;
     }
 
     pub(crate) fn set_wrap_mode(&mut self, wrapped: bool) {
@@ -253,26 +251,15 @@ impl SelectableTextState {
     }
 
     pub fn ensure_cursor_visible(&mut self) {
-        if self.is_wrapped {
-            let line_height = self.line_height.unwrap_or(gpui::px(16.0));
-            self.vertical_scroll_offset = ensure_cursor_visible_wrapped(
-                self.cursor_offset(),
-                &self.precomputed_visual_lines,
-                line_height,
-                self.multiline_clamp,
-                self.vertical_scroll_offset,
-            );
-        } else {
-            ensure_cursor_visible_in_scroll(
-                self.cursor_offset(),
-                self.is_wrapped,
-                &self.precomputed_visual_lines,
-                self.multiline_clamp,
-                &self.scroll_handle,
-                |offset| self.offset_to_line_col(offset).0,
-                || self.line_count(),
-            );
-        }
+        ensure_cursor_visible_in_scroll(
+            self.cursor_offset(),
+            self.is_wrapped,
+            &self.precomputed_visual_lines,
+            self.multiline_max_lines,
+            &self.scroll_handle,
+            |offset| self.offset_to_line_col(offset).0,
+            || self.line_count(),
+        );
     }
 
     pub fn cursor_offset(&self) -> usize {
@@ -635,11 +622,7 @@ impl SelectableTextState {
     }
 
     pub(crate) fn scroll_up_one_line(&mut self) {
-        if self.is_wrapped {
-            let line_height = self.line_height.unwrap_or(gpui::px(16.0));
-            self.vertical_scroll_offset =
-                (self.vertical_scroll_offset - line_height).max(Pixels::ZERO);
-        } else if let Some(first) = self.visible_lines_info.first() {
+        if let Some(first) = self.visible_lines_info.first() {
             if first.line_index > 0 {
                 self.scroll_handle
                     .scroll_to_item(first.line_index - 1, ScrollStrategy::Top);
@@ -648,30 +631,17 @@ impl SelectableTextState {
     }
 
     pub(crate) fn scroll_down_one_line(&mut self) {
-        if self.is_wrapped {
-            let line_height = self.line_height.unwrap_or(gpui::px(16.0));
-            self.vertical_scroll_offset = self.vertical_scroll_offset + line_height;
-            // Don't clamp here — precomputed_visual_lines may be stale.
-            // The measure callback will clamp with the correct line count.
+        let total = if self.is_wrapped {
+            self.precomputed_visual_lines.len()
         } else {
-            let line_count = self.line_count();
-            if let Some(last) = self.visible_lines_info.last() {
-                if last.line_index + 1 < line_count {
-                    self.scroll_handle
-                        .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
-                }
+            self.line_count()
+        };
+        if let Some(last) = self.visible_lines_info.last() {
+            if last.line_index + 1 < total {
+                self.scroll_handle
+                    .scroll_to_item(last.line_index + 1, ScrollStrategy::Bottom);
             }
         }
-    }
-
-    pub(crate) fn clamp_vertical_scroll(&mut self) {
-        let line_height = self.line_height.unwrap_or(gpui::px(16.0));
-        self.vertical_scroll_offset = clamp_vertical_scroll(
-            self.vertical_scroll_offset,
-            line_height,
-            self.precomputed_visual_lines.len(),
-            self.multiline_clamp,
-        );
     }
 
     fn start_auto_scroll_timer(&mut self, cx: &mut Context<Self>) {
@@ -762,36 +732,23 @@ impl SelectableTextState {
         let line_height = self.line_height.unwrap_or(gpui::px(16.0));
         let delta = event.delta.pixel_delta(line_height);
 
+        // Wrapped mode: uniform_list handles vertical scrolling natively.
+        if self.is_wrapped {
+            return;
+        }
+
         // Check if there's vertical scrollable content (more lines than visible)
-        let line_count = if self.is_wrapped {
-            self.precomputed_visual_lines.len()
-        } else {
-            self.line_count()
-        };
+        let line_count = self.line_count();
         let has_vertical_scroll = self
-            .multiline_clamp
+            .multiline_max_lines
             .map_or(false, |clamp| line_count > clamp);
 
         if has_vertical_scroll {
             cx.stop_propagation();
-
-            // Vertical scroll for wrapped mode
-            if self.is_wrapped && delta.y.abs() > gpui::px(0.01) {
-                let clamp = self.multiline_clamp.unwrap();
-                let max_scroll = line_height * (line_count - clamp) as f32;
-                let new_offset = (self.vertical_scroll_offset - delta.y)
-                    .max(Pixels::ZERO)
-                    .min(max_scroll);
-
-                if new_offset != self.vertical_scroll_offset {
-                    self.vertical_scroll_offset = new_offset;
-                    cx.notify();
-                }
-            }
         }
 
         // Horizontal scroll: only in non-wrapped mode
-        if !self.is_wrapped {
+        {
             let container_width = self
                 .last_bounds
                 .map(|b| b.size.width)

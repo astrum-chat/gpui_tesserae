@@ -573,55 +573,6 @@ pub fn auto_scroll_horizontal(
     offset
 }
 
-/// Clamps a vertical scroll offset to valid bounds based on the total number
-/// of visual lines and the visible line count (from multiline_clamp).
-pub fn clamp_vertical_scroll(
-    scroll_offset: Pixels,
-    line_height: Pixels,
-    total_visual_lines: usize,
-    multiline_clamp: Option<usize>,
-) -> Pixels {
-    let total = total_visual_lines.max(1);
-    let visible = multiline_clamp.map_or(1, |c| c.min(total));
-    let max_scroll = line_height * (total - visible) as f32;
-    let max_scroll = if max_scroll > Pixels::ZERO {
-        max_scroll
-    } else {
-        Pixels::ZERO
-    };
-    scroll_offset.max(Pixels::ZERO).min(max_scroll)
-}
-
-/// Adjusts vertical scroll offset to keep the cursor's visual line visible in wrapped mode.
-/// Returns the updated scroll offset.
-pub fn ensure_cursor_visible_wrapped(
-    cursor_offset: usize,
-    visual_lines: &[VisualLineInfo],
-    line_height: Pixels,
-    multiline_clamp: Option<usize>,
-    scroll_offset: Pixels,
-) -> Pixels {
-    let visual_line = visual_lines
-        .iter()
-        .position(|info| cursor_offset >= info.start_offset && cursor_offset <= info.end_offset)
-        .unwrap_or(0);
-
-    let line_top = line_height * visual_line as f32;
-    let line_bottom = line_top + line_height;
-    let total_visual_lines = visual_lines.len().max(1);
-    let visible_height =
-        line_height * multiline_clamp.map_or(1, |c| c.min(total_visual_lines)) as f32;
-
-    let mut offset = scroll_offset;
-    if line_top < offset {
-        offset = line_top;
-    } else if line_bottom > offset + visible_height {
-        offset = line_bottom - visible_height;
-    }
-
-    clamp_vertical_scroll(offset, line_height, total_visual_lines, multiline_clamp)
-}
-
 /// Computes the vertical auto-scroll throttle interval (in milliseconds) based on
 /// how far outside the bounds the mouse is. Closer to the edge = slower, further = faster.
 /// Returns `None` if the position is within bounds (no scroll needed).

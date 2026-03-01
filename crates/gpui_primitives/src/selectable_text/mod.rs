@@ -6,14 +6,13 @@ mod state;
 use gpui::{
     App, ElementId, Entity, FocusHandle, Focusable, Font, Hsla, InteractiveElement, IntoElement,
     KeyBinding, MouseButton, Overflow, ParentElement, Pixels, Refineable, RenderOnce, SharedString,
-    Style, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, relative, rgb,
-    uniform_list,
+    StyleRefinement, Styled, Window, div, prelude::FluentBuilder, relative, rgb, uniform_list,
 };
 
 use crate::utils::{
     TextNavigation, WIDTH_WRAP_BASE_MARGIN, compute_line_offsets, multiline_height, rgb_a,
 };
-use elements::{LineElement, UniformListElement, WrappedTextElement};
+use elements::{LineElement, UniformListElement, WrappedLineElement};
 
 pub use state::{
     Copy, Down, End, Home, Left, MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord,
@@ -97,7 +96,7 @@ fn compute_wrap_width(
 pub struct SelectableText {
     id: ElementId,
     state: Entity<SelectableTextState>,
-    multiline_clamp: Option<usize>,
+    multiline_max_lines: Option<usize>,
     multiline_wrapped: bool,
     selection_color: Option<Hsla>,
     selection_rounded: Option<Pixels>,
@@ -125,7 +124,7 @@ impl SelectableText {
         Self {
             id: id.into(),
             state,
-            multiline_clamp: None,
+            multiline_max_lines: None,
             multiline_wrapped: false,
             selection_color: None,
             selection_rounded: None,
@@ -143,13 +142,13 @@ impl SelectableText {
     }
 
     pub fn multiline(mut self) -> Self {
-        self.multiline_clamp = Some(usize::MAX);
+        self.multiline_max_lines = Some(usize::MAX);
         self
     }
 
     /// Sets the maximum number of visible lines before scrolling.
-    pub fn multiline_clamp(mut self, multiline_clamp: usize) -> Self {
-        self.multiline_clamp = Some(multiline_clamp.max(1));
+    pub fn multiline_max_lines(mut self, multiline_max_lines: usize) -> Self {
+        self.multiline_max_lines = Some(multiline_max_lines.max(1));
         self
     }
 
@@ -364,10 +363,10 @@ impl RenderOnce for SelectableText {
         let params = self.compute_render_params(window);
 
         // Word wrapping only takes effect when multiline is also enabled
-        let is_wrapped = self.multiline_wrapped && self.multiline_clamp.is_some();
+        let is_wrapped = self.multiline_wrapped && self.multiline_max_lines.is_some();
 
         self.state.update(cx, |state, _cx| {
-            state.set_multiline_params(params.line_height, self.multiline_clamp);
+            state.set_multiline_params(params.line_height, self.multiline_max_lines);
             state.set_wrap_mode(is_wrapped);
             state.update_focus_state(window);
         });
@@ -496,8 +495,8 @@ impl SelectableText {
             )
         };
         let state_entity = self.state.clone();
-        let multiline_clamp = self.multiline_clamp;
-        let needs_scroll = multiline_clamp.is_some_and(|clamp| line_count > clamp);
+        let multiline_max_lines = self.multiline_max_lines;
+        let needs_scroll = multiline_max_lines.is_some_and(|clamp| line_count > clamp);
         let text_color = params.text_color;
         let highlight_text_color = params.highlight_text_color;
         let line_height = params.line_height;
@@ -580,7 +579,7 @@ impl SelectableText {
         })
         .h(multiline_height(
             line_height,
-            multiline_clamp
+            multiline_max_lines
                 .map_or(1, |clamp| clamp.min(line_count))
                 .max(1),
             scale_factor,
@@ -602,7 +601,7 @@ impl SelectableText {
         container: gpui::Stateful<gpui::Div>,
         params: &RenderParams,
         _width_params: &WidthParams,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> gpui::Stateful<gpui::Div> {
         let font = params.font.clone();
@@ -611,48 +610,133 @@ impl SelectableText {
         let line_height = params.line_height;
         let font_size = params.font_size;
         let scale_factor = params.scale_factor;
+        let multiline_max_lines = self.multiline_max_lines;
+        let state_entity = self.state.clone();
+        let selection_rounded = self.selection_rounded;
+        #[cfg(feature = "squircle")]
+        let selection_rounded_smoothing = self.selection_rounded_smoothing;
+        #[cfg(not(feature = "squircle"))]
+        let selection_rounded_smoothing: Option<f32> = None;
+        let selection_precise = self.selection_precise;
+        #[cfg(feature = "debug")]
+        let debug_character_bounds = self.debug_character_bounds;
+        #[cfg(feature = "debug")]
+        let debug_interior_corners = self.debug_interior_corners;
 
-        // Cache render params on state (needed for UniformListElement's rewrap_at_width fallback).
-        // The WrappedTextElement's measure callback handles wrapping with the actual width.
+        // Cache render params on state for width-change rewrap.
         self.state.update(cx, |state, _cx| {
             state.last_font = Some(font.clone());
             state.last_font_size = Some(font_size);
             state.last_text_color = Some(text_color);
-            state.needs_wrap_recompute = false;
         });
 
-        let selected_range = self.state.read(cx).selected_range.clone();
+        // Recompute visual lines using cached width from previous frame.
+        // On first render (no cached width), fall back to logical line count.
+        let visual_line_count = {
+            let cached_width = self.state.read(cx).cached_wrap_width;
+            if let Some(width) = cached_width {
+                let wrap_width = width + WIDTH_WRAP_BASE_MARGIN;
+                let text = self.state.read(cx).get_text();
+                let (wrapped_lines, visual_lines) =
+                    crate::utils::shape_and_build_visual_lines(
+                        &text,
+                        wrap_width,
+                        font_size,
+                        font.clone(),
+                        text_color,
+                        window,
+                    );
+                let count = visual_lines.len().max(1);
+                self.state.update(cx, |state, _cx| {
+                    state.measured_max_line_width =
+                        Some(crate::utils::compute_max_visual_line_width(&wrapped_lines));
+                    state.precomputed_at_width = Some(wrap_width);
+                    state.precomputed_visual_lines = visual_lines;
+                    state.precomputed_wrapped_lines = wrapped_lines;
+                    state.needs_wrap_recompute = false;
 
-        // The parent div keeps the user's sizing (w, max_w, etc.).
-        // The WrappedTextElement fills the parent at 100% width so it gets the
-        // parent's resolved width in its measure callback — matching Input's pattern.
-        let mut element_style = Style::default();
-        element_style.size.width = relative(1.).into();
+                    if state.scroll_to_cursor_on_next_render {
+                        state.scroll_to_cursor_on_next_render = false;
+                        state.ensure_cursor_visible();
+                    }
+                });
+                count
+            } else {
+                self.state.read(cx).line_count().max(1)
+            }
+        };
 
-        container.child(WrappedTextElement {
-            state: self.state.clone(),
-            text_color,
-            highlight_text_color,
+        let scroll_handle = self.state.read(cx).scroll_handle.clone();
+        let needs_scroll = multiline_max_lines.is_some_and(|clamp| visual_line_count > clamp);
+
+        let list = uniform_list(
+            self.id.clone(),
+            visual_line_count,
+            move |visible_range, _window, cx| {
+                let state = state_entity.read(cx);
+                let visual_lines = &state.precomputed_visual_lines;
+                let selected_range = state.selected_range.clone();
+
+                visible_range
+                    .map(|visual_idx| {
+                        let prev_visual_line_offsets = if visual_idx > 0 {
+                            visual_lines
+                                .get(visual_idx - 1)
+                                .map(|info| (info.start_offset, info.end_offset))
+                        } else {
+                            None
+                        };
+                        let next_visual_line_offsets = visual_lines
+                            .get(visual_idx + 1)
+                            .map(|info| (info.start_offset, info.end_offset));
+
+                        WrappedLineElement {
+                            state: state_entity.clone(),
+                            visual_line_index: visual_idx,
+                            text_color,
+                            highlight_text_color,
+                            line_height,
+                            font_size,
+                            font: font.clone(),
+                            selected_range: selected_range.clone(),
+                            selection_rounded,
+                            selection_rounded_smoothing,
+                            prev_visual_line_offsets,
+                            next_visual_line_offsets,
+                            selection_precise,
+                            content_width: None,
+                            #[cfg(feature = "debug")]
+                            debug_character_bounds,
+                            #[cfg(feature = "debug")]
+                            debug_interior_corners,
+                        }
+                    })
+                    .collect()
+            },
+        )
+        .track_scroll(&scroll_handle)
+        .map(|mut list| {
+            if !needs_scroll {
+                list.style().overflow.y = Some(Overflow::Hidden);
+            }
+            list
+        })
+        .h(multiline_height(
             line_height,
-            font_size,
-            font: font.clone(),
-            selected_range,
-            selection_rounded: self.selection_rounded,
-            #[cfg(feature = "squircle")]
-            selection_rounded_smoothing: self.selection_rounded_smoothing,
-            #[cfg(not(feature = "squircle"))]
-            selection_rounded_smoothing: None,
-            selection_precise: self.selection_precise,
-            #[cfg(feature = "debug")]
-            debug_character_bounds: self.debug_character_bounds,
-            #[cfg(feature = "debug")]
-            debug_interior_corners: self.debug_interior_corners,
+            multiline_max_lines
+                .map_or(1, |c| c.min(visual_line_count))
+                .max(1),
+            scale_factor,
+        ));
+
+        container.child(UniformListElement {
+            state: self.state.clone(),
+            child: list.into_any_element(),
             #[cfg(feature = "debug")]
             debug_wrapping: self.debug_wrapping,
-            multiline_clamp: self.multiline_clamp,
-            scale_factor,
-            style: element_style,
-            children: Vec::new(),
+            font: params.font.clone(),
+            font_size: params.font_size,
+            text_color: params.text_color,
         })
     }
 }

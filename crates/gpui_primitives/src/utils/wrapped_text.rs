@@ -85,7 +85,7 @@ pub fn measure_wrapped_text(
     font: Font,
     text_color: Hsla,
     text: &SharedString,
-    multiline_clamp: Option<usize>,
+    multiline_max_lines: Option<usize>,
     scale_factor: f32,
     known_width: bool,
     window: &Window,
@@ -99,7 +99,7 @@ pub fn measure_wrapped_text(
 
     let max_line_width = compute_max_visual_line_width(&wrapped_lines);
 
-    let visible_lines = multiline_clamp
+    let visible_lines = multiline_max_lines
         .map_or(1, |c| c.min(visual_line_count))
         .max(1);
     let height = multiline_height(line_height, visible_lines, scale_factor);
@@ -128,7 +128,7 @@ pub fn ensure_cursor_visible_in_scroll(
     cursor_offset: usize,
     is_wrapped: bool,
     precomputed_visual_lines: &[VisualLineInfo],
-    multiline_clamp: Option<usize>,
+    multiline_max_lines: Option<usize>,
     scroll_handle: &UniformListScrollHandle,
     offset_to_line: impl FnOnce(usize) -> usize,
     line_count: impl FnOnce() -> usize,
@@ -144,7 +144,7 @@ pub fn ensure_cursor_visible_in_scroll(
         (cursor_line, line_count())
     };
 
-    if multiline_clamp.map_or(false, |clamp| total_lines > clamp) {
+    if multiline_max_lines.map_or(false, |clamp| total_lines > clamp) {
         scroll_handle.scroll_to_item(target_line, ScrollStrategy::Center);
     }
 }

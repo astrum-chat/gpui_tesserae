@@ -84,7 +84,7 @@ impl Render for ExampleApp {
                 .child(
                     container().child(
                         SelectableText::new("clamped", self.clamped.clone())
-                            .multiline_clamp(3)
+                            .multiline_max_lines(3)
                             .selection_color(SELECTION_COLOR),
                     ),
                 )
@@ -93,7 +93,7 @@ impl Render for ExampleApp {
                 .child(
                     container().child(
                         SelectableText::new("wrapped", self.wrapped.clone())
-                            .multiline_clamp(4)
+                            .multiline_max_lines(4)
                             .multiline_wrapped()
                             .selection_color(SELECTION_COLOR),
                     ),
