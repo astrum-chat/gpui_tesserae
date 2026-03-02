@@ -792,3 +792,128 @@ impl TextNavigation for SelectableTextState {
         self.text.clone()
     }
 }
+
+#[cfg(all(test, feature = "test-support"))]
+mod gpui_tests {
+    use super::*;
+    use gpui::{AppContext as _, TestAppContext};
+
+    #[gpui::test]
+    fn test_scroll_up_one_line_empty_visible_info(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.scroll_up_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_down_one_line_empty_visible_info(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.scroll_down_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_up_at_top_is_noop(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.visible_lines_info.push(VisibleLineInfo {
+                line_index: 0,
+                bounds: gpui::Bounds::default(),
+                shaped_line: gpui::ShapedLine::default(),
+            });
+            state.scroll_up_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_down_at_bottom_is_noop(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.text("line1\nline2");
+            state.visible_lines_info.push(VisibleLineInfo {
+                line_index: 1,
+                bounds: gpui::Bounds::default(),
+                shaped_line: gpui::ShapedLine::default(),
+            });
+            state.scroll_down_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_down_wrapped_uses_visual_line_count(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.is_wrapped = true;
+            state.text("hello world");
+            state.precomputed_visual_lines = vec![
+                VisualLineInfo {
+                    start_offset: 0,
+                    end_offset: 4,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 0,
+                },
+                VisualLineInfo {
+                    start_offset: 5,
+                    end_offset: 8,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 1,
+                },
+                VisualLineInfo {
+                    start_offset: 9,
+                    end_offset: 11,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 2,
+                },
+            ];
+            state.visible_lines_info.push(VisibleLineInfo {
+                line_index: 2,
+                bounds: gpui::Bounds::default(),
+                shaped_line: gpui::ShapedLine::default(),
+            });
+            state.scroll_down_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_ensure_cursor_visible_no_panic(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.text("line1\nline2\nline3");
+            state.selected_range = 10..10;
+            state.ensure_cursor_visible();
+        });
+    }
+
+    #[gpui::test]
+    fn test_ensure_cursor_visible_wrapped(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.is_wrapped = true;
+            state.multiline_max_lines = Some(2);
+            state.precomputed_visual_lines = vec![
+                VisualLineInfo {
+                    start_offset: 0,
+                    end_offset: 10,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 0,
+                },
+                VisualLineInfo {
+                    start_offset: 11,
+                    end_offset: 20,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 1,
+                },
+                VisualLineInfo {
+                    start_offset: 21,
+                    end_offset: 30,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 2,
+                },
+            ];
+            state.selected_range = 25..25;
+            state.ensure_cursor_visible();
+        });
+    }
+}

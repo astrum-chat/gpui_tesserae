@@ -1008,4 +1008,42 @@ mod builder_tests {
             );
         });
     }
+
+    #[gpui::test]
+    fn test_multiline_max_lines_sets_value(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        cx.update(|_cx| {
+            let st = SelectableText::new("test", state).multiline_max_lines(5);
+            assert_eq!(st.multiline_max_lines, Some(5));
+        });
+    }
+
+    #[gpui::test]
+    fn test_multiline_max_lines_clamps_to_one(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        cx.update(|_cx| {
+            let st = SelectableText::new("test", state).multiline_max_lines(0);
+            assert_eq!(st.multiline_max_lines, Some(1));
+        });
+    }
+
+    #[gpui::test]
+    fn test_multiline_sets_max_lines_to_max(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        cx.update(|_cx| {
+            let st = SelectableText::new("test", state).multiline();
+            assert_eq!(st.multiline_max_lines, Some(usize::MAX));
+        });
+    }
+
+    #[gpui::test]
+    fn test_state_defaults_no_vertical_scroll(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| SelectableTextState::new(cx));
+        state.read_with(cx, |state, _| {
+            assert!(!state.is_wrapped);
+            assert!(state.precomputed_visual_lines.is_empty());
+            assert!(state.multiline_max_lines.is_none());
+            assert!(state.visible_lines_info.is_empty());
+        });
+    }
 }

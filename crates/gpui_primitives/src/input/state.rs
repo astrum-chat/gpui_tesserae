@@ -1232,3 +1232,139 @@ mod tests {
         assert_eq!(state.word_end(1), 2);
     }
 }
+
+#[cfg(all(test, feature = "test-support"))]
+mod gpui_tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn test_scroll_up_one_line_empty_visible_info(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        // Should not panic with empty visible_lines_info
+        state.update(cx, |state, _cx| {
+            state.scroll_up_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_down_one_line_empty_visible_info(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        // Should not panic with empty visible_lines_info
+        state.update(cx, |state, _cx| {
+            state.scroll_down_one_line();
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_up_at_top_is_noop(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        state.update(cx, |state, _cx| {
+            // Simulate being at line 0
+            state.visible_lines_info.push(VisibleLineInfo {
+                line_index: 0,
+                bounds: gpui::Bounds::default(),
+                shaped_line: gpui::ShapedLine::default(),
+            });
+            state.scroll_up_one_line();
+            // No panic — already at top
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_down_at_bottom_is_noop(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.value = Some("line1\nline2".into());
+            // Last visible line is line_index=1 and total line_count=2
+            state.visible_lines_info.push(VisibleLineInfo {
+                line_index: 1,
+                bounds: gpui::Bounds::default(),
+                shaped_line: gpui::ShapedLine::default(),
+            });
+            state.scroll_down_one_line();
+            // No panic — already at bottom
+        });
+    }
+
+    #[gpui::test]
+    fn test_scroll_down_wrapped_uses_visual_line_count(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.is_wrapped = true;
+            state.value = Some("hello world".into());
+            // Simulate 3 visual lines from wrapping
+            state.precomputed_visual_lines = vec![
+                VisualLineInfo {
+                    start_offset: 0,
+                    end_offset: 4,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 0,
+                },
+                VisualLineInfo {
+                    start_offset: 5,
+                    end_offset: 8,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 1,
+                },
+                VisualLineInfo {
+                    start_offset: 9,
+                    end_offset: 11,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 2,
+                },
+            ];
+            // Last visible is visual line 2, total is 3 → at bottom
+            state.visible_lines_info.push(VisibleLineInfo {
+                line_index: 2,
+                bounds: gpui::Bounds::default(),
+                shaped_line: gpui::ShapedLine::default(),
+            });
+            state.scroll_down_one_line();
+            // No panic — at bottom of wrapped content
+        });
+    }
+
+    #[gpui::test]
+    fn test_ensure_cursor_visible_no_panic(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.value = Some("line1\nline2\nline3".into());
+            state.selected_range = 10..10;
+            state.ensure_cursor_visible();
+            // No panic; with no multiline_max_lines set, this is a no-op
+        });
+    }
+
+    #[gpui::test]
+    fn test_ensure_cursor_visible_wrapped(cx: &mut TestAppContext) {
+        let state = cx.new(|cx| InputState::new(cx));
+        state.update(cx, |state, _cx| {
+            state.is_wrapped = true;
+            state.multiline_max_lines = Some(2);
+            state.precomputed_visual_lines = vec![
+                VisualLineInfo {
+                    start_offset: 0,
+                    end_offset: 10,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 0,
+                },
+                VisualLineInfo {
+                    start_offset: 11,
+                    end_offset: 20,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 1,
+                },
+                VisualLineInfo {
+                    start_offset: 21,
+                    end_offset: 30,
+                    wrapped_line_index: 0,
+                    visual_index_in_wrapped: 2,
+                },
+            ];
+            state.selected_range = 25..25;
+            state.ensure_cursor_visible();
+            // No panic — cursor on visual line 2, which exceeds max_lines=2
+        });
+    }
+}

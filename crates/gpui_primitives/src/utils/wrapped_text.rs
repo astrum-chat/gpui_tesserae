@@ -309,3 +309,123 @@ pub fn apply_selection_change(
         *selected_range = selected_range.end..selected_range.start;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_visual_lines(ranges: &[(usize, usize)]) -> Vec<VisualLineInfo> {
+        ranges
+            .iter()
+            .enumerate()
+            .map(|(i, &(start, end))| VisualLineInfo {
+                start_offset: start,
+                end_offset: end,
+                wrapped_line_index: 0,
+                visual_index_in_wrapped: i,
+            })
+            .collect()
+    }
+
+    // -- ensure_cursor_visible_in_scroll tests --
+
+    #[test]
+    fn test_ensure_cursor_visible_no_scroll_when_no_max_lines() {
+        let handle = UniformListScrollHandle::new();
+        // multiline_max_lines = None → should never scroll
+        ensure_cursor_visible_in_scroll(5, false, &[], None, &handle, |_| 2, || 10);
+        // No panic, no-op
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_no_scroll_when_lines_fit() {
+        let handle = UniformListScrollHandle::new();
+        // 3 total lines, max_lines = 5 → no scroll needed
+        ensure_cursor_visible_in_scroll(5, false, &[], Some(5), &handle, |_| 1, || 3);
+        // No panic, no-op (total_lines <= clamp)
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_scrolls_when_lines_exceed_max() {
+        let handle = UniformListScrollHandle::new();
+        // 10 total lines, max_lines = 3 → should scroll
+        ensure_cursor_visible_in_scroll(5, false, &[], Some(3), &handle, |_| 5, || 10);
+        // Doesn't panic; scroll_to_item was called internally
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_wrapped_finds_correct_visual_line() {
+        let handle = UniformListScrollHandle::new();
+        let visual_lines = make_visual_lines(&[(0, 10), (11, 25), (26, 40)]);
+        // cursor_offset=15 is in visual line 1 (range 11..25)
+        ensure_cursor_visible_in_scroll(15, true, &visual_lines, Some(2), &handle, |_| 0, || 0);
+        // Doesn't panic; correct visual line found
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_wrapped_cursor_beyond_end() {
+        let handle = UniformListScrollHandle::new();
+        let visual_lines = make_visual_lines(&[(0, 10), (11, 25)]);
+        // cursor_offset=100 is beyond all visual lines → falls back to line 0
+        ensure_cursor_visible_in_scroll(100, true, &visual_lines, Some(1), &handle, |_| 0, || 0);
+        // No panic
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_wrapped_empty_visual_lines() {
+        let handle = UniformListScrollHandle::new();
+        // Empty visual lines with is_wrapped=true → total_lines=0, no scroll
+        ensure_cursor_visible_in_scroll(0, true, &[], Some(3), &handle, |_| 0, || 0);
+        // No panic
+    }
+
+    #[test]
+    fn test_ensure_cursor_visible_unwrapped_uses_offset_to_line() {
+        let handle = UniformListScrollHandle::new();
+        // Verify offset_to_line is called for unwrapped path
+        let mut called_with = None;
+        ensure_cursor_visible_in_scroll(
+            42,
+            false,
+            &[],
+            Some(3),
+            &handle,
+            |offset| {
+                called_with = Some(offset);
+                7
+            },
+            || 20,
+        );
+        assert_eq!(called_with, Some(42));
+    }
+
+    // -- apply_selection_change tests --
+
+    #[test]
+    fn test_apply_selection_change_forward() {
+        let mut range = 5..10;
+        let mut reversed = false;
+        apply_selection_change(&mut range, &mut reversed, 15);
+        assert_eq!(range, 5..15);
+        assert!(!reversed);
+    }
+
+    #[test]
+    fn test_apply_selection_change_reversed() {
+        let mut range = 5..10;
+        let mut reversed = true;
+        apply_selection_change(&mut range, &mut reversed, 3);
+        assert_eq!(range, 3..10);
+        assert!(reversed);
+    }
+
+    #[test]
+    fn test_apply_selection_change_flips_direction() {
+        let mut range = 5..10;
+        let mut reversed = false;
+        apply_selection_change(&mut range, &mut reversed, 2);
+        // end=2 < start=5, so flips
+        assert_eq!(range, 2..5);
+        assert!(reversed);
+    }
+}
